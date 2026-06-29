@@ -1,0 +1,86 @@
+{
+  "collections": [
+    {
+      "name": "users",
+      "description": "Stores user account information and roles.",
+      "fields": [
+        { "name": "email", "type": "string", "description": "User email address." },
+        { "name": "role", "type": "string", "description": "User role: 'free', 'premium', or 'admin'." },
+        { "name": "createdAt", "type": "timestamp", "description": "Account creation time." }
+      ]
+    },
+    {
+      "name": "business_profiles",
+      "description": "Stores the detailed business profiles for users. Document ID should match User ID.",
+      "fields": [
+        { "name": "companyName", "type": "string" },
+        { "name": "proprietorName", "type": "string" },
+        { "name": "gstNumber", "type": "string" },
+        { "name": "panNumber", "type": "string" },
+        { "name": "udyamNumber", "type": "string" },
+        { "name": "msmeStatus", "type": "string" },
+        { "name": "companyType", "type": "string" },
+        { "name": "industryCategory", "type": "string" },
+        { "name": "products", "type": "array" },
+        { "name": "services", "type": "array" },
+        { "name": "keywords", "type": "array" },
+        { "name": "turnover", "type": "number" },
+        { "name": "experienceYears", "type": "number" },
+        { "name": "state", "type": "string" },
+        { "name": "city", "type": "string" },
+        { "name": "website", "type": "string" },
+        { "name": "contactDetails", "type": "string" }
+      ]
+    },
+    {
+      "name": "tender_analyses",
+      "description": "Stores AI-generated analysis of tenders.",
+      "fields": [
+        { "name": "userId", "type": "string" },
+        { "name": "tenderName", "type": "string" },
+        { "name": "organization", "type": "string" },
+        { "name": "tenderValue", "type": "string" },
+        { "name": "results", "type": "map" },
+        { "name": "createdAt", "type": "timestamp" }
+      ]
+    },
+    {
+      "name": "saved_tenders",
+      "description": "Tenders users have saved.",
+      "fields": [
+        { "name": "userId", "type": "string" },
+        { "name": "tenderId", "type": "string" },
+        { "name": "details", "type": "map" },
+        { "name": "savedAt", "type": "timestamp" }
+      ]
+    },
+    {
+      "name": "notifications",
+      "description": "User notifications.",
+      "fields": [
+        { "name": "userId", "type": "string" },
+        { "name": "message", "type": "string" },
+        { "name": "read", "type": "boolean" },
+        { "name": "createdAt", "type": "timestamp" }
+      ]
+    },
+    {
+      "name": "subscriptions",
+      "description": "User subscription details.",
+      "fields": [
+        { "name": "userId", "type": "string" },
+        { "name": "plan", "type": "string" },
+        { "name": "status", "type": "string" },
+        { "name": "expiresAt", "type": "timestamp" }
+      ]
+    }
+  ],
+  "securityRules": {
+    "users": "User can read/write their own document. Admins can read/write all.",
+    "business_profiles": "User can read/write their own document. Admins can read/write all.",
+    "tender_analyses": "User can read/write documents where userId matches theirs. Admins can read/write all.",
+    "saved_tenders": "User can read/write documents where userId matches theirs. Admins can read/write all.",
+    "notifications": "User can read/write documents where userId matches theirs. Admins can read/write all.",
+    "subscriptions": "User can read their own document. Admins can read/write all."
+  }
+}

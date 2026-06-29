@@ -70,8 +70,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const loginWithGoogle = async () => {
     try {
       await signInWithPopup(auth, googleProvider);
-    } catch (error) {
+    } catch (error: any) {
       console.error("Login failed", error);
+      let errorMessage = error.message;
+      if (error.code === 'auth/operation-not-allowed') {
+        errorMessage = "Google Sign-In is not enabled. Please go to your Firebase Console -> Authentication -> Sign-in method, and enable Google.";
+      } else if (error.message.includes("Cross-Origin") || error.message.includes("popup")) {
+        errorMessage += "\n\nIf you are viewing this in an iframe, please open the app in a new tab to log in with Google.";
+      }
+      alert("Google Login failed: " + errorMessage);
     }
   };
 

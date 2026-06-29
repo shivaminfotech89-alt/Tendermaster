@@ -17,3 +17,6 @@ export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId || "(defa
 export const storage = getStorage(app);
 
 export const googleProvider = new GoogleAuthProvider();
+googleProvider.setCustomParameters({
+  prompt: 'select_account'
+});

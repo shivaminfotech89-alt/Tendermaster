@@ -1,9 +1,17 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import { useAuth } from "../auth/AuthProvider";
 import { Building2, Loader2, Mail, Lock } from "lucide-react";
 
 export default function Login() {
-  const { loginWithGoogle, loginWithEmail, signupWithEmail, loading } = useAuth();
+  const { loginWithGoogle, loginWithEmail, signupWithEmail, loading, user } = useAuth();
+  const navigate = useNavigate();
+  
+  useEffect(() => {
+    if (user) {
+      navigate("/");
+    }
+  }, [user, navigate]);
   
   const [isLogin, setIsLogin] = useState(true);
   const [email, setEmail] = useState("");
@@ -92,6 +100,7 @@ export default function Login() {
           </div>
 
           <button
+            type="button"
             onClick={loginWithGoogle}
             disabled={loading || authLoading}
             className="w-full h-11 bg-white border border-slate-300 rounded-lg text-slate-700 font-bold hover:bg-slate-50 hover:border-slate-400 transition-all flex items-center justify-center gap-3 shadow-sm disabled:opacity-50"

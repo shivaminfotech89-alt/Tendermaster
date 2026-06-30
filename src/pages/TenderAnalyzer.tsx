@@ -8,6 +8,7 @@ import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import JSZip from "jszip";
 import { toast } from "react-hot-toast";
+import { useTranslation } from "react-i18next";
 
 const CollapsibleSection = ({ title, defaultOpen = true, children }: { title: string, defaultOpen?: boolean, children: React.ReactNode }) => {
   const [isOpen, setIsOpen] = useState(defaultOpen);
@@ -33,6 +34,7 @@ const CollapsibleSection = ({ title, defaultOpen = true, children }: { title: st
 
 export default function TenderAnalyzer() {
   const { user } = useAuth();
+  const { t, i18n } = useTranslation();
   
   const { analyzing, progress, analysisResult, payloadContext, setAnalyzing, setProgress, setAnalysisResult, setPayloadContext } = useAnalyzerStore();
 
@@ -182,7 +184,8 @@ export default function TenderAnalyzer() {
         body: JSON.stringify({ 
           tenderType: inputType,
           tenderContent: payload,
-          userProfile: JSON.stringify(profile)
+          userProfile: JSON.stringify(profile),
+          language: i18n.language
         })
       });
 
@@ -286,7 +289,8 @@ export default function TenderAnalyzer() {
             docType,
             tenderDetails: analysisResult,
             userProfile: businessProfile,
-            extraInstructions
+            extraInstructions,
+            language: i18n.language
          })
       });
       const resText = await res.text();
@@ -322,7 +326,8 @@ export default function TenderAnalyzer() {
         body: JSON.stringify({
           tenderDocument: payloadContext,
           analysisResult,
-          messages: newMessages
+          messages: newMessages,
+          language: i18n.language
         })
       });
       

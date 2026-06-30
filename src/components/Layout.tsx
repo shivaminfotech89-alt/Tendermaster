@@ -1,35 +1,41 @@
 import { Outlet, Link, useLocation, useNavigate } from "react-router-dom";
-import { LayoutDashboard, FileSearch, Building2, ShieldCheck, LogOut, Settings, FileText, MessageSquare, TrendingUp, Bell, Loader2 } from "lucide-react";
+import { LayoutDashboard, FileSearch, Building2, ShieldCheck, LogOut, Settings, FileText, MessageSquare, TrendingUp, Bell, Loader2, Globe } from "lucide-react";
 import { useAuth } from "../auth/AuthProvider";
 import { useAnalyzerStore } from "../context/AnalyzerContext";
+import { useTranslation } from "react-i18next";
 
 export default function Layout() {
   const { user, role, logout } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
   const { analyzing, progress, analysisResult, reanalyzing, reanalyzeProgress } = useAnalyzerStore();
+  const { t, i18n } = useTranslation();
+
+  const changeLanguage = (lng: string) => {
+    i18n.changeLanguage(lng);
+  };
 
   const isGlobalAnalyzing = analyzing || reanalyzing;
   const globalProgress = reanalyzing ? reanalyzeProgress : progress;
   const analyzingText = reanalyzing ? 'Re-Analyzing Project' : 'Analysis In Progress';
 
   const navItems = [
-    { path: "/", id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
-    { path: "/projects", id: "projects", label: "Projects", icon: FileText },
-    { path: "/analyzer", id: "analyzer", label: "Tender Analyzer", icon: FileSearch },
-    { path: "/chat", id: "chat", label: "Tender Chat", icon: MessageSquare },
-    { path: "/documents", id: "documents", label: "Documents", icon: FileText },
-    { path: "/reports", id: "reports", label: "Reports", icon: TrendingUp },
-    { path: "/notifications", id: "notifications", label: "Notifications", icon: Bell },
-    { path: "/profile", id: "profile", label: "Business Profile", icon: Building2 },
-    { path: "/settings", id: "settings", label: "Settings", icon: Settings },
+    { path: "/", id: "dashboard", label: t("dashboard"), icon: LayoutDashboard },
+    { path: "/projects", id: "projects", label: t("projects"), icon: FileText },
+    { path: "/analyzer", id: "analyzer", label: t("analyzer"), icon: FileSearch },
+    { path: "/chat", id: "chat", label: t("chat"), icon: MessageSquare },
+    { path: "/documents", id: "documents", label: t("documents"), icon: FileText },
+    { path: "/reports", id: "reports", label: t("reports"), icon: TrendingUp },
+    { path: "/notifications", id: "notifications", label: t("notifications"), icon: Bell },
+    { path: "/profile", id: "profile", label: t("profile"), icon: Building2 },
+    { path: "/settings", id: "settings", label: t("settings"), icon: Settings },
   ];
 
   if (role === "admin" || role === "superadmin") {
-    navItems.push({ path: "/admin", id: "admin", label: "Admin Panel", icon: ShieldCheck });
+    navItems.push({ path: "/admin", id: "admin", label: t("admin_panel"), icon: ShieldCheck });
   }
   if (role === "superadmin") {
-    navItems.push({ path: "/superadmin", id: "superadmin", label: "Super Admin", icon: Settings });
+    navItems.push({ path: "/superadmin", id: "superadmin", label: t("super_admin"), icon: Settings });
   }
 
   return (
@@ -60,6 +66,18 @@ export default function Layout() {
         </nav>
 
         <div className="p-4 border-t border-slate-100 flex flex-col gap-2">
+           <div className="flex items-center gap-2 px-2 pb-2 border-b border-slate-100">
+             <Globe className="w-4 h-4 text-slate-400" />
+             <select 
+               value={i18n.language} 
+               onChange={(e) => changeLanguage(e.target.value)}
+               className="bg-transparent text-sm font-medium text-slate-600 outline-none cursor-pointer flex-1"
+             >
+               <option value="en">English</option>
+               <option value="hi">हिंदी</option>
+               <option value="gu">ગુજરાતી</option>
+             </select>
+           </div>
            <div className="flex items-center gap-3 px-2 py-2">
              <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center text-blue-700 font-bold shrink-0">
                {user?.email?.[0].toUpperCase() || "U"}
@@ -73,7 +91,7 @@ export default function Layout() {
              onClick={logout}
              className="flex items-center gap-2 px-3 py-2 text-sm font-medium text-slate-500 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors w-full"
            >
-             <LogOut className="w-4 h-4" /> Sign Out
+             <LogOut className="w-4 h-4" /> {t("logout")}
            </button>
         </div>
       </aside>
@@ -86,7 +104,18 @@ export default function Layout() {
               <div className="w-6 h-6 bg-blue-600 rounded flex items-center justify-center font-bold text-white text-xs mr-2">T</div>
               <span className="text-lg font-bold tracking-tight text-slate-800">TenderMaster</span>
             </div>
-            <button onClick={logout} className="p-2 text-slate-500 hover:text-red-600"><LogOut className="w-5 h-5" /></button>
+            <div className="flex items-center gap-2">
+              <select 
+                value={i18n.language} 
+                onChange={(e) => changeLanguage(e.target.value)}
+                className="bg-transparent text-xs font-medium text-slate-600 outline-none cursor-pointer"
+              >
+                <option value="en">EN</option>
+                <option value="hi">HI</option>
+                <option value="gu">GU</option>
+              </select>
+              <button onClick={logout} className="p-2 text-slate-500 hover:text-red-600"><LogOut className="w-5 h-5" /></button>
+            </div>
         </header>
 
         {/* Dynamic Route Content */}

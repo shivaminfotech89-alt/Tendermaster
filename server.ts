@@ -170,7 +170,7 @@ app.post("/api/enhance-text", async (req, res) => {
 // Mode 2: Analyze Tender
 app.post("/api/analyze-tender", async (req, res) => {
   try {
-    const { tenderDocument, tenderType = 'text', tenderContent, userProfile } = req.body;
+    const { tenderDocument, tenderType = 'text', tenderContent, userProfile, language } = req.body;
     const actualContent = tenderContent || tenderDocument;
     
     if (!actualContent || !userProfile) {
@@ -222,6 +222,7 @@ app.post("/api/analyze-tender", async (req, res) => {
     }
 
     const systemInstruction = `You are "Tender MasterAI", the premier strategic procurement intelligence engine for Indian entrepreneurs and enterprises. Your role is to decode dense bureaucratic tender documents (from GeM, nProcure, CPPP, and private entities), match them ruthlessly against an Indian businessman's profile, and provide a clear, risk-managed path to winning the bid. BE EXTREMELY IN-DEPTH AND DETAILED in your rationales, lists, and steps. Elaborate heavily.
+${language && language !== 'en' ? `\nCRITICAL LANGUAGE REQUIREMENT: You MUST output all your analysis and content STRICTLY in ${language === 'hi' ? 'Hindi' : language === 'gu' ? 'Gujarati' : language}. Do not use English unless it is for technical terms that have no direct translation.` : ''}
 
 You switch between three operational modes based on input.
 
@@ -432,7 +433,7 @@ MODE 1: CONTRACT PROFILE ANALYSIS & MATCHING
 // Mode 3: Compare Tender Versions
 app.post("/api/compare-tender", async (req, res) => {
   try {
-    const { originalTender, newDocument, documentType = "DOCUMENT" } = req.body;
+    const { originalTender, newDocument, documentType = "DOCUMENT", language } = req.body;
     if (!originalTender || !newDocument) {
       return res.status(400).json({ error: "originalTender and newDocument are required" });
     }
@@ -457,7 +458,7 @@ app.post("/api/compare-tender", async (req, res) => {
         ];
     }
 
-    const systemInstruction = `You are a Tender Document Comparison Engine. Compare the Original Tender Details against the New ${safeDocType} uploaded by the user. Highlight EXACTLY what changed. Outputs must be clear and direct.`;
+    const systemInstruction = `You are a Tender Document Comparison Engine. Compare the Original Tender Details against the New ${safeDocType} uploaded by the user. Highlight EXACTLY what changed. Outputs must be clear and direct.${language && language !== 'en' ? `\nCRITICAL LANGUAGE REQUIREMENT: You MUST output all content STRICTLY in ${language === 'hi' ? 'Hindi' : language === 'gu' ? 'Gujarati' : language}.` : ''}`;
 
     const response = await generateContentWithRetry(aiClient, {
       model: "gemini-2.5-flash",
@@ -490,14 +491,14 @@ app.post("/api/compare-tender", async (req, res) => {
 
 app.post("/api/chat-tender", async (req, res) => {
   try {
-    const { tenderDocument, analysisResult, messages } = req.body;
+    const { tenderDocument, analysisResult, messages, language } = req.body;
     if ((!tenderDocument && !analysisResult) || !messages || !Array.isArray(messages)) {
       return res.status(400).json({ error: "tenderDocument and messages array are required" });
     }
 
     const aiClient = getAI();
     const systemInstruction = `You are a specialized Procurement Chatbot assisting an Indian business with a specific tender. 
-You have access to the original tender document and the AI analysis. Answer their questions clearly, concisely, and realistically based on the provided context. Follow Indian tendering terminology (EMD, PBG, BOQ, etc.). If a detail is missing, state it is not specified and advise to check for corrigendums.
+You have access to the original tender document and the AI analysis. Answer their questions clearly, concisely, and realistically based on the provided context. Follow Indian tendering terminology (EMD, PBG, BOQ, etc.). If a detail is missing, state it is not specified and advise to check for corrigendums.${language && language !== 'en' ? `\nCRITICAL LANGUAGE REQUIREMENT: You MUST answer the user STRICTLY in ${language === 'hi' ? 'Hindi' : language === 'gu' ? 'Gujarati' : language}.` : ''}
 
 --- TENDER CONTEXT ---
 ${tenderDocument ? tenderDocument.substring(0, 50000) : 'No raw text provided.'}
@@ -530,7 +531,7 @@ ${analysisResult ? JSON.stringify(analysisResult) : 'No previous analysis provid
 // Generate Tender Documents
 app.post("/api/generate-doc", async (req, res) => {
   try {
-    const { docType, tenderDetails, userProfile, financialData, extraInstructions } = req.body;
+    const { docType, tenderDetails, userProfile, financialData, extraInstructions, language } = req.body;
     if (!docType || !tenderDetails) {
       return res.status(400).json({ error: "docType and tenderDetails are required" });
     }
@@ -550,7 +551,7 @@ app.post("/api/generate-doc", async (req, res) => {
 Your task is to generate high-quality, professional draft documents based on the provided tender analysis and the user's business profile. 
 Use the business profile data (Company Name, Address, GST, PAN, etc.) and Tender Details (Tender No., Dates, Authority Name, etc.) to automatically fill in ALL placeholders. 
 CRITICAL RULE: DO NOT leave placeholders like "[Tender Number - To be filled by bidder]" or "[Date]" or "[Bidder Name]" in the output. You MUST aggressively find and replace all such "fill in the blank" brackets with the actual data from the provided Tender Details and Business Profile. If an exact piece of information is missing, use a logical assumed default or current date rather than leaving a bracketed placeholder.
-If the document requested is an "Auto-Fill: [Annexure Name]", your job is to auto-generate the filled-up annexure exactly as it should be submitted. Since real annexures are often tabular forms in PDFs, YOU MUST Reconstruct the exact Annexure/Schedule/Form tabular layout required by the agency using clean, well-structured Markdown tables and lists. Place the bidder's information directly into the respective form fields/cells as if they were filling out the actual PDF form. Ensure it visually resembles a structured printable form that can be submitted to the agency. Do not leave blanks if information can be reasonably derived or if standard boilerplate is applicable.
+If the document requested is an "Auto-Fill: [Annexure Name]", your job is to auto-generate the filled-up annexure exactly as it should be submitted. Since real annexures are often tabular forms in PDFs, YOU MUST Reconstruct the exact Annexure/Schedule/Form tabular layout required by the agency using clean, well-structured Markdown tables and lists. Place the bidder's information directly into the respective form fields/cells as if they were filling out the actual PDF form. Ensure it visually resembles a structured printable form that can be submitted to the agency. Do not leave blanks if information can be reasonably derived or if standard boilerplate is applicable.${language && language !== 'en' ? `\nCRITICAL LANGUAGE REQUIREMENT: You MUST draft the document STRICTLY in ${language === 'hi' ? 'Hindi' : language === 'gu' ? 'Gujarati' : language}, unless the user asks otherwise.` : ''}
 ${financialContext}${extraContext}
 
 --- BUSINESS PROFILE ---

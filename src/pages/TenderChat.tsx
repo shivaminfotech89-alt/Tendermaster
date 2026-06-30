@@ -5,9 +5,11 @@ import { useAuth } from "../auth/AuthProvider";
 import { MessageSquare, Search, Send, Loader2, ArrowLeft, FolderOpen } from "lucide-react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { useTranslation } from "react-i18next";
 
 export default function TenderChat() {
   const { user } = useAuth();
+  const { t, i18n } = useTranslation();
   const [projects, setProjects] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -59,14 +61,15 @@ export default function TenderChat() {
         body: JSON.stringify({
           tenderDocument: JSON.stringify(selectedProject.details),
           analysisResult: selectedProject.details,
-          messages: [...messages, newMsg]
+          messages: [...messages, newMsg],
+          language: i18n.language
         })
       });
 
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
 
-      setMessages(prev => [...prev, { role: 'model', text: data.reply }]);
+      setMessages(prev => [...prev, { role: 'model', text: data.answer || data.reply }]);
     } catch(err: any) {
        console.error("Chat Error:", err);
        setMessages(prev => [...prev, { role: 'model', text: `Error: ${err.message}` }]);

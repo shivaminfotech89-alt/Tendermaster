@@ -1,18 +1,20 @@
 import { useEffect, useState, useRef } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
-import { doc, getDoc, updateDoc, deleteDoc } from "firebase/firestore";
+import { doc, getDoc, updateDoc, deleteDoc, setDoc } from "firebase/firestore";
 import { db } from "../lib/firebase";
 import { ArrowLeft, Calculator, Building, Activity, Upload, FileText, Download, Loader2, Save, Plus, Target, CheckCircle, ListTodo, Calendar, MessageSquare, Send, X, Trash2, RefreshCw, Edit2, Check, ChevronRight } from "lucide-react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import JSZip from "jszip";
 import { toast } from "react-hot-toast";
+import { useTranslation } from "react-i18next";
 import { useAuth } from "../auth/AuthProvider";
 import { useAnalyzerStore } from "../context/AnalyzerContext";
 
 export default function ProjectDetails() {
   const { projectId } = useParams();
   const { user } = useAuth();
+  const { t, i18n } = useTranslation();
   const [project, setProject] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [businessProfile, setBusinessProfile] = useState<any>(null);
@@ -135,7 +137,8 @@ export default function ProjectDetails() {
           tenderType: 'text',
           tenderContent: (project.payloadRef && project.payloadRef !== 'Text/PDF Document') ? project.payloadRef : JSON.stringify(project.details),
           userProfile: JSON.stringify(businessProfile || {}),
-          extraContext: payload
+          extraContext: payload,
+          language: i18n.language
         })
       });
 
@@ -206,7 +209,8 @@ export default function ProjectDetails() {
             tenderType: 'text',
             tenderContent: project.payloadRef || project.details.tender_simplified.scope_of_work,
             userProfile: JSON.stringify(businessProfile || {}),
-            extraContext: payload
+            extraContext: payload,
+            language: i18n.language
           })
         });
 
@@ -293,7 +297,8 @@ export default function ProjectDetails() {
                tenderType: tenderTypeToSend,
                tenderContent: contentToSend,
                userProfile: JSON.stringify(businessProfile || {}),
-               extraContext: payload
+               extraContext: payload,
+               language: i18n.language
              })
           });
 
@@ -350,7 +355,8 @@ export default function ProjectDetails() {
          body: JSON.stringify({
             originalTender: project.details,
             newDocument: "Corrigendum Details Attached. Timeline extended by 30 days due to Covid. Technical eligibility now requires 5 years instead of 3 years. EMD is unchanged.", // Mocking file text extraction for brevity
-            documentType: fileRec.type
+            documentType: fileRec.type,
+            language: i18n.language
          })
        });
        const resText = await res.text();
@@ -388,7 +394,8 @@ export default function ProjectDetails() {
               revenue,
               materials,
               labour
-            }
+            },
+            language: i18n.language
          })
       });
       const resText = await res.text();
@@ -424,7 +431,8 @@ export default function ProjectDetails() {
         body: JSON.stringify({
           tenderDocument: project.payloadRef, // passing reference text logic here
           analysisResult: project.details,
-          messages: newMessages
+          messages: newMessages,
+          language: i18n.language
         })
       });
       

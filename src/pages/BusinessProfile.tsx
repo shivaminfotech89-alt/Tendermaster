@@ -155,6 +155,16 @@ export default function BusinessProfile() {
       }
       
       const data = await response.json();
+      if (data.success && data.newExpiry) {
+        const { doc, updateDoc, Timestamp } = await import('firebase/firestore');
+        const { db } = await import('../lib/firebase');
+        if (user) {
+          await updateDoc(doc(db, 'users', user.uid), {
+            role: 'premium',
+            subscriptionExpiry: Timestamp.fromDate(new Date(data.newExpiry))
+          });
+        }
+      }
       toast.success(data.message || "Premium activated! Please refresh.");
       setActivationCode("");
       setTimeout(() => {

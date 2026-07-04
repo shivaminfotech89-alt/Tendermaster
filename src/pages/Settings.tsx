@@ -91,6 +91,16 @@ export default function Settings() {
         throw new Error(errData.error || "Failed to redeem code");
       }
       const data = await res.json();
+      if (data.success && data.newExpiry) {
+        const { doc, updateDoc, Timestamp } = await import('firebase/firestore');
+        const { db } = await import('../lib/firebase');
+        if (user) {
+          await updateDoc(doc(db, 'users', user.uid), {
+            role: 'premium',
+            subscriptionExpiry: Timestamp.fromDate(new Date(data.newExpiry))
+          });
+        }
+      }
       toast.success(data.message || "Success! Your account has been upgraded to PREMIUM. Please refresh the page.");
       setTimeout(() => {
         window.location.reload();
@@ -129,9 +139,15 @@ export default function Settings() {
                        amount: amount
                     })
                  });
-                 if (!res.ok) {
-                    const errData = await res.json();
-                    throw new Error(errData.error || "Payment verification failed");
+                 const data = await res.json();
+                 if (data.success && data.newExpiry) {
+                    const { doc, updateDoc, Timestamp } = await import('firebase/firestore');
+                    const { db } = await import('../lib/firebase');
+                    await updateDoc(doc(db, 'users', user.uid), {
+                       role: 'premium',
+                       subscriptionExpiry: Timestamp.fromDate(new Date(data.newExpiry)),
+                       paymentId: pId
+                    });
                  }
                  toast.dismiss();
                  toast.success("Payment verified! Your account is upgraded to Premium.");

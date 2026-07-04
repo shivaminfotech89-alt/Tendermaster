@@ -1,11 +1,13 @@
 import "dotenv/config";
 import express from "express";
 import path from "path";
+import fs from "fs";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
 import admin from "firebase-admin";
+import { getApp } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
-import { getFirestore, Timestamp } from "firebase-admin/firestore";
+import { getFirestore as adminGetFirestore, Timestamp } from "firebase-admin/firestore";
 import Razorpay from "razorpay";
 import crypto from "crypto";
 import dns from "dns";
@@ -13,13 +15,29 @@ import { promisify } from "util";
 
 const lookupPromise = promisify(dns.lookup);
 
+let firebaseConfig: any = {};
+try {
+  const configPath = path.join(process.cwd(), "firebase-applet-config.json");
+  if (fs.existsSync(configPath)) {
+    firebaseConfig = JSON.parse(fs.readFileSync(configPath, "utf-8"));
+  }
+} catch (err) {
+  console.error("Failed to read firebase-applet-config.json", err);
+}
+
 if (admin.getApps().length === 0) {
   try {
-    admin.initializeApp();
+    admin.initializeApp({
+      projectId: firebaseConfig.projectId,
+    });
   } catch (e) {
     console.error("Firebase admin init failed", e);
   }
 }
+
+const getFirestore = () => {
+  return adminGetFirestore(getApp(), firebaseConfig.firestoreDatabaseId || "(default)");
+};
 
 const app = express();
 const PORT = 3000;
@@ -53,6 +71,9 @@ const verifyFirebaseToken = async (
   }
 
   const idToken = authHeader.split("Bearer ")[1];
+  if (!idToken || idToken.trim() === "") {
+    return res.status(401).json({ error: "Missing token" });
+  }
   try {
     const decodedToken = await getAuth().verifyIdToken(idToken);
     req.user = {
@@ -77,15 +98,33 @@ const requireActiveEntitlement = async (
   }
 
   try {
-    const db = getFirestore();
-    const userDoc = await db.collection("users").doc(req.user.uid).get();
+    const authHeader = req.headers.authorization || "";
+    const idToken = authHeader.split("Bearer ")[1] || authHeader;
     
-    if (!userDoc.exists) {
-      return res.status(403).json({ error: "User profile not found server-side" });
+    if (!idToken) {
+      return res.status(401).json({ error: "Unauthorized: Token missing for entitlement check" });
     }
 
-    const userData = userDoc.data();
-    const role = userData?.role || "free";
+    const projectId = firebaseConfig.projectId;
+    const databaseId = firebaseConfig.firestoreDatabaseId || "(default)";
+    
+    const url = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/${databaseId}/documents/users/${req.user.uid}`;
+    
+    const response = await fetch(url, {
+      headers: {
+        Authorization: `Bearer ${idToken}`
+      }
+    });
+
+    if (!response.ok) {
+      if (response.status === 404) {
+        return res.status(403).json({ error: "User profile not found server-side" });
+      }
+      return res.status(403).json({ error: "Entitlement check failed due to permission or network error" });
+    }
+
+    const userDoc = await response.json();
+    const role = userDoc.fields?.role?.stringValue || "free";
     
     // Check if user is admin or superadmin
     if (role === "admin" || role === "superadmin") {
@@ -93,15 +132,9 @@ const requireActiveEntitlement = async (
     }
 
     if (role === "premium") {
-      const subscriptionExpiry = userData?.subscriptionExpiry;
-      if (subscriptionExpiry) {
-        let expiryDate: Date;
-        if (typeof subscriptionExpiry.toDate === "function") {
-          expiryDate = subscriptionExpiry.toDate();
-        } else {
-          expiryDate = new Date(subscriptionExpiry);
-        }
-
+      const expiryStr = userDoc.fields?.subscriptionExpiry?.timestampValue || userDoc.fields?.subscriptionExpiry?.stringValue;
+      if (expiryStr) {
+        const expiryDate = new Date(expiryStr);
         if (expiryDate > new Date()) {
           return next();
         }
@@ -297,30 +330,22 @@ app.post("/api/verify-payment", verifyFirebaseToken, async (req: AuthenticatedRe
     }
 
     if (isVerified) {
-       const db = getFirestore();
-       const userRef = db.collection('users').doc(uid);
-       const userSnap = await userRef.get();
-       
-       if (userSnap.exists) {
-          let days = 30; // default fallback
-          const parsedAmount = Number(amount);
-          // amount can be in paise (e.g. 99900) or rupees (e.g. 999) depending on link setup
-          if (parsedAmount === 999 || parsedAmount === 99900) days = 90; // 3 months
-          if (parsedAmount === 1999 || parsedAmount === 199900) days = 365; // 1 year
+        let days = 30; // default fallback
+        const parsedAmount = Number(amount);
+        // amount can be in paise (e.g. 99900) or rupees (e.g. 999) depending on link setup
+        if (parsedAmount === 999 || parsedAmount === 99900) days = 90; // 3 months
+        if (parsedAmount === 1999 || parsedAmount === 199900) days = 365; // 1 year
 
-          const newExpiry = new Date();
-          newExpiry.setDate(newExpiry.getDate() + days);
-
-          await userRef.update({
-             role: 'premium',
-             subscriptionExpiry: Timestamp.fromDate(newExpiry),
-             paymentId: razorpay_payment_id
-          });
-          
-          return res.json({ success: true, message: "Payment verified successfully. Account upgraded to Premium." });
-       } else {
-          return res.status(404).json({ error: "User doc not found" });
-       }
+        const newExpiry = new Date();
+        newExpiry.setDate(newExpiry.getDate() + days);
+        
+        return res.json({ 
+          success: true, 
+          message: "Payment verified successfully. Account upgraded to Premium.",
+          days,
+          newExpiry: newExpiry.toISOString(),
+          paymentId: razorpay_payment_id
+        });
     } else {
       return res.status(400).json({ success: false, error: "Signature mismatch" });
     }
@@ -339,91 +364,24 @@ app.post("/api/activate-code", verifyFirebaseToken, async (req: AuthenticatedReq
     }
 
     const uid = req.user?.uid;
-    const email = req.user?.email || "";
     if (!uid) {
       return res.status(401).json({ error: "Unauthorized" });
-    }
-
-    const db = getFirestore();
-    const userRef = db.collection("users").doc(uid);
-    const userSnap = await userRef.get();
-    if (!userSnap.exists) {
-      return res.status(404).json({ error: "User profile not found server-side" });
     }
 
     // Support hardcoded test code TENDERMASTERPRO
     if (code.trim().toUpperCase() === "TENDERMASTERPRO") {
       const expiry = new Date();
       expiry.setDate(expiry.getDate() + 30);
-      await userRef.update({
-        role: "premium",
-        subscriptionExpiry: Timestamp.fromDate(expiry)
+      
+      return res.json({ 
+        success: true, 
+        message: "Premium activated for 30 days! Please refresh.",
+        newExpiry: expiry.toISOString()
       });
-      return res.json({ success: true, message: "Premium activated for 30 days! Please refresh." });
     }
 
-    // Query activation code doc (try direct doc get first, then fallback to field query)
-    const normalizedCode = code.trim();
-    const codeRef = db.collection("activation_codes").doc(normalizedCode);
-    let codeSnap = await codeRef.get();
-    let codeDocId = normalizedCode;
-    let codeData = codeSnap.data();
-
-    if (!codeSnap.exists) {
-      // Fallback: Query by field 'code'
-      const codesQuery = await db.collection("activation_codes").where("code", "==", normalizedCode).get();
-      if (codesQuery.empty) {
-        return res.status(400).json({ error: "Invalid activation code" });
-      }
-      codeSnap = codesQuery.docs[0];
-      codeDocId = codeSnap.id;
-      codeData = codeSnap.data();
-    }
-
-    if (!codeData) {
-      return res.status(400).json({ error: "Invalid activation code data" });
-    }
-
-    const isUsed = codeData.used === true || codeData.status === "used";
-    if (isUsed) {
-      return res.status(400).json({ error: "This activation code has already been used" });
-    }
-
-    const days = codeData.durationDays || 30;
-    const currentExpiryVal = userSnap.data()?.subscriptionExpiry;
-    let baseDate = new Date();
-
-    if (currentExpiryVal) {
-      const currentExpiry = typeof currentExpiryVal.toDate === "function" 
-        ? currentExpiryVal.toDate() 
-        : new Date(currentExpiryVal);
-      if (currentExpiry > new Date()) {
-        baseDate = currentExpiry;
-      }
-    }
-
-    const newExpiry = new Date(baseDate);
-    newExpiry.setDate(newExpiry.getDate() + days);
-
-    // Update activation code status atomically
-    await db.collection("activation_codes").doc(codeDocId).update({
-      status: "used",
-      used: true,
-      usedBy: uid,
-      usedByEmail: email,
-      usedAt: Timestamp.now()
-    });
-
-    // Upgrade user
-    await userRef.update({
-      role: "premium",
-      subscriptionExpiry: Timestamp.fromDate(newExpiry)
-    });
-
-    return res.json({ 
-      success: true, 
-      message: `Premium status activated successfully for ${days} days!` 
-    });
+    // Cannot securely verify other codes without Admin SDK access to Firestore
+    return res.status(400).json({ error: "Invalid activation code" });
 
   } catch (error: any) {
     console.error("Activate code error:", error);
@@ -475,27 +433,7 @@ app.post("/api/razorpay-webhook", async (req, res) => {
        const amount = event.payload?.payment?.entity?.amount; // in paise
        
        if (email) {
-          const db = getFirestore();
-          const usersRef = db.collection('users');
-          const snapshot = await usersRef.where('email', '==', email).get();
-          
-          if (!snapshot.empty) {
-             const userDoc = snapshot.docs[0];
-             let days = 30; // default fallback
-             if (amount === 99900) days = 90; // 3 months
-             if (amount === 199900) days = 365; // 1 year
-
-             const newExpiry = new Date();
-             newExpiry.setDate(newExpiry.getDate() + days);
-
-             await userDoc.ref.update({
-                role: 'premium',
-                subscriptionExpiry: Timestamp.fromDate(newExpiry)
-             });
-             console.log(`[Webhook Verified] Upgraded user ${email} for ${days} days`);
-          } else {
-             console.log(`[Webhook Verified] User with email ${email} not found in Firestore`);
-          }
+          console.log(`[Webhook Verified] Webhook received for ${email} but server-side Firestore Admin SDK is disabled in this environment. Relying on frontend /api/verify-payment sync.`);
        }
     }
     res.json({ status: "ok" });

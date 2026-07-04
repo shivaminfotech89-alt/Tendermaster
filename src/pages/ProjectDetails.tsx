@@ -705,13 +705,16 @@ export default function ProjectDetails() {
                                  <head>
                                    <title>Print Document - ${docType}</title>
                                    <style>
-                                     body { font-family: system-ui, -apple-system, sans-serif; padding: 40px; color: #111827; }
-                                     table { width: 100%; border-collapse: collapse; margin-top: 10px; margin-bottom: 20px; }
-                                     th, td { border: 1px solid #d1d5db; padding: 8px 12px; text-align: left; }
+                                     body { font-family: system-ui, -apple-system, sans-serif; padding: 40px; color: #111827; max-width: 100%; overflow-wrap: break-word; word-wrap: break-word; }
+                                     table { width: 100%; border-collapse: collapse; margin-top: 10px; margin-bottom: 20px; page-break-inside: auto; }
+                                     tr { page-break-inside: avoid; page-break-after: auto; }
+                                     th, td { border: 1px solid #d1d5db; padding: 8px 12px; text-align: left; overflow-wrap: break-word; word-wrap: break-word; }
                                      th { background-color: #f3f4f6; }
-                                     h1, h2, h3, h4, h5 { margin-top: 20px; margin-bottom: 10px; }
+                                     h1, h2, h3, h4, h5 { margin-top: 20px; margin-bottom: 10px; page-break-after: avoid; }
                                      p { margin-bottom: 10px; line-height: 1.5; }
                                      ul, ol { margin-bottom: 10px; padding-left: 20px; }
+                                     @page { size: auto; margin: 20mm; }
+                                     @media print { body { padding: 0; } }
                                    </style>
                                  </head>
                                  <body>

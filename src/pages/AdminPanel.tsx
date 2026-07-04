@@ -1,37 +1,134 @@
 import { ShieldCheck, Users, Settings, Activity, Plus, Key, Gift, Bell } from "lucide-react";
 import { useState, useEffect } from "react";
 import { db } from "../lib/firebase";
-import { collection, doc, setDoc, query, getDocs } from "firebase/firestore";
+import { collection, doc, setDoc, query, getDocs, updateDoc } from "firebase/firestore";
 import { toast } from "react-hot-toast";
 
 export default function AdminPanel() {
   const [activeTab, setActiveTab] = useState("dashboard");
   const [upiId, setUpiId] = useState("7990878248@ybl"); // Default
+  const [whatsappNumber, setWhatsappNumber] = useState("7990878248");
+  const [savingSettings, setSavingSettings] = useState(false);
 
-  // Fetch UPI ID from settings
+  // Fetch settings
   useEffect(() => {
     const fetchSettings = async () => {
       try {
         const snap = await getDocs(query(collection(db, "system_settings")));
         snap.forEach(d => {
-          if (d.id === "payments") setUpiId(d.data().upi_id || "7990878248@ybl");
+          if (d.id === "payments") {
+            setUpiId(d.data().upi_id || "7990878248@ybl");
+            setWhatsappNumber(d.data().whatsapp_number || "7990878248");
+          }
         });
       } catch (e) {}
     }
     fetchSettings();
   }, []);
 
+  const saveSettings = async () => {
+    setSavingSettings(true);
+    try {
+      await setDoc(doc(db, "system_settings", "payments"), {
+        upi_id: upiId,
+        whatsapp_number: whatsappNumber,
+        updatedAt: new Date()
+      }, { merge: true });
+      toast.success("Settings saved successfully!");
+    } catch (e: any) {
+      toast.error("Failed to save settings: " + e.message);
+    }
+    setSavingSettings(false);
+  };
+
+  const [users, setUsers] = useState<any[]>([]);
+  const [usersLoading, setUsersLoading] = useState(false);
+
+  useEffect(() => {
+    if (activeTab === "users") {
+      const fetchUsers = async () => {
+        setUsersLoading(true);
+        try {
+          const snap = await getDocs(query(collection(db, "users")));
+          const userList = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }))
+            .sort((a: any, b: any) => (b.createdAt?.toMillis() || 0) - (a.createdAt?.toMillis() || 0));
+          setUsers(userList);
+        } catch (e) {
+          console.error(e);
+        }
+        setUsersLoading(false);
+      };
+      fetchUsers();
+    }
+  }, [activeTab]);
+
+  const handleActivateUser = async (userId: string, days: number) => {
+    try {
+      if (days === 0) {
+        await updateDoc(doc(db, "users", userId), {
+          role: "free",
+          subscriptionExpiry: null
+        });
+        setUsers(users.map(u => u.id === userId ? { ...u, role: "free", subscriptionExpiry: null } : u));
+        toast.success(`User downgraded to free plan`);
+      } else {
+        const newExpiry = new Date();
+        newExpiry.setDate(newExpiry.getDate() + days);
+        await updateDoc(doc(db, "users", userId), {
+          role: "premium",
+          subscriptionExpiry: newExpiry
+        });
+        setUsers(users.map(u => u.id === userId ? { ...u, role: "premium", subscriptionExpiry: { toDate: () => newExpiry } } : u));
+        toast.success(`User activated for ${days} days`);
+      }
+    } catch (error: any) {
+      toast.error("Failed to activate user: " + error.message);
+    }
+  };
+
   const [activationCode, setActivationCode] = useState("");
+  const [activationDays, setActivationDays] = useState(30);
+  const [recentCodes, setRecentCodes] = useState<any[]>([]);
+
+  // Fetch recent codes
+  useEffect(() => {
+    if (activeTab === "activation") {
+      const fetchCodes = async () => {
+        try {
+          const snap = await getDocs(query(collection(db, "activation_codes")));
+          const codes = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }))
+            .sort((a: any, b: any) => b.createdAt?.toMillis() - a.createdAt?.toMillis())
+            .slice(0, 10);
+          setRecentCodes(codes);
+        } catch (e) {
+          console.error(e);
+        }
+      };
+      fetchCodes();
+    }
+  }, [activeTab]);
+
   const generateActivationCode = async () => {
     const code = "ACT-" + Math.random().toString(36).substring(2, 8).toUpperCase();
     try {
       await setDoc(doc(db, "activation_codes", code), {
         code,
+        durationDays: activationDays,
         status: "active",
+        used: false,
         createdAt: new Date(),
       });
       setActivationCode(code);
-      toast.success("Activation code generated successfully!");
+      toast.success(`Activation code generated successfully for ${activationDays} days!`);
+      // Refresh list
+      setRecentCodes(prev => [{
+        id: code,
+        code,
+        durationDays: activationDays,
+        status: "active",
+        used: false,
+        createdAt: new Date()
+      }, ...prev].slice(0, 10));
     } catch (e: any) {
       toast.error("Error: " + e.message);
     }
@@ -71,7 +168,7 @@ export default function AdminPanel() {
 
       <div className="flex bg-white rounded-lg p-1 border border-slate-200 mb-8 inline-flex overflow-x-auto max-w-full">
         <button onClick={() => setActiveTab("dashboard")} className={`whitespace-nowrap px-4 py-2 rounded-md font-medium text-sm transition-colors ${activeTab === 'dashboard' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-50'}`}>Dashboard</button>
-        <button onClick={() => setActiveTab("activation")} className={`whitespace-nowrap px-4 py-2 rounded-md font-medium text-sm transition-colors ${activeTab === 'activation' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-50'}`}>Activation Codes</button>
+        <button onClick={() => setActiveTab("users")} className={`whitespace-nowrap px-4 py-2 rounded-md font-medium text-sm transition-colors ${activeTab === 'users' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-50'}`}>Users List</button>
         <button onClick={() => setActiveTab("coupons")} className={`whitespace-nowrap px-4 py-2 rounded-md font-medium text-sm transition-colors ${activeTab === 'coupons' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-50'}`}>Coupons</button>
         <button onClick={() => setActiveTab("customers")} className={`whitespace-nowrap px-4 py-2 rounded-md font-medium text-sm transition-colors ${activeTab === 'customers' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-50'}`}>Add Customer</button>
         <button onClick={() => setActiveTab("notifications")} className={`whitespace-nowrap px-4 py-2 rounded-md font-medium text-sm transition-colors ${activeTab === 'notifications' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-50'}`}>Send Notifications</button>
@@ -111,22 +208,101 @@ export default function AdminPanel() {
         </div>
       )}
 
-      {activeTab === "activation" && (
+      {activeTab === "settings" && (
         <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm max-w-lg">
-          <h2 className="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2"><Key className="w-5 h-5 text-emerald-600"/> Generate Activation Code</h2>
-          <p className="text-sm text-slate-600 mb-6">Create a one-time activation code to upgrade a user to premium after confirming their payment on UPI <strong>{upiId}</strong>.</p>
+          <h2 className="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2"><Settings className="w-5 h-5 text-slate-600"/> Platform Settings</h2>
           
-          <button onClick={generateActivationCode} className="w-full bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-3 rounded-lg font-bold text-sm flex items-center justify-center gap-2 transition-colors">
-            <Plus className="w-4 h-4"/> Generate New Code
-          </button>
+          <div className="space-y-4">
+             <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Payment UPI ID</label>
+                <input 
+                  type="text" 
+                  value={upiId}
+                  onChange={(e) => setUpiId(e.target.value)}
+                  className="w-full border border-slate-300 rounded-lg p-2 focus:ring-2 focus:ring-blue-500" 
+                  placeholder="e.g. 7990878248@ybl" 
+                />
+             </div>
+             <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">WhatsApp Verification Number</label>
+                <input 
+                  type="text" 
+                  value={whatsappNumber}
+                  onChange={(e) => setWhatsappNumber(e.target.value)}
+                  className="w-full border border-slate-300 rounded-lg p-2 focus:ring-2 focus:ring-blue-500" 
+                  placeholder="e.g. +917990878248" 
+                />
+                <p className="text-xs text-slate-500 mt-1">Users will be directed to this number to send their payment screenshot.</p>
+             </div>
+             <button 
+               onClick={saveSettings} 
+               disabled={savingSettings}
+               className="w-full bg-slate-900 hover:bg-slate-800 text-white px-4 py-3 rounded-lg font-bold text-sm transition-colors disabled:opacity-50"
+             >
+               {savingSettings ? "Saving..." : "Save Settings"}
+             </button>
+          </div>
+        </div>
+      )}
 
-          {activationCode && (
-            <div className="mt-6 p-4 bg-emerald-50 border border-emerald-200 rounded-lg text-center">
-              <p className="text-xs font-bold text-emerald-800 uppercase tracking-widest mb-1">New Code Genereated</p>
-              <div className="text-2xl font-black text-emerald-900 tracking-wider font-mono">{activationCode}</div>
-              <p className="text-xs text-emerald-600 mt-2">Share this code securely with the customer.</p>
+      {activeTab === "activation" && (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
+            <h2 className="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2"><Key className="w-5 h-5 text-emerald-600"/> Generate Activation Code</h2>
+            <p className="text-sm text-slate-600 mb-6">Create a one-time activation code to upgrade a user to premium after confirming their payment on UPI <strong>{upiId}</strong>.</p>
+            
+            <div className="mb-4">
+               <label className="block text-sm font-medium text-slate-700 mb-1">Duration (Days)</label>
+               <input 
+                 type="number" 
+                 value={activationDays} 
+                 onChange={(e) => setActivationDays(parseInt(e.target.value) || 30)}
+                 className="w-full border border-slate-300 rounded-lg p-2 focus:ring-2 focus:ring-emerald-500" 
+                 min="1"
+               />
             </div>
-          )}
+
+            <button onClick={generateActivationCode} className="w-full bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-3 rounded-lg font-bold text-sm flex items-center justify-center gap-2 transition-colors">
+              <Plus className="w-4 h-4"/> Generate New Code
+            </button>
+
+            {activationCode && (
+              <div className="mt-6 p-4 bg-emerald-50 border border-emerald-200 rounded-lg text-center">
+                <p className="text-xs font-bold text-emerald-800 uppercase tracking-widest mb-1">New Code Genereated</p>
+                <div className="text-2xl font-black text-emerald-900 tracking-wider font-mono">{activationCode}</div>
+                <p className="text-xs text-emerald-600 mt-2">Share this code securely with the customer.</p>
+              </div>
+            )}
+          </div>
+          
+          <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
+            <h2 className="text-lg font-bold text-slate-800 mb-4">Recent Codes</h2>
+            {recentCodes.length === 0 ? (
+              <p className="text-sm text-slate-500">No codes generated yet.</p>
+            ) : (
+              <div className="space-y-3">
+                {recentCodes.map(c => (
+                  <div key={c.id} className="flex justify-between items-center p-3 rounded-lg border border-slate-100 bg-slate-50">
+                    <div>
+                      <div className="font-mono font-bold text-slate-800">{c.code}</div>
+                      <div className="text-xs text-slate-500">{c.durationDays} Days • {new Date(c.createdAt?.toMillis ? c.createdAt.toMillis() : Date.now()).toLocaleDateString()}</div>
+                    </div>
+                    <div>
+                      {c.used ? (
+                        <div className="flex flex-col items-end gap-1">
+                          <span className="px-2 py-1 bg-slate-200 text-slate-600 text-xs font-bold rounded">USED</span>
+                          {c.usedAt?.toDate && <span className="text-xs text-slate-500">on {c.usedAt.toDate().toLocaleDateString()}</span>}
+                          {c.usedBy && <span className="text-[10px] text-slate-400 font-mono">by: {c.usedBy}</span>}
+                        </div>
+                      ) : (
+                        <span className="px-2 py-1 bg-emerald-100 text-emerald-700 text-xs font-bold rounded">ACTIVE</span>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       )}
       
@@ -162,6 +338,71 @@ export default function AdminPanel() {
              </div>
              <button className="w-full bg-blue-600 hover:bg-blue-700 text-white px-4 py-3 rounded-lg font-bold text-sm transition-colors">Send to All Users</button>
           </div>
+        </div>
+      )}
+
+      {activeTab === "users" && (
+        <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
+          <h2 className="text-lg font-bold text-slate-800 mb-6 flex items-center gap-2"><Users className="w-5 h-5 text-indigo-600"/> Registered Users</h2>
+          
+          {usersLoading ? (
+            <div className="text-center py-8 text-slate-500">Loading users...</div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="border-b border-slate-200 bg-slate-50 text-sm">
+                    <th className="p-3 font-semibold text-slate-700">User Details</th>
+                    <th className="p-3 font-semibold text-slate-700">Contact</th>
+                    <th className="p-3 font-semibold text-slate-700">Plan Status</th>
+                    <th className="p-3 font-semibold text-slate-700">Joined Date</th>
+                    <th className="p-3 font-semibold text-slate-700 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {users.map(u => {
+                    const isPremium = u.role === 'premium' || u.role === 'superadmin';
+                    const expiryDate = u.subscriptionExpiry?.toDate ? u.subscriptionExpiry.toDate() : null;
+                    const isExpired = expiryDate && expiryDate < new Date();
+                    
+                    return (
+                      <tr key={u.id} className="text-sm hover:bg-slate-50 transition-colors">
+                        <td className="p-3">
+                          <div className="font-bold text-slate-800">{u.name || "N/A"}</div>
+                          <div className="text-xs text-slate-500 mt-0.5">{u.email}</div>
+                        </td>
+                        <td className="p-3">
+                          <div className="text-slate-700">{u.phone || "N/A"}</div>
+                        </td>
+                        <td className="p-3">
+                          <div className="flex flex-col items-start gap-1">
+                            <span className={`px-2 py-1 rounded text-xs font-bold ${isPremium && !isExpired ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-600'}`}>
+                              {(u.role || 'free').toUpperCase()}
+                            </span>
+                            {expiryDate && (
+                              <span className={`text-xs ${isExpired ? 'text-red-500' : 'text-slate-500'}`}>
+                                Exp: {expiryDate.toLocaleDateString()}
+                              </span>
+                            )}
+                          </div>
+                        </td>
+                        <td className="p-3 text-slate-600">
+                          {u.createdAt?.toDate ? u.createdAt.toDate().toLocaleDateString() : 'N/A'}
+                        </td>
+                        <td className="p-3 text-right">
+                          <div className="flex justify-end gap-2">
+                            <button onClick={() => handleActivateUser(u.id, 90)} className="px-3 py-1 bg-emerald-100 hover:bg-emerald-200 text-emerald-700 text-xs font-bold rounded transition-colors">3 Months</button>
+                            <button onClick={() => handleActivateUser(u.id, 365)} className="px-3 py-1 bg-indigo-100 hover:bg-indigo-200 text-indigo-700 text-xs font-bold rounded transition-colors">1 Year</button>
+                            <button onClick={() => handleActivateUser(u.id, 0)} className="px-3 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded transition-colors">Free</button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       )}
 

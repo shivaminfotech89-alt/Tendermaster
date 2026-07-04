@@ -1,13 +1,181 @@
+import "dotenv/config";
 import express from "express";
 import path from "path";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
+import admin from "firebase-admin";
+import { getFirestore, Timestamp } from "firebase-admin/firestore";
+import Razorpay from "razorpay";
+import crypto from "crypto";
+
+if (admin.getApps().length === 0) {
+  try {
+    admin.initializeApp();
+  } catch (e) {
+    console.error("Firebase admin init failed", e);
+  }
+}
 
 const app = express();
 const PORT = 3000;
 
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
+
+let razorpayInstance: Razorpay | null = null;
+function getRazorpay(): Razorpay {
+  if (!razorpayInstance) {
+    let key_id = process.env.RAZORPAY_KEY_ID;
+    let key_secret = process.env.RAZORPAY_KEY_SECRET;
+    
+    // Auto-swap if the user accidentally inverted them in secrets panel
+    if (key_id && !key_id.startsWith("rzp_") && key_secret && key_secret.startsWith("rzp_")) {
+      const temp = key_id;
+      key_id = key_secret;
+      key_secret = temp;
+    }
+
+    if (!key_id || !key_secret) {
+      throw new Error("Razorpay credentials not found in environment variables");
+    }
+    razorpayInstance = new Razorpay({ key_id, key_secret });
+  }
+  return razorpayInstance;
+}
+
+
+app.post("/api/create-payment-link", async (req, res) => {
+  try {
+    const { amount, currency = "INR", description, customer, callback_url } = req.body;
+    
+    if (!amount || amount < 100) {
+      return res.status(400).json({ error: "Amount must be at least 100 paise" });
+    }
+
+    const rzp = getRazorpay();
+    const paymentLink = await rzp.paymentLink.create({
+      amount,
+      currency,
+      description,
+      customer,
+      callback_url,
+      callback_method: "get"
+    });
+    
+    res.json(paymentLink);
+  } catch (error: any) {
+    console.error("Create payment link error:", error);
+    res.status(500).json({ error: error.message || "Failed to create payment link" });
+  }
+});
+
+app.post("/api/create-order", async (req, res) => {
+  try {
+    const { amount, currency = "INR", receipt } = req.body;
+    
+    if (!amount || amount < 100) {
+      return res.status(400).json({ error: "Amount must be at least 100 paise" });
+    }
+
+    const rzp = getRazorpay();
+    const options = {
+      amount,
+      currency,
+      receipt
+    };
+
+    const order = await rzp.orders.create(options);
+    res.json(order);
+  } catch (error: any) {
+    console.error("Create order error:", error);
+    res.status(500).json({ error: error.message || "Failed to create order" });
+  }
+});
+
+app.post("/api/verify-payment", async (req, res) => {
+  try {
+    const { razorpay_order_id, razorpay_payment_id, razorpay_signature, email, amount } = req.body;
+    
+    if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
+      return res.status(400).json({ error: "Missing required fields" });
+    }
+
+    const key_secret = process.env.RAZORPAY_KEY_SECRET;
+    if (!key_secret) throw new Error("Missing RAZORPAY_KEY_SECRET");
+
+    const generated_signature = crypto
+      .createHmac("sha256", key_secret)
+      .update(razorpay_order_id + "|" + razorpay_payment_id)
+      .digest("hex");
+
+    if (generated_signature === razorpay_signature) {
+      if (email && amount) {
+         const db = getFirestore();
+         const usersRef = db.collection('users');
+         const snapshot = await usersRef.where('email', '==', email).get();
+         
+         if (!snapshot.empty) {
+            const userDoc = snapshot.docs[0];
+            let days = 30; // default fallback
+            if (amount === 99900) days = 90; // 3 months
+            if (amount === 199900) days = 365; // 1 year
+
+            const newExpiry = new Date();
+            newExpiry.setDate(newExpiry.getDate() + days);
+
+            await userDoc.ref.update({
+               role: 'premium',
+               subscriptionExpiry: Timestamp.fromDate(newExpiry)
+            });
+         }
+      }
+      res.json({ success: true, message: "Payment verified successfully" });
+    } else {
+      res.status(400).json({ success: false, error: "Signature mismatch" });
+    }
+  } catch (error: any) {
+    console.error("Verify payment error:", error);
+    res.status(500).json({ error: error.message || "Failed to verify payment" });
+  }
+});
+
+app.post("/api/razorpay-webhook", async (req, res) => {
+  try {
+    const event = req.body;
+    if (event.event === 'payment.captured' || event.event === 'payment.authorized') {
+       const email = event.payload?.payment?.entity?.email;
+       const amount = event.payload?.payment?.entity?.amount; // in paise
+       
+       if (email) {
+          const db = getFirestore();
+          const usersRef = db.collection('users');
+          const snapshot = await usersRef.where('email', '==', email).get();
+          
+          if (!snapshot.empty) {
+             const userDoc = snapshot.docs[0];
+             let days = 30; // default fallback
+             if (amount === 99900) days = 90; // 3 months
+             if (amount === 199900) days = 365; // 1 year
+
+             const newExpiry = new Date();
+             newExpiry.setDate(newExpiry.getDate() + days);
+
+             await userDoc.ref.update({
+                role: 'premium',
+                subscriptionExpiry: Timestamp.fromDate(newExpiry)
+             });
+             console.log(`Upgraded user ${email} for ${days} days`);
+          } else {
+             console.log(`Webhook received but user with email ${email} not found`);
+          }
+       }
+    }
+    res.json({status: "ok"});
+  } catch (error) {
+    console.error("Webhook error:", error);
+    res.status(500).json({ error: "Internal error" });
+  }
+});
 
 // Initialize Gemini SDK
 // Fails fast if GEMINI_API_KEY is not set
@@ -187,8 +355,14 @@ app.post("/api/analyze-tender", async (req, res) => {
          `--- USER PROFILE ---\n${userProfile}${extraContextStr}\n\n--- TENDER DOCUMENTS (Attached as PDFs) ---\n`
        ];
        if (Array.isArray(actualContent)) {
-         for (const pdfItem of actualContent) {
-           docContents.push({ inlineData: { mimeType: "application/pdf", data: pdfItem.replace(/^data:application\/pdf;base64,/, '') } });
+         for (const item of actualContent) {
+           const match = item.match(/^data:([^;]+);base64,(.*)$/);
+           if (match) {
+             docContents.push({ inlineData: { mimeType: match[1], data: match[2] } });
+           } else {
+             // Fallback for previous implementation
+             docContents.push({ inlineData: { mimeType: "application/pdf", data: item.replace(/^data:application\/pdf;base64,/, '') } });
+           }
          }
        }
     } else if (tenderType === 'pdf') {
@@ -497,11 +671,28 @@ app.post("/api/chat-tender", async (req, res) => {
     }
 
     const aiClient = getAI();
-    const systemInstruction = `You are a specialized Procurement Chatbot assisting an Indian business with a specific tender. 
+    let tenderContextText = "";
+    const documentParts: any[] = [];
+    
+    if (typeof tenderDocument === 'string') {
+      tenderContextText = tenderDocument.substring(0, 50000);
+    } else if (Array.isArray(tenderDocument)) {
+      tenderContextText = "Multiple documents attached as files.";
+      for (const item of tenderDocument) {
+        if (typeof item === 'string' && item.startsWith('data:')) {
+           const match = item.match(/^data:([^;]+);base64,(.*)$/);
+           if (match) {
+             documentParts.push({ inlineData: { mimeType: match[1], data: match[2] } });
+           }
+        }
+      }
+    }
+    
+    const instructionText = `You are a specialized Procurement Chatbot assisting an Indian business with a specific tender. 
 You have access to the original tender document and the AI analysis. Answer their questions clearly, concisely, and realistically based on the provided context. Follow Indian tendering terminology (EMD, PBG, BOQ, etc.). If a detail is missing, state it is not specified and advise to check for corrigendums.${language && language !== 'en' ? `\nCRITICAL LANGUAGE REQUIREMENT: You MUST answer the user STRICTLY in ${language === 'hi' ? 'Hindi' : language === 'gu' ? 'Gujarati' : language}.` : ''}
 
 --- TENDER CONTEXT ---
-${tenderDocument ? tenderDocument.substring(0, 50000) : 'No raw text provided.'}
+${tenderContextText || 'No raw text provided.'}
 
 --- PREVIOUS AI ANALYSIS ---
 ${analysisResult ? JSON.stringify(analysisResult) : 'No previous analysis provided.'}
@@ -512,6 +703,12 @@ ${analysisResult ? JSON.stringify(analysisResult) : 'No previous analysis provid
       role: msg.role === 'user' ? 'user' : 'model',
       parts: [ { text: msg.text || " " } ]
     }));
+
+    if (documentParts.length > 0 && formattedContents.length > 0) {
+      formattedContents[0].parts.unshift(...documentParts);
+    }
+
+    const systemInstruction = { parts: [{ text: instructionText }] };
 
     const response = await generateContentWithRetry(aiClient, {
       model: "gemini-2.5-flash",

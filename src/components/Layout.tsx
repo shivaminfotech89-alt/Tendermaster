@@ -1,5 +1,6 @@
+import React, { useState, useEffect } from "react";
 import { Outlet, Link, useLocation, useNavigate } from "react-router-dom";
-import { LayoutDashboard, FileSearch, Building2, ShieldCheck, LogOut, Settings, FileText, MessageSquare, TrendingUp, Bell, Loader2, Globe } from "lucide-react";
+import { LayoutDashboard, FileSearch, Building2, ShieldCheck, LogOut, Settings, FileText, MessageSquare, TrendingUp, Bell, Loader2, Globe, X } from "lucide-react";
 import { useAuth } from "../auth/AuthProvider";
 import { useAnalyzerStore } from "../context/AnalyzerContext";
 import { useTranslation } from "react-i18next";
@@ -8,7 +9,9 @@ export default function Layout() {
   const { user, role, logout } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
-  const { analyzing, progress, analysisResult, reanalyzing, reanalyzeProgress } = useAnalyzerStore();
+  const { analyzing, progress, analysisResult, reanalyzing, reanalyzeProgress, clearAnalysis } = useAnalyzerStore();
+  const [hidePopup, setHidePopup] = useState(false);
+  useEffect(() => { if (analyzing || reanalyzing) setHidePopup(false); }, [analyzing, reanalyzing]);
   const { t, i18n } = useTranslation();
 
   const changeLanguage = (lng: string) => {
@@ -142,7 +145,7 @@ export default function Layout() {
       </main>
 
       {/* Global Analysis Progress Indicator (Only visible outside of analyzer page or when processing) */}
-      {(isGlobalAnalyzing || (analysisResult && location.pathname !== '/analyzer' && !location.pathname.startsWith('/projects/'))) && (
+      {!hidePopup && (isGlobalAnalyzing || (analysisResult && location.pathname !== '/analyzer' && !location.pathname.startsWith('/projects/'))) && (
         <div 
           onClick={() => {
             if (reanalyzing) return; // Stay on project page if reanalyzing
@@ -150,11 +153,20 @@ export default function Layout() {
           }}
           className="fixed top-4 right-4 md:top-6 md:right-6 bg-white border border-blue-200 shadow-xl rounded-xl p-4 flex items-center gap-4 cursor-pointer hover:shadow-2xl transition-all z-50 group hover:border-blue-400"
         >
+
+          <button 
+             onClick={(e) => { e.stopPropagation(); setHidePopup(true); }} 
+             className="absolute -top-2 -right-2 bg-white rounded-full p-1 shadow-md border border-slate-200 text-slate-400 hover:text-slate-700 hover:bg-slate-50 transition-colors"
+             title="Dismiss"
+          >
+             <X className="w-3 h-3" />
+          </button>
+
           {isGlobalAnalyzing ? (
             <div className="relative flex items-center justify-center w-12 h-12">
               <Loader2 className="w-12 h-12 text-blue-100 animate-spin" />
               <Loader2 className="w-12 h-12 text-blue-600 animate-spin absolute top-0 left-0" style={{ clipPath: `inset(${100 - globalProgress}% 0 0 0)` }} />
-              <span className="absolute text-[10px] font-bold text-blue-800">{globalProgress}%</span>
+              <span className="absolute text-[10px] font-bold text-blue-800">{Math.round(globalProgress)}%</span>
             </div>
           ) : (
             <div className="w-12 h-12 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center">

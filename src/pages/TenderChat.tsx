@@ -8,7 +8,7 @@ import remarkGfm from "remark-gfm";
 import { useTranslation } from "react-i18next";
 
 export default function TenderChat() {
-  const { user } = useAuth();
+  const { user, role } = useAuth();
   const { t, i18n } = useTranslation();
   const [projects, setProjects] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -80,6 +80,26 @@ export default function TenderChat() {
 
   if (loading) {
     return <div className="p-8 flex justify-center"><Loader2 className="w-8 h-8 animate-spin text-blue-600" /></div>;
+  }
+
+  if (role === 'free') {
+    return (
+      <div className="max-w-4xl mx-auto p-4 md:p-8 flex items-center justify-center min-h-[60vh]">
+         <div className="bg-white p-8 rounded-2xl shadow-sm border border-slate-200 max-w-md text-center">
+           <div className="w-16 h-16 bg-amber-100 text-amber-600 rounded-full flex items-center justify-center mx-auto mb-4">
+             <MessageSquare className="w-8 h-8" />
+           </div>
+           <h2 className="text-2xl font-bold text-slate-900 mb-2">{t("locked_feature")}</h2>
+           <p className="text-slate-600 mb-6">{t("premium_required")}</p>
+           <button 
+             onClick={() => window.location.href = '/profile'}
+             className="bg-amber-500 hover:bg-amber-600 text-white px-6 py-3 rounded-lg font-bold shadow-sm transition-colors w-full"
+           >
+             {t("upgrade_to_premium")}
+           </button>
+         </div>
+      </div>
+    );
   }
 
   if (!selectedProject) {

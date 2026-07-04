@@ -7,7 +7,7 @@ import { toast } from "react-hot-toast";
 
 export default function SuperAdminPanel() {
   const { user } = useAuth();
-  const [activeTab, setActiveTab] = useState("settings");
+  const [activeTab, setActiveTab] = useState("admins");
   
   // Settings Tab State
   const [upiId, setUpiId] = useState("");
@@ -101,9 +101,17 @@ export default function SuperAdminPanel() {
     }
   };
 
-  const updateRole = async (userId: string, newRole: string) => {
+  const updateRole = async (userId: string, newRole: string, days?: number) => {
     try {
-      await updateDoc(doc(db, "users", userId), { role: newRole });
+      if (newRole === 'premium' && days) {
+        const newExpiry = new Date();
+        newExpiry.setDate(newExpiry.getDate() + days);
+        await updateDoc(doc(db, "users", userId), { role: newRole, subscriptionExpiry: newExpiry });
+      } else if (newRole === 'free') {
+        await updateDoc(doc(db, "users", userId), { role: newRole, subscriptionExpiry: null });
+      } else {
+        await updateDoc(doc(db, "users", userId), { role: newRole });
+      }
       toast.success("Role updated!");
       fetchUsers();
       // write log
@@ -111,6 +119,7 @@ export default function SuperAdminPanel() {
         action: "UPDATE_ROLE",
         targetUserId: userId,
         newRole,
+        days: days || 0,
         by: user?.email,
         timestamp: new Date()
       });
@@ -135,7 +144,6 @@ export default function SuperAdminPanel() {
       </div>
 
       <div className="flex bg-white rounded-lg p-1 border border-slate-200 mb-8 inline-flex">
-        <button onClick={() => setActiveTab("settings")} className={`px-4 py-2 rounded-md font-medium text-sm transition-colors ${activeTab === 'settings' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-50'}`}>System Settings</button>
         <button onClick={() => setActiveTab("admins")} className={`px-4 py-2 rounded-md font-medium text-sm transition-colors ${activeTab === 'admins' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-50'}`}>Admin Accounts</button>
         <button onClick={() => setActiveTab("plans")} className={`px-4 py-2 rounded-md font-medium text-sm transition-colors ${activeTab === 'plans' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-50'}`}>Plans & Pricing</button>
         <button onClick={() => setActiveTab("logs")} className={`px-4 py-2 rounded-md font-medium text-sm transition-colors ${activeTab === 'logs' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-50'}`}>Activity Logs</button>
@@ -145,17 +153,7 @@ export default function SuperAdminPanel() {
         <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm max-w-lg">
           <h2 className="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2"><IndianRupee className="w-5 h-5 text-blue-600"/> Payment Configuration</h2>
           <div className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">Master UPI ID</label>
-              <input 
-                 type="text" 
-                 value={upiId}
-                 onChange={e => setUpiId(e.target.value)}
-                 className="w-full border border-slate-300 rounded-lg p-2 focus:ring-2 focus:ring-blue-500"
-                 placeholder="e.g. 7990878248@ybl"
-              />
-              <p className="text-xs text-slate-500 mt-1">This UPI ID is displayed to users for manual payments / activation flows.</p>
-            </div>
+            <p className="text-sm text-slate-600">Payments are configured via Razorpay integration.</p>
             <button onClick={saveSettings} disabled={savingSettings} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-bold text-sm flex items-center justify-center gap-2">
               {savingSettings ? <Loader2 className="w-4 h-4 animate-spin"/> : null} Save Settings
             </button>
@@ -188,7 +186,12 @@ export default function SuperAdminPanel() {
                          <td className="p-4 flex gap-2">
                            {u.role !== 'admin' && <button onClick={() => updateRole(u.id, 'admin')} className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded font-medium hover:bg-blue-200">Make Admin</button>}
                            {u.role !== 'free' && <button onClick={() => updateRole(u.id, 'free')} className="text-xs bg-slate-200 text-slate-700 px-2 py-1 rounded font-medium hover:bg-slate-300">Make Free</button>}
-                           {u.role !== 'premium' && <button onClick={() => updateRole(u.id, 'premium')} className="text-xs bg-purple-100 text-purple-700 px-2 py-1 rounded font-medium hover:bg-purple-200">Make Premium</button>}
+                           {u.role !== 'premium' && (
+                             <>
+                               <button onClick={() => updateRole(u.id, 'premium', 90)} className="text-xs bg-emerald-100 text-emerald-700 px-2 py-1 rounded font-medium hover:bg-emerald-200">3 Months</button>
+                               <button onClick={() => updateRole(u.id, 'premium', 365)} className="text-xs bg-indigo-100 text-indigo-700 px-2 py-1 rounded font-medium hover:bg-indigo-200">1 Year</button>
+                             </>
+                           )}
                          </td>
                        </tr>
                      ))}
@@ -201,16 +204,14 @@ export default function SuperAdminPanel() {
       
       {activeTab === "plans" && (
         <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm max-w-lg">
-          <h2 className="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2"><FileText className="w-5 h-5 text-purple-600"/> Edit Premium Plan</h2>
+          <h2 className="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2"><FileText className="w-5 h-5 text-purple-600"/> Edit Premium Plan Features</h2>
           <div className="space-y-4">
-             <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Premium Plan Price (INR)</label>
-                <input 
-                   type="text" 
-                   value={premiumPrice}
-                   onChange={e => setPremiumPrice(e.target.value)}
-                   className="w-full border border-slate-300 rounded-lg p-2 focus:ring-2 focus:ring-purple-500"
-                />
+             <div className="bg-slate-50 p-3 rounded text-sm text-slate-600 mb-4">
+                <strong>Current Active Plans (Razorpay Integration):</strong>
+                <ul className="list-disc pl-5 mt-1">
+                   <li>3 Months Plan (₹999)</li>
+                   <li>1 Year Plan (₹1999)</li>
+                </ul>
              </div>
              <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">Plan Features (One per line)</label>

@@ -1,12 +1,13 @@
 import { useState, useRef, useEffect } from "react";
 import { useAuth } from "../auth/AuthProvider";
 import { useAnalyzerStore } from "../context/AnalyzerContext";
-import { Upload, X, Loader2, Sparkles, AlertCircle, FileText, CheckCircle2, ChevronRight, Activity, CalendarDays, Link as LinkIcon, File, MessageSquare, Send, Calculator, Building, Target, Download, Edit2, Trash2, Plus, Minus } from "lucide-react";
-import { doc, setDoc, collection, addDoc } from "firebase/firestore";
+import { Upload, X, Loader2, Sparkles, AlertCircle, FileText, CheckCircle2, ChevronRight, Activity, CalendarDays, Link as LinkIcon, File, MessageSquare, Send, Calculator, Building, Target, Download, Edit2, Trash2, Plus, Minus , ArrowLeft } from "lucide-react";
+import { doc, setDoc, collection, addDoc, getDocs, query } from "firebase/firestore";
 import { db } from "../lib/firebase";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import JSZip from "jszip";
+import * as XLSX from "xlsx";
 import { toast } from "react-hot-toast";
 import { useTranslation } from "react-i18next";
 
@@ -33,10 +34,10 @@ const CollapsibleSection = ({ title, defaultOpen = true, children }: { title: st
 };
 
 export default function TenderAnalyzer() {
-  const { user } = useAuth();
+  const { user, role } = useAuth();
   const { t, i18n } = useTranslation();
   
-  const { analyzing, progress, analysisResult, payloadContext, setAnalyzing, setProgress, setAnalysisResult, setPayloadContext } = useAnalyzerStore();
+  const { analyzing, progress, analysisResult, payloadContext, setAnalyzing, setProgress, setAnalysisResult, setPayloadContext, clearAnalysis } = useAnalyzerStore();
 
   const [inputType, setInputType] = useState<'url' | 'pdf' | 'zip'>('pdf');
   const [tenderUrl, setTenderUrl] = useState("");
@@ -58,6 +59,28 @@ export default function TenderAnalyzer() {
   const [chatInput, setChatInput] = useState("");
   const [chatLoading, setChatLoading] = useState(false);
   const [confirmClearChat, setConfirmClearChat] = useState(false);
+
+  const [materials, setMaterials] = useState<any[]>([]);
+  const [labour, setLabour] = useState<any[]>([]);
+  const [revenue, setRevenue] = useState(0);
+
+  useEffect(() => {
+    if (analysisResult?.financial_estimate) {
+      if (analysisResult.financial_estimate.material_costs && materials.length === 0) {
+        setMaterials(analysisResult.financial_estimate.material_costs.map((m: any) => ({ ...m, cost_num: parseInt(String(m.estimated_cost).replace(/[^0-9]/g, '')) || 0 })));
+      }
+      if (analysisResult.financial_estimate.labour_costs && labour.length === 0) {
+        setLabour(analysisResult.financial_estimate.labour_costs.map((l: any) => ({ ...l, cost_num: parseInt(String(l.estimated_cost).replace(/[^0-9]/g, '')) || 0 })));
+      }
+      if (analysisResult.bid_recommendation?.recommended && revenue === 0) {
+        setRevenue(parseInt(String(analysisResult.bid_recommendation.recommended).replace(/[^0-9]/g, '')) || 0);
+      }
+    }
+  }, [analysisResult]);
+
+  const totalExpense = materials.reduce((acc, m) => acc + (m.cost_num || 0), 0) + labour.reduce((acc, l) => acc + (l.cost_num || 0), 0);
+  const estimatedProfit = revenue - totalExpense;
+
   
   // Business Profile Context
   const [businessProfile, setBusinessProfile] = useState<any>(null);
@@ -89,8 +112,8 @@ export default function TenderAnalyzer() {
     const file = e.target.files?.[0];
     if (!file) return;
     
-    if (file.size > 10 * 1024 * 1024) {
-      setError("PDF size must be less than 10MB");
+    if (file.size > 30 * 1024 * 1024) {
+      setError("PDF size must be less than 30MB");
       return;
     }
     
@@ -108,8 +131,8 @@ export default function TenderAnalyzer() {
     const file = e.target.files?.[0];
     if (!file) return;
     
-    if (file.size > 20 * 1024 * 1024) {
-      setError("ZIP size must be less than 20MB");
+    if (file.size > 30 * 1024 * 1024) {
+      setError("ZIP size must be less than 30MB");
       return;
     }
     
@@ -117,22 +140,44 @@ export default function TenderAnalyzer() {
     try {
       const zip = new JSZip();
       const contents = await zip.loadAsync(file);
-      const pdfBase64Array: string[] = [];
+      const fileDataArray: string[] = [];
       
       for (const [filename, zipEntry] of Object.entries(contents.files)) {
-        if (!zipEntry.dir && filename.toLowerCase().endsWith('.pdf')) {
+        if (zipEntry.dir) continue;
+        
+        const lowerFilename = filename.toLowerCase();
+        if (lowerFilename.endsWith('.pdf')) {
           const base64Data = await zipEntry.async("base64");
-          pdfBase64Array.push(`data:application/pdf;base64,${base64Data}`);
+          fileDataArray.push(`data:application/pdf;base64,${base64Data}`);
+        } else if (lowerFilename.endsWith('.xlsx') || lowerFilename.endsWith('.xls') || lowerFilename.endsWith('.csv')) {
+          try {
+            const arrayBuffer = await zipEntry.async("arraybuffer");
+            const workbook = XLSX.read(arrayBuffer, { type: "array" });
+            let allText = `\n--- CONTENT OF SPREADSHEET: ${filename} ---\n`;
+            for (const sheetName of workbook.SheetNames) {
+              allText += `\nSheet: ${sheetName}\n`;
+              const sheet = workbook.Sheets[sheetName];
+              const csv = XLSX.utils.sheet_to_csv(sheet);
+              allText += csv;
+            }
+            // btoa expects a string, so we convert text to base64
+            // To handle unicode, we use TextEncoder
+            const utf8Bytes = new TextEncoder().encode(allText);
+            const base64Text = btoa(String.fromCharCode(...utf8Bytes));
+            fileDataArray.push(`data:text/plain;base64,${base64Text}`);
+          } catch (err) {
+            console.error(`Failed to parse spreadsheet ${filename}:`, err);
+          }
         }
       }
       
-      if (pdfBase64Array.length === 0) {
-        setError("No PDF files found in the ZIP folder.");
+      if (fileDataArray.length === 0) {
+        setError("No supported documents (PDF, Excel, CSV) found in the ZIP folder.");
         setZipFileName("");
         return;
       }
       
-      setZipFilesData(pdfBase64Array);
+      setZipFilesData(fileDataArray);
     } catch (err) {
       setError("Failed to extract ZIP file.");
       console.error(err);
@@ -355,11 +400,48 @@ export default function TenderAnalyzer() {
     return "text-red-600 bg-red-50 border-red-200";
   };
 
+  const [whatsappNumber, setWhatsappNumber] = useState("7990878248");
+  useEffect(() => {
+    const fetchSettings = async () => {
+      try {
+        const snap = await getDocs(query(collection(db, "system_settings")));
+        snap.forEach(d => {
+          if (d.id === "payments") {
+            setWhatsappNumber(d.data().whatsapp_number || "7990878248");
+          }
+        });
+      } catch (e) {}
+    }
+    fetchSettings();
+  }, []);
+
+  const LockedOverlay = () => (
+    <div className="relative border border-slate-200 rounded-xl overflow-hidden bg-white shadow-sm my-6 p-12 flex flex-col items-center justify-center text-center">
+      <div className="w-16 h-16 bg-amber-100 text-amber-600 rounded-full flex items-center justify-center mx-auto mb-4">
+        <Sparkles className="w-8 h-8" />
+      </div>
+      <h2 className="text-xl font-bold text-slate-900 mb-2">{t("locked_feature")}</h2>
+      <p className="text-slate-600 mb-6 max-w-md mx-auto">{t("premium_required")}</p>
+      
+      <div className="bg-slate-50 p-4 rounded-lg mb-6 border border-slate-200 text-sm max-w-sm w-full">
+        <p className="mb-2 text-slate-700 font-semibold text-left">How to unlock:</p>
+        <p className="text-left text-slate-600">Please visit the Settings page to select a plan and upgrade your account.</p>
+      </div>
+
+      <button 
+        onClick={() => window.location.href = '/settings'}
+        className="bg-amber-500 hover:bg-amber-600 text-white px-6 py-3 rounded-lg font-bold shadow-sm transition-colors"
+      >
+        Go to Settings to Upgrade
+      </button>
+    </div>
+  );
+
   return (
-    <div className="p-6 md:p-8 max-w-6xl mx-auto pb-24">
+    <div className="p-6 md:p-8 max-w-6xl mx-auto pb-24 relative">
       <div className="mb-6 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight text-slate-900">Tender Analyzer</h1>
+          <h1 className="text-3xl font-bold tracking-tight text-slate-900">{t("analyzer")}</h1>
           <p className="text-slate-500 mt-1">Cross-match GeM/eProcure documents against your business constraints.</p>
         </div>
       </div>
@@ -377,7 +459,7 @@ export default function TenderAnalyzer() {
               onClick={() => setInputType('zip')}
               className={`flex-1 py-4 px-6 text-sm font-semibold border-b-2 flex justify-center items-center gap-2 whitespace-nowrap ${inputType === 'zip' ? 'border-blue-600 text-blue-700 bg-white' : 'border-transparent text-slate-500 hover:text-slate-700'}`}
             >
-              <Upload className="w-4 h-4" /> ZIP Folder (Multiple PDFs)
+              <Upload className="w-4 h-4" /> ZIP Folder (PDF, Excel, CSV)
             </button>
             <button 
               onClick={() => setInputType('url')}
@@ -393,116 +475,128 @@ export default function TenderAnalyzer() {
                 <span className="text-sm">{error}</span>
               </div>
             )}
-            
-            <div className="mb-4">
-               {inputType === 'pdf' && (
-                 <div className="w-full h-80 border-2 border-dashed border-slate-300 rounded-xl flex flex-col items-center justify-center p-6 bg-slate-50 transition-colors hover:border-blue-400">
-                   {pdfFileName ? (
-                     <div className="flex flex-col items-center gap-4">
-                       <div className="w-16 h-16 bg-red-100 text-red-600 rounded-2xl flex items-center justify-center">
-                         <File className="w-8 h-8" />
-                       </div>
-                       <div className="text-center">
-                         <p className="font-semibold text-slate-900">{pdfFileName}</p>
-                         <p className="text-xs text-slate-500 mt-1">Ready for analysis</p>
-                       </div>
-                       <button onClick={clearPdf} className="mt-2 text-sm text-red-600 hover:text-red-700 font-medium px-4 py-2 bg-red-50 rounded-lg border border-red-100 flex items-center gap-2">
-                         <X className="w-4 h-4" /> Remove PDF
-                       </button>
-                     </div>
-                   ) : (
-                     <div className="flex flex-col items-center text-center">
-                       <div className="w-16 h-16 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center mb-4">
-                         <Upload className="w-8 h-8" />
-                       </div>
-                       <h3 className="text-lg font-semibold text-slate-900 mb-1">Upload Tender PDF</h3>
-                       <p className="text-sm text-slate-500 mb-6 max-w-sm">Upload the official NIT or BOQ document. We'll automatically extract and analyze the contents.</p>
-                       <label className="bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 px-6 py-2.5 rounded-lg cursor-pointer font-medium shadow-sm transition-colors">
-                         Select PDF File
-                         <input ref={fileInputRef} type="file" accept="application/pdf" className="hidden" onChange={handlePdfUpload} />
-                       </label>
-                     </div>
-                   )}
-                 </div>
-               )}
 
-               {inputType === 'zip' && (
-                 <div className="w-full h-80 border-2 border-dashed border-slate-300 rounded-xl flex flex-col items-center justify-center p-6 bg-slate-50 transition-colors hover:border-blue-400">
-                   {zipFileName ? (
-                     <div className="flex flex-col items-center gap-4">
-                       <div className="w-16 h-16 bg-purple-100 text-purple-600 rounded-2xl flex items-center justify-center">
-                         <Upload className="w-8 h-8" />
+            {inputType === 'pdf' && (
+              <div className="space-y-4">
+                {!pdfFileName ? (
+                  <div 
+                    onClick={() => !analyzing && fileInputRef.current?.click()}
+                    className={`border-2 border-dashed border-slate-300 rounded-xl p-8 md:p-12 text-center cursor-pointer hover:bg-slate-50 hover:border-blue-400 transition-all ${analyzing ? 'opacity-50' : ''}`}
+                  >
+                    <File className="w-10 h-10 text-blue-500 mx-auto mb-4" />
+                    <p className="font-medium text-slate-800 text-lg mb-1">Upload single PDF tender document</p>
+                    <p className="text-sm text-slate-500">Supported formats: .pdf</p>
+                  </div>
+                ) : (
+                  <div className="border border-slate-200 rounded-xl p-6 bg-slate-50 flex items-center justify-between">
+                    <div className="flex items-center gap-4">
+                       <div className="bg-blue-100 p-3 rounded-lg text-blue-600">
+                         <FileText className="w-6 h-6" />
                        </div>
-                       <div className="text-center">
-                         <p className="font-semibold text-slate-900">{zipFileName}</p>
-                         <p className="text-xs text-slate-500 mt-1">{zipFilesData.length} PDF(s) extracted and ready for analysis</p>
+                       <div>
+                         <p className="font-semibold text-slate-800">{pdfFileName}</p>
+                         <p className="text-sm text-slate-500">Ready for analysis</p>
                        </div>
-                       <button onClick={clearZip} className="mt-2 text-sm text-red-600 hover:text-red-700 font-medium px-4 py-2 bg-red-50 rounded-lg border border-red-100 flex items-center gap-2">
-                         <X className="w-4 h-4" /> Remove ZIP
-                       </button>
-                     </div>
-                   ) : (
-                     <div className="flex flex-col items-center text-center">
-                       <div className="w-16 h-16 bg-purple-100 text-purple-600 rounded-full flex items-center justify-center mb-4">
-                         <Upload className="w-8 h-8" />
-                       </div>
-                       <h3 className="text-lg font-semibold text-slate-900 mb-1">Upload Multiple PDFs (ZIP Folder)</h3>
-                       <p className="text-sm text-slate-500 mb-6 max-w-sm">Got multiple tender documents? Compress them into a ZIP folder and upload them all at once. The AI will cross-reference all contained PDFs.</p>
-                       <label className="bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 px-6 py-2.5 rounded-lg cursor-pointer font-medium shadow-sm transition-colors">
-                         Select ZIP File
-                         <input ref={fileInputRef} type="file" accept="application/zip,application/x-zip-compressed" className="hidden" onChange={handleZipUpload} />
-                       </label>
-                     </div>
-                   )}
-                 </div>
-               )}
-               
-               {inputType === 'url' && (
-                  <>
-                    <label className="text-sm font-semibold text-slate-700 block mb-2">Tender Web Link</label>
-                    <div className="bg-slate-50 border border-slate-300 rounded-xl p-8 h-80 flex flex-col justify-center items-center shadow-inner">
-                       <div className="w-full max-w-lg relative">
-                          <LinkIcon className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 w-5 h-5" />
-                          <input 
-                            type="url"
-                            value={tenderUrl}
-                            onChange={e => setTenderUrl(e.target.value)}
-                            placeholder="https://eprocure.gov.in/..."
-                            className="w-full pl-12 pr-4 py-4 rounded-lg border border-slate-300 focus:ring-2 focus:ring-blue-500 outline-none text-slate-900 shadow-sm"
-                          />
-                       </div>
-                       <p className="text-sm text-slate-500 mt-6 text-center max-w-md">
-                         Paste a direct link to the tender notice or corrigendum. The AI will extract the content directly from the webpage.
-                       </p>
                     </div>
-                  </>
-               )}
-            </div>
+                    <div className="flex items-center gap-3">
+                      <button onClick={clearPdf} disabled={analyzing} className="text-slate-500 hover:text-red-500 p-2 disabled:opacity-50">
+                        <Trash2 className="w-5 h-5" />
+                      </button>
+                      <button 
+                        onClick={handleAnalyze} 
+                        disabled={analyzing}
+                        className="bg-slate-900 hover:bg-slate-800 text-white px-6 py-2.5 rounded-lg font-semibold transition-colors disabled:opacity-50 flex items-center gap-2"
+                      >
+                        {analyzing ? <><Loader2 className="w-4 h-4 animate-spin" /> Analyzing</> : 'Analyze Document'}
+                      </button>
+                    </div>
+                  </div>
+                )}
+                <input type="file" ref={fileInputRef} className="hidden" accept=".pdf,application/pdf" onChange={(e) => (inputType as string) === 'pdf' ? handlePdfUpload(e) : handleZipUpload(e)} />
+              </div>
+            )}
+            
+            {inputType === 'zip' && (
+               <div className="space-y-4">
+                 {!zipFileName ? (
+                   <div 
+                     onClick={() => !analyzing && fileInputRef.current?.click()}
+                     className={`border-2 border-dashed border-slate-300 rounded-xl p-8 md:p-12 text-center cursor-pointer hover:bg-slate-50 hover:border-blue-400 transition-all ${analyzing ? 'opacity-50' : ''}`}
+                   >
+                     <Upload className="w-10 h-10 text-indigo-500 mx-auto mb-4" />
+                     <p className="font-medium text-slate-800 text-lg mb-1">Upload ZIP containing tender documents</p>
+                     <p className="text-sm text-slate-500">Includes PDFs, BOQ Excel, CSV, text files</p>
+                   </div>
+                 ) : (
+                   <div className="border border-slate-200 rounded-xl p-6 bg-slate-50 flex items-center justify-between">
+                     <div className="flex items-center gap-4">
+                        <div className="bg-indigo-100 p-3 rounded-lg text-indigo-600">
+                          <FileText className="w-6 h-6" />
+                        </div>
+                        <div>
+                          <p className="font-semibold text-slate-800">{zipFileName}</p>
+                          <p className="text-sm text-slate-500">{zipFilesData.length} documents ready</p>
+                        </div>
+                     </div>
+                     <div className="flex items-center gap-3">
+                       <button onClick={clearZip} disabled={analyzing} className="text-slate-500 hover:text-red-500 p-2 disabled:opacity-50">
+                         <Trash2 className="w-5 h-5" />
+                       </button>
+                       <button 
+                         onClick={handleAnalyze} 
+                         disabled={analyzing}
+                         className="bg-slate-900 hover:bg-slate-800 text-white px-6 py-2.5 rounded-lg font-semibold transition-colors disabled:opacity-50 flex items-center gap-2"
+                       >
+                         {analyzing ? <><Loader2 className="w-4 h-4 animate-spin" /> Analyzing</> : 'Analyze ZIP'}
+                       </button>
+                     </div>
+                   </div>
+                 )}
+                 <input type="file" ref={fileInputRef} className="hidden" accept=".zip,application/zip" onChange={(e) => (inputType as string) === 'pdf' ? handlePdfUpload(e) : handleZipUpload(e)} />
+               </div>
+            )}
 
-            <div className="flex justify-end pt-4">
-              <button 
-                onClick={handleAnalyze}
-                disabled={analyzing || (inputType === 'pdf' && !tenderPdfBase64) || (inputType === 'url' && !tenderUrl) || (inputType === 'zip' && zipFilesData.length === 0)}
-                className="bg-blue-600 hover:bg-blue-700 focus:ring-2 focus:ring-offset-2 focus:ring-blue-600 text-white px-8 py-3 rounded-lg font-bold shadow-md flex items-center gap-2 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {analyzing ? <Loader2 className="w-5 h-5 animate-spin" /> : <Sparkles className="w-5 h-5" />}
-                {analyzing ? `Analyzing... ${progress}%` : "Analyze Eligibility Match"}
-              </button>
-            </div>
+            {inputType === 'url' && (
+              <div className="space-y-4">
+                <div className="flex gap-2">
+                  <input 
+                    type="url"
+                    value={tenderUrl}
+                    onChange={e => setTenderUrl(e.target.value)}
+                    placeholder="https://gem.gov.in/tender/..." 
+                    className="flex-1 px-4 py-3 rounded-lg border border-slate-300 outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all"
+                  />
+                  <button 
+                    onClick={() => { if(tenderUrl) handleAnalyze(); }}
+                    disabled={!tenderUrl || analyzing}
+                    className="bg-slate-900 hover:bg-slate-800 text-white px-6 py-3 rounded-lg font-semibold transition-colors disabled:opacity-50"
+                  >
+                    Analyze
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}
 
       {analysisResult && (
-         <div id="analyzer-report-container" className="space-y-6">
-             <div className="flex flex-col md:flex-row justify-between items-start md:items-center bg-white p-4 rounded-xl border border-slate-200 shadow-sm gap-4">
-               <button onClick={() => { setAnalysisResult(null); setHideTLDR(false); }} className="text-slate-500 hover:text-slate-900 font-medium text-sm flex items-center gap-1 shrink-0 print:hidden">
-                 ← New Analysis
+        <div className="space-y-6">
+          <div className="bg-white rounded-xl p-6 shadow-sm border border-slate-200 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 print:hidden">
+            <div>
+               <h2 className="text-xl font-bold text-slate-900 flex items-center gap-2">
+                 <Target className="w-5 h-5 text-emerald-600" />
+                 Analysis Complete
+               </h2>
+               <p className="text-sm text-slate-500 mt-1">Review the AI generated breakdown below.</p>
+            </div>
+            <div className="flex flex-col md:flex-row items-center gap-3 w-full md:w-auto">
+               <button onClick={clearAnalysis} className="text-slate-500 hover:text-slate-800 font-semibold text-sm flex items-center gap-2">
+                 <ArrowLeft className="w-4 h-4" /> New Analysis
                </button>
                <div className="flex items-center gap-3 w-full md:w-auto">
-                 <button onClick={handleDownloadPDF} disabled={isExportingPDF} className="bg-slate-100 hover:bg-slate-200 text-slate-700 px-4 py-2 rounded-lg font-bold text-sm flex items-center justify-center gap-2 shrink-0 print:hidden border border-slate-200 shadow-sm transition-colors disabled:opacity-50">
-                   {isExportingPDF ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
-                   {isExportingPDF ? "Generating PDF..." : "Export PDF Report"}
+                 <button className="bg-slate-100 hover:bg-slate-200 text-slate-700 px-4 py-2 rounded-lg font-bold text-sm flex items-center justify-center gap-2 shrink-0 print:hidden border border-slate-200 shadow-sm transition-colors disabled:opacity-50">
+                   Export PDF Report
                  </button>
                  <input 
                    type="text" 
@@ -512,13 +606,14 @@ export default function TenderAnalyzer() {
                    className="flex-1 md:w-64 px-3 py-2 border border-slate-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500"
                  />
                  <button onClick={handleSaveToPipeline} disabled={saving} className="text-white bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded-lg font-bold text-sm flex items-center justify-center gap-2 shrink-0 transition-colors">
-                   {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
                    {saving ? "Saving..." : "Save Project"}
                  </button>
                </div>
             </div>
+          </div>
 
-            <div className="flex border-b border-slate-200 mb-6 bg-white rounded-xl shadow-sm overflow-x-auto print:hidden">
+          <div className="flex border-b border-slate-200 mb-6 bg-white rounded-xl shadow-sm overflow-x-auto print:hidden">
+
                 <button onClick={() => setActiveTab('overview')} className={`px-6 py-4 font-semibold text-sm border-b-2 whitespace-nowrap transition-colors ${activeTab === 'overview' ? 'border-blue-600 text-blue-700' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>Tender Overview</button>
                 <button onClick={() => setActiveTab('docs')} className={`px-6 py-4 font-semibold text-sm border-b-2 whitespace-nowrap transition-colors ${activeTab === 'docs' ? 'border-blue-600 text-blue-700' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>Auto-Generate Documents</button>
                 <button onClick={() => setActiveTab('calculator')} className={`px-6 py-4 font-semibold text-sm border-b-2 whitespace-nowrap transition-colors ${activeTab === 'calculator' ? 'border-blue-600 text-blue-700' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>Bid Engine & Profit Calculator</button>
@@ -562,7 +657,8 @@ export default function TenderAnalyzer() {
             )}
 
             {/* Bid Recommendation / Risk Calculator */}
-            {activeTab === 'calculator' && analysisResult.bid_recommendation && (
+            {activeTab === 'calculator' && role === 'free' && <LockedOverlay />}
+            {activeTab === 'calculator' && role !== 'free' && analysisResult.bid_recommendation && (
               <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden flex flex-col md:flex-row divide-y md:divide-y-0 md:divide-x divide-slate-100">
                 {/* Bid Recommendation */}
                 <div className="p-6 md:w-2/3">
@@ -655,6 +751,8 @@ export default function TenderAnalyzer() {
 </CollapsibleSection>
 
               {/* Part 3: Timeline & Steps */}
+              {role === 'free' ? <LockedOverlay /> : (
+              <>
               <CollapsibleSection title="Part 3: Updation & Roadmap">
                 <div className="flex flex-col gap-6 mt-2">
                 <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6">
@@ -853,9 +951,13 @@ export default function TenderAnalyzer() {
              </CollapsibleSection>
              </>
              )}
+             
+             </>
+             )}
 
              {/* Generate Documents */}
-             {activeTab === 'docs' && (
+             {activeTab === 'docs' && role === 'free' && <LockedOverlay />}
+             {activeTab === 'docs' && role !== 'free' && (
              <div className="bg-gradient-to-br from-indigo-50 to-blue-50 rounded-xl border border-indigo-100 shadow-sm overflow-hidden mb-6">
                <div className="p-5 border-b border-indigo-100/50">
                   <h3 className="font-semibold text-indigo-900 flex items-center gap-2"><FileText className="w-5 h-5" /> Auto-Generate Documents</h3>
@@ -914,13 +1016,16 @@ export default function TenderAnalyzer() {
                                    <head>
                                      <title>Print Document - ${docType}</title>
                                      <style>
-                                       body { font-family: system-ui, -apple-system, sans-serif; padding: 40px; color: #111827; }
-                                       table { width: 100%; border-collapse: collapse; margin-top: 10px; margin-bottom: 20px; }
-                                       th, td { border: 1px solid #d1d5db; padding: 8px 12px; text-align: left; }
+                                       body { font-family: system-ui, -apple-system, sans-serif; padding: 40px; color: #111827; max-width: 100%; overflow-wrap: break-word; word-wrap: break-word; }
+                                       table { width: 100%; border-collapse: collapse; margin-top: 10px; margin-bottom: 20px; page-break-inside: auto; }
+                                       tr { page-break-inside: avoid; page-break-after: auto; }
+                                       th, td { border: 1px solid #d1d5db; padding: 8px 12px; text-align: left; overflow-wrap: break-word; word-wrap: break-word; }
                                        th { background-color: #f3f4f6; }
-                                       h1, h2, h3, h4, h5 { margin-top: 20px; margin-bottom: 10px; }
+                                       h1, h2, h3, h4, h5 { margin-top: 20px; margin-bottom: 10px; page-break-after: avoid; }
                                        p { margin-bottom: 10px; line-height: 1.5; }
                                        ul, ol { margin-bottom: 10px; padding-left: 20px; }
+                                       @page { size: auto; margin: 20mm; }
+                                       @media print { body { padding: 0; } }
                                      </style>
                                    </head>
                                    <body>
@@ -976,7 +1081,8 @@ export default function TenderAnalyzer() {
              )}
 
              {/* Integrated Chatbot for active tender */}
-             {activeTab === 'chat' && (
+             {activeTab === 'chat' && role === 'free' && <LockedOverlay />}
+             {activeTab === 'chat' && role !== 'free' && (
              <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden flex flex-col" style={{ height: '500px' }}>
                 <div className="p-4 border-b border-slate-100 bg-blue-600 text-white flex items-center justify-between">
                    <div className="flex items-center gap-3">
@@ -1056,7 +1162,7 @@ export default function TenderAnalyzer() {
                 </div>
              </div>
              )}
-         </div>
+        </div>
       )}
     </div>
   );

@@ -1,48 +1,80 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../auth/AuthProvider';
-import { Save, Bell, Shield, Key, User, Settings2, IndianRupee, Loader2 } from 'lucide-react';
+import { Save, Bell, Shield, Key, User, Settings2, Loader2, IndianRupee } from 'lucide-react';
 import { db } from '../lib/firebase';
-import { doc, getDoc, updateDoc, setDoc } from 'firebase/firestore';
+import { doc, getDoc, updateDoc } from 'firebase/firestore';
 import { toast } from 'react-hot-toast';
 
 export default function Settings() {
-  const { user, role } = useAuth();
+  const { user, role, subscriptionExpiry } = useAuth();
   const [loading, setLoading] = useState(false);
   const [activeTab, setActiveTab] = useState("account");
 
   const [activationCode, setActivationCode] = useState("");
   const [activating, setActivating] = useState(false);
+  const [checkingOut, setCheckingOut] = useState<number | null>(null);
   
-  const [upiId, setUpiId] = useState("7990878248@ybl");
-  const [premiumPrice, setPremiumPrice] = useState("999");
   const [premiumFeatures, setPremiumFeatures] = useState(["Unlimited Tender Analysis", "Automated Document Generation", "Dedicated Tender Chat AI", "PDF Exports & Competitor Analysis"]);
 
+  const daysRemaining = subscriptionExpiry ? Math.max(0, Math.ceil((subscriptionExpiry.getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24))) : 0;
+
   useEffect(() => {
-    const fetchSettings = async () => {
-       try {
-         const snap = await getDoc(doc(db, "system_settings", "payments"));
-         if (snap.exists() && snap.data().upi_id) setUpiId(snap.data().upi_id);
-         
-         const pSnap = await getDoc(doc(db, "system_settings", "plans"));
-         if (pSnap.exists()) {
-             if (pSnap.data().premiumPrice) setPremiumPrice(pSnap.data().premiumPrice);
-             if (pSnap.data().premiumFeatures) {
-                 setPremiumFeatures(pSnap.data().premiumFeatures.split("\n").filter((f:string) => f.trim() !== ""));
-             }
-         }
-       } catch (e) {}
-    };
-    fetchSettings();
+    // Load Razorpay Script
+    if (!document.querySelector('script[src="https://checkout.razorpay.com/v1/checkout.js"]')) {
+      const script = document.createElement('script');
+      script.src = 'https://checkout.razorpay.com/v1/checkout.js';
+      script.async = true;
+      document.body.appendChild(script);
+    }
   }, []);
 
-  if (!user) return null;
+  
+  const handleCheckout = async (amountInRupees: number) => {
+    if (!user) {
+      toast.error("Please login to continue");
+      return;
+    }
 
-  const handleSave = () => {
-    setLoading(true);
-    setTimeout(() => {
-      setLoading(false);
-      toast.success("Preferences saved successfully");
-    }, 800);
+    setCheckingOut(amountInRupees);
+    try {
+      // Get the current URL base to return to after payment
+      const callbackUrl = new URL(window.location.href);
+      callbackUrl.searchParams.set("payment", "success");
+      callbackUrl.searchParams.set("amount", amountInRupees.toString());
+
+      const response = await fetch('/api/create-payment-link', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          amount: amountInRupees * 100, 
+          description: "Premium Subscription",
+          customer: {
+            email: user.email || "",
+            contact: "9999999999" // Fallback contact
+          },
+          callback_url: callbackUrl.toString()
+        })
+      });
+      
+      const paymentLink = await response.json();
+      
+      if (!response.ok) {
+        throw new Error(paymentLink.error || "Failed to create payment link");
+      }
+
+      if (paymentLink.short_url) {
+         // Open the payment link in a new tab
+         window.open(paymentLink.short_url, '_blank');
+         toast.success("Payment link opened in a new tab. Please complete the payment there.");
+         setCheckingOut(null);
+      } else {
+         throw new Error("Invalid payment link returned");
+      }
+
+    } catch (err: any) {
+      toast.error(err.message || "Checkout failed");
+      setCheckingOut(null);
+    }
   };
 
   const handleActivate = async () => {
@@ -68,6 +100,40 @@ export default function Settings() {
     } finally {
       setActivating(false);
     }
+  };
+
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('payment') === 'success') {
+      const pId = params.get('razorpay_payment_id');
+      if (pId) {
+         toast.success("Payment completed successfully!");
+         const activatePremium = async () => {
+            if (user) {
+               try {
+                 await updateDoc(doc(db, "users", user.uid), {
+                   role: "premium",
+                   subscriptionExpiry: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString(),
+                   paymentId: pId
+                 });
+                 toast.success("Premium features activated!");
+                 setTimeout(() => window.location.href = "/settings", 2000);
+               } catch (e) {
+                 console.error(e);
+               }
+            }
+         };
+         activatePremium();
+      } else {
+         toast.success("Payment link processed. Awaiting confirmation.");
+      }
+    }
+  }, [user]);
+
+  const handleSave = async () => {
+     setLoading(true);
+     setTimeout(() => { setLoading(false); toast.success("Saved"); }, 1000);
   };
 
   return (
@@ -142,65 +208,78 @@ export default function Settings() {
                       <p className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-1">Current Plan</p>
                       <h3 className="text-2xl font-black text-indigo-900 uppercase">{role || "FREE"}</h3>
                    </div>
-                   {role !== 'premium' && role !== 'admin' && role !== 'superadmin' && (
+                   {role !== 'premium' && role !== 'admin' && role !== 'superadmin' ? (
                      <div className="text-right">
                         <span className="bg-indigo-100 text-indigo-800 text-xs font-bold px-2 py-1 rounded">UPGRADE AVAILABLE</span>
+                     </div>
+                   ) : (
+                     <div className="text-right">
+                        <span className="bg-emerald-100 text-emerald-800 text-xs font-bold px-2 py-1 rounded mb-1 inline-block">ACTIVE</span>
+                        {role === 'premium' && <div className="text-xs text-slate-500 font-semibold">{daysRemaining} days remaining</div>}
                      </div>
                    )}
                 </div>
 
-                {role === "free" && (
+                 {role !== "premium" && (
                   <div className="mt-8 space-y-8">
                      
-                     <div className="bg-gradient-to-br from-indigo-900 to-purple-900 rounded-2xl p-6 text-white shadow-xl relative overflow-hidden">
-                        <div className="absolute top-0 right-0 p-4 opacity-10">
-                           <Shield className="w-32 h-32" />
-                        </div>
-                        <div className="relative z-10">
-                           <span className="bg-indigo-500/30 text-indigo-100 text-xs font-bold px-2 py-1 rounded inline-block mb-3">RECOMMENDED</span>
-                           <h3 className="text-2xl font-black mb-1">Premium Plan</h3>
-                           <div className="text-4xl font-extrabold mb-4 flex items-baseline gap-1">
-                              ₹{premiumPrice} <span className="text-lg font-medium text-indigo-300">/ month</span>
-                           </div>
-                           
-                           <ul className="space-y-2 mb-6">
-                              {premiumFeatures.map((feat, i) => (
-                                 <li key={i} className="flex items-start gap-2 text-sm text-indigo-100">
-                                   <div className="mt-1 w-1.5 h-1.5 bg-emerald-400 rounded-full shrink-0"></div>
-                                   {feat}
-                                 </li>
-                              ))}
-                           </ul>
-                        </div>
-                     </div>
+                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                       {/* 3 Months Plan */}
+                       <div className="bg-gradient-to-br from-slate-900 to-slate-800 rounded-2xl p-6 text-white shadow-xl relative overflow-hidden flex flex-col">
+                          <div className="absolute top-0 right-0 p-4 opacity-5">
+                             <Shield className="w-32 h-32" />
+                          </div>
+                          <div className="relative z-10 flex-1">
+                             <h3 className="text-xl font-bold mb-1 text-slate-200">Quarterly Plan</h3>
+                             <div className="text-3xl font-extrabold mb-4 flex items-baseline gap-1">
+                                ₹999 <span className="text-sm font-medium text-slate-400">/ 3 months</span>
+                             </div>
+                             
+                             <ul className="space-y-2 mb-6 text-sm text-slate-300">
+                                {premiumFeatures.map((feat, i) => (
+                                   <li key={i} className="flex items-start gap-2">
+                                     <div className="mt-1 w-1.5 h-1.5 bg-blue-400 rounded-full shrink-0"></div>
+                                     {feat}
+                                   </li>
+                                ))}
+                             </ul>
+                          </div>
+                          <div className="relative z-10">
+                             <button onClick={() => handleCheckout(999)} disabled={checkingOut === 999} className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white font-bold py-3 px-4 rounded-xl transition-colors flex items-center justify-center gap-2">
+                               {checkingOut === 999 ? <Loader2 className="w-5 h-5 animate-spin" /> : "Subscribe Now"}
+                             </button>
+                          </div>
+                       </div>
 
-                     <div>
-                        <h3 className="text-sm font-semibold text-slate-900 mb-3">Manual Upgrade via UPI</h3>
-                        <p className="text-xs text-slate-500 mb-4 leading-relaxed">
-                           To upgrade to the Premium Plan, please transfer <strong className="text-slate-900">₹{premiumPrice}</strong> to our official UPI ID <strong className="text-slate-800 bg-slate-100 px-1 py-0.5 rounded">{upiId}</strong>. Once payment is confirmed, contact our administration to receive your one-time activation code.
-                        </p>
-                        
-                        <div className="space-y-4 border border-slate-200 p-4 rounded-xl bg-white">
-                        <div>
-                          <label className="block text-sm font-medium text-slate-700 mb-1">Have an Activation Code?</label>
-                          <input 
-                             type="text" 
-                             value={activationCode}
-                             onChange={e => setActivationCode(e.target.value.toUpperCase())}
-                             placeholder="e.g. ACT-X7B9F1" 
-                             className="w-full font-mono font-bold bg-slate-50 border border-slate-300 text-slate-900 text-sm rounded-lg focus:ring-indigo-500 focus:border-indigo-500 block p-2.5" 
-                          />
-                        </div>
-                        <button 
-                           onClick={handleActivate}
-                           disabled={activating || !activationCode}
-                           className="w-full bg-emerald-600 hover:bg-emerald-700 disabled:bg-emerald-400 text-white font-semibold py-2.5 px-6 rounded-lg text-sm flex items-center justify-center gap-2 transition-colors"
-                        >
-                           {activating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Key className="w-4 h-4" />} Redeem Code
-                        </button>
+                       {/* 1 Year Plan */}
+                       <div className="bg-gradient-to-br from-indigo-900 to-purple-900 rounded-2xl p-6 text-white shadow-xl relative overflow-hidden flex flex-col border border-indigo-500/30">
+                          <div className="absolute top-0 right-0 p-4 opacity-10">
+                             <Shield className="w-32 h-32" />
+                          </div>
+                          <div className="relative z-10 flex-1">
+                             <span className="bg-indigo-500/30 text-indigo-100 text-xs font-bold px-2 py-1 rounded inline-block mb-3">BEST VALUE</span>
+                             <h3 className="text-xl font-bold mb-1 text-indigo-100">Yearly Plan</h3>
+                             <div className="text-3xl font-extrabold mb-4 flex items-baseline gap-1">
+                                ₹1999 <span className="text-sm font-medium text-indigo-300">/ year</span>
+                             </div>
+                             
+                             <ul className="space-y-2 mb-6 text-sm text-indigo-100">
+                                {premiumFeatures.map((feat, i) => (
+                                   <li key={i} className="flex items-start gap-2">
+                                     <div className="mt-1 w-1.5 h-1.5 bg-emerald-400 rounded-full shrink-0"></div>
+                                     {feat}
+                                   </li>
+                                ))}
+                             </ul>
+                          </div>
+                          <div className="relative z-10">
+                             <button onClick={() => handleCheckout(1999)} disabled={checkingOut === 1999} className="w-full bg-indigo-500 hover:bg-indigo-400 disabled:bg-indigo-300 text-white font-bold py-3 px-4 rounded-xl transition-colors flex items-center justify-center gap-2 shadow-lg shadow-indigo-900/50">
+                               {checkingOut === 1999 ? <Loader2 className="w-5 h-5 animate-spin" /> : "Subscribe Now"}
+                             </button>
+                          </div>
+                       </div>
                      </div>
                   </div>
-                </div>
                 )}
              </div>
            )}

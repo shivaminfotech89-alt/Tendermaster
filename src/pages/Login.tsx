@@ -18,6 +18,8 @@ export default function Login() {
   const [isLogin, setIsLogin] = useState(true);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [name, setName] = useState("");
+  const [phone, setPhone] = useState("");
   const [authLoading, setAuthLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -56,7 +58,7 @@ export default function Login() {
       if (isLogin) {
         await loginWithEmail(email, password);
       } else {
-        await signupWithEmail(email, password);
+        await signupWithEmail(email, password, name, phone);
       }
     } catch (err: any) {
       setError(err.message);
@@ -85,6 +87,37 @@ export default function Login() {
           <form className="w-full space-y-4 mb-6" onSubmit={handleSubmit}>
             {error && <div className="p-3 bg-red-50 text-red-600 text-sm rounded-lg border border-red-100 text-center">{error}</div>}
             
+            {!isLogin && (
+              <>
+                <div className="space-y-1">
+                  <label className="text-sm font-medium text-slate-700">{t("name") || "Full Name"}</label>
+                  <div className="relative">
+                    <input 
+                      type="text" 
+                      required
+                      value={name}
+                      onChange={e => setName(e.target.value)}
+                      className="w-full px-3 py-2.5 bg-slate-50 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" 
+                      placeholder="Your Name"
+                    />
+                  </div>
+                </div>
+                <div className="space-y-1">
+                  <label className="text-sm font-medium text-slate-700">{t("phone") || "Mobile Number"}</label>
+                  <div className="relative">
+                    <input 
+                      type="tel" 
+                      required
+                      value={phone}
+                      onChange={e => setPhone(e.target.value)}
+                      className="w-full px-3 py-2.5 bg-slate-50 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" 
+                      placeholder="Mobile Number"
+                    />
+                  </div>
+                </div>
+              </>
+            )}
+
             <div className="space-y-1">
               <label className="text-sm font-medium text-slate-700">{t("email")}</label>
               <div className="relative">
@@ -154,17 +187,24 @@ export default function Login() {
           </div>
         </div>
         
-        <div className="bg-slate-100 p-4 border-t border-slate-200 flex justify-center items-center gap-2">
-          <Globe className="w-4 h-4 text-slate-500" />
-          <select 
-            value={i18n.language} 
-            onChange={(e) => changeLanguage(e.target.value)}
-            className="bg-transparent text-sm font-medium text-slate-700 outline-none cursor-pointer focus:ring-0"
-          >
-            <option value="en">English</option>
-            <option value="hi">हिंदी</option>
-            <option value="gu">ગુજરાતી</option>
-          </select>
+        <div className="bg-slate-100 p-4 border-t border-slate-200 flex flex-col sm:flex-row justify-between items-center gap-4">
+          <div className="flex items-center gap-2">
+            <Globe className="w-4 h-4 text-slate-500" />
+            <select 
+               value={i18n.language} 
+               onChange={(e) => changeLanguage(e.target.value)}
+              className="bg-transparent text-sm font-medium text-slate-700 outline-none cursor-pointer focus:ring-0"
+            >
+              <option value="en">English</option>
+              <option value="hi">हिंदी</option>
+              <option value="gu">ગુજરાતી</option>
+            </select>
+          </div>
+          
+          <div className="flex items-center gap-4 text-xs font-medium text-slate-500">
+            <a href="/terms" className="hover:text-slate-900 transition-colors">Terms of Service</a>
+            <a href="/privacy" className="hover:text-slate-900 transition-colors">Privacy Policy</a>
+          </div>
         </div>
       </div>
     </div>

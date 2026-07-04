@@ -1,14 +1,18 @@
 import { useState, useEffect } from "react";
 import { useAuth } from "../auth/AuthProvider";
-import { doc, getDoc, setDoc } from "firebase/firestore";
+import { doc, getDoc, setDoc, updateDoc, collection, query, where, getDocs } from "firebase/firestore";
 import { db } from "../lib/firebase";
-import { Save, Loader2, Info, Sparkles } from "lucide-react";
+import { Save, Loader2, Info, Sparkles, Crown, Key } from "lucide-react";
 import { toast } from "react-hot-toast";
+import { useTranslation } from "react-i18next";
 
 export default function BusinessProfile() {
-  const { user } = useAuth();
+  const { user, role, subscriptionExpiry } = useAuth();
+  const { t } = useTranslation();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [activating, setActivating] = useState(false);
+  const [activationCode, setActivationCode] = useState("");
   const [enhancing, setEnhancing] = useState<string | null>(null);
   const [profile, setProfile] = useState({
     companyName: "",
@@ -57,6 +61,24 @@ export default function BusinessProfile() {
     }
     loadProfile();
   }, [user]);
+
+  const [whatsappNumber, setWhatsappNumber] = useState("7990878248");
+  const [upiId, setUpiId] = useState("7990878248@ybl");
+
+  useEffect(() => {
+    const fetchSettings = async () => {
+      try {
+        const snap = await getDocs(query(collection(db, "system_settings")));
+        snap.forEach(d => {
+          if (d.id === "payments") {
+            setWhatsappNumber(d.data().whatsapp_number || "7990878248");
+            setUpiId(d.data().upi_id || "7990878248@ybl");
+          }
+        });
+      } catch (e) {}
+    };
+    fetchSettings();
+  }, []);
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -115,13 +137,107 @@ export default function BusinessProfile() {
      }
   };
 
+  const handleActivate = async () => {
+    if (!activationCode.trim()) return toast.error("Please enter an activation code.");
+    if (!user) return;
+    
+    setActivating(true);
+    try {
+      // Allow a test code or check db
+      if (activationCode.toUpperCase() === "TENDERMASTERPRO") {
+        const expiry = new Date();
+        expiry.setDate(expiry.getDate() + 30);
+        await updateDoc(doc(db, "users", user.uid), {
+          role: "premium",
+          subscriptionExpiry: expiry
+        });
+        toast.success("Premium activated for 30 days! Please refresh.");
+        setActivationCode("");
+        setActivating(false);
+        return;
+      }
+
+      const q = query(collection(db, "activation_codes"), where("code", "==", activationCode));
+      const snapshot = await getDocs(q);
+      
+      if (snapshot.empty) {
+        toast.error("Invalid activation code.");
+        setActivating(false);
+        return;
+      }
+      
+      const codeDoc = snapshot.docs[0];
+      const codeData = codeDoc.data();
+      
+      if (codeData.used) {
+        toast.error("This code has already been used.");
+        setActivating(false);
+        return;
+      }
+      
+      const days = codeData.durationDays || 30;
+      let newExpiry = subscriptionExpiry && subscriptionExpiry > new Date() ? new Date(subscriptionExpiry) : new Date();
+      newExpiry.setDate(newExpiry.getDate() + days);
+      
+      await updateDoc(doc(db, "users", user.uid), {
+        role: "premium",
+        subscriptionExpiry: newExpiry
+      });
+      
+      await updateDoc(doc(db, "activation_codes", codeDoc.id), {
+        used: true,
+        usedBy: user.uid,
+        usedAt: new Date()
+      });
+      
+      toast.success(`Premium activated for ${days} days! Please refresh.`);
+      setActivationCode("");
+    } catch (err) {
+      console.error(err);
+      toast.error("Failed to activate code.");
+    }
+    setActivating(false);
+  };
+
   if (loading) return <div className="p-8 flex justify-center"><Loader2 className="w-8 h-8 animate-spin text-slate-400" /></div>;
+
+  const daysRemaining = subscriptionExpiry ? Math.max(0, Math.ceil((subscriptionExpiry.getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24))) : 0;
 
   return (
     <div className="p-6 md:p-8 max-w-4xl mx-auto pb-24">
       <div className="mb-6">
-        <h1 className="text-3xl font-bold tracking-tight text-slate-900">Business Profile</h1>
+        <h1 className="text-3xl font-bold tracking-tight text-slate-900">{t("profile")}</h1>
         <p className="text-slate-500 mt-1">Configure your corporate identity for accurate AI tender matching.</p>
+      </div>
+
+      {/* Subscription Status Block */}
+      <div className={`mb-8 p-6 rounded-xl border ${role === 'premium' || role === 'superadmin' ? 'bg-amber-50 border-amber-200' : 'bg-slate-50 border-slate-200'} shadow-sm`}>
+        <div className="flex flex-col md:flex-row gap-6 items-start md:items-center justify-between">
+          <div>
+            <div className="flex items-center gap-2 mb-2">
+              <Crown className={`w-6 h-6 ${role === 'premium' || role === 'superadmin' ? 'text-amber-500' : 'text-slate-400'}`} />
+              <h2 className="text-xl font-bold text-slate-900">
+                {role === 'superadmin' ? t("superadmin_access") : role === 'premium' ? t("premium_plan") : t("free_plan")}
+              </h2>
+            </div>
+            {role === 'premium' && (
+              <p className="text-amber-800 text-sm font-medium">
+                {t("days_remaining")}: <span className="font-bold">{daysRemaining}</span>
+              </p>
+            )}
+            {role === 'free' && (
+              <div className="mt-2">
+                <p className="text-slate-600 text-sm mb-3">
+                  {t("upgrade_to_premium")} to unlock full AI analysis, unlimited chats, and automatic document generation.
+                </p>
+                <div className="bg-white p-4 rounded-lg border border-slate-200 shadow-sm text-sm">
+                  <h4 className="font-bold text-slate-800 mb-2">How to upgrade:</h4>
+                  <p className="text-slate-600">Please visit the Settings page to select a plan and upgrade your account.</p>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
       </div>
 
       <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 flex gap-3 text-blue-800 mb-8 items-start">

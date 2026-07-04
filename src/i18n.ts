@@ -35,7 +35,14 @@ const resources = {
       "free_plan": "Free Plan",
       "premium_plan": "Premium Plan",
       "admin_access": "Admin Access",
-      "superadmin_access": "Superadmin Access"
+      "superadmin_access": "Superadmin Access",
+      "upgrade_to_premium": "Upgrade to Premium",
+      "enter_activation_code": "Enter Activation Code",
+      "activation_code": "Activation Code",
+      "activate": "Activate",
+      "days_remaining": "Days Remaining",
+      "locked_feature": "Premium Feature",
+      "premium_required": "This feature requires a premium subscription."
     }
   },
   hi: {
@@ -69,7 +76,14 @@ const resources = {
       "free_plan": "मुफ्त योजना",
       "premium_plan": "प्रीमियम योजना",
       "admin_access": "एडमिन एक्सेस",
-      "superadmin_access": "सुपरएडमिन एक्सेस"
+      "superadmin_access": "सुपरएडमिन एक्सेस",
+      "upgrade_to_premium": "प्रीमियम में अपग्रेड करें",
+      "enter_activation_code": "एक्टिवेशन कोड दर्ज करें",
+      "activation_code": "एक्टिवेशन कोड",
+      "activate": "सक्रिय करें",
+      "days_remaining": "दिन शेष",
+      "locked_feature": "प्रीमियम सुविधा",
+      "premium_required": "इस सुविधा के लिए प्रीमियम सदस्यता की आवश्यकता है।"
     }
   },
   gu: {
@@ -103,7 +117,14 @@ const resources = {
       "free_plan": "મફત યોજના",
       "premium_plan": "પ્રીમિયમ યોજના",
       "admin_access": "એડમિન એક્સેસ",
-      "superadmin_access": "સુપરએડમિન એક્સેસ"
+      "superadmin_access": "સુપરએડમિન એક્સેસ",
+      "upgrade_to_premium": "પ્રીમિયમમાં અપગ્રેડ કરો",
+      "enter_activation_code": "એક્ટિવેશન કોડ દાખલ કરો",
+      "activation_code": "એક્ટિવેશન કોડ",
+      "activate": "સક્રિય કરો",
+      "days_remaining": "દિવસ બાકી",
+      "locked_feature": "પ્રીમિયમ સુવિધા",
+      "premium_required": "આ સુવિધા માટે પ્રીમિયમ સબ્સ્ક્રિપ્શનની જરૂર છે."
     }
   }
 };

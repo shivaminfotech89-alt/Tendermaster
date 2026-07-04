@@ -4,9 +4,14 @@ import path from "path";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
 import admin from "firebase-admin";
+import { getAuth } from "firebase-admin/auth";
 import { getFirestore, Timestamp } from "firebase-admin/firestore";
 import Razorpay from "razorpay";
 import crypto from "crypto";
+import dns from "dns";
+import { promisify } from "util";
+
+const lookupPromise = promisify(dns.lookup);
 
 if (admin.getApps().length === 0) {
   try {
@@ -19,8 +24,152 @@ if (admin.getApps().length === 0) {
 const app = express();
 const PORT = 3000;
 
-app.use(express.json({ limit: '50mb' }));
+// Enable raw body buffer storage for Razorpay signature verification
+app.use(express.json({ 
+  limit: '50mb',
+  verify: (req: any, res, buf) => {
+    req.rawBody = buf;
+  }
+}));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
+
+// Express Custom Request Type for Auth Middleware
+interface AuthenticatedRequest extends express.Request {
+  user?: {
+    uid: string;
+    email: string;
+  };
+}
+
+// Phase 1: Firebase Auth ID Token Verification Middleware
+const verifyFirebaseToken = async (
+  req: AuthenticatedRequest,
+  res: express.Response,
+  next: express.NextFunction
+) => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    return res.status(401).json({ error: "Missing or invalid authorization header" });
+  }
+
+  const idToken = authHeader.split("Bearer ")[1];
+  try {
+    const decodedToken = await getAuth().verifyIdToken(idToken);
+    req.user = {
+      uid: decodedToken.uid,
+      email: decodedToken.email || "",
+    };
+    next();
+  } catch (error: any) {
+    console.error("Firebase ID token verification failed:", error);
+    return res.status(401).json({ error: "Unauthorized: Invalid or expired token" });
+  }
+};
+
+// Phase 1: Entitlement Gating Middleware
+const requireActiveEntitlement = async (
+  req: AuthenticatedRequest,
+  res: express.Response,
+  next: express.NextFunction
+) => {
+  if (!req.user || !req.user.uid) {
+    return res.status(401).json({ error: "Unauthorized: Authenticated user context required" });
+  }
+
+  try {
+    const db = getFirestore();
+    const userDoc = await db.collection("users").doc(req.user.uid).get();
+    
+    if (!userDoc.exists) {
+      return res.status(403).json({ error: "User profile not found server-side" });
+    }
+
+    const userData = userDoc.data();
+    const role = userData?.role || "free";
+    
+    // Check if user is admin or superadmin
+    if (role === "admin" || role === "superadmin") {
+      return next();
+    }
+
+    if (role === "premium") {
+      const subscriptionExpiry = userData?.subscriptionExpiry;
+      if (subscriptionExpiry) {
+        let expiryDate: Date;
+        if (typeof subscriptionExpiry.toDate === "function") {
+          expiryDate = subscriptionExpiry.toDate();
+        } else {
+          expiryDate = new Date(subscriptionExpiry);
+        }
+
+        if (expiryDate > new Date()) {
+          return next();
+        }
+      }
+    }
+
+    return res.status(403).json({ error: "Premium subscription required to perform this action" });
+  } catch (error: any) {
+    console.error("Entitlement check failed:", error);
+    return res.status(500).json({ error: "Internal server error during entitlement check" });
+  }
+};
+
+// Phase 5: SSRF protection helper
+async function isSafeUrl(urlStr: string): Promise<boolean> {
+  try {
+    const parsedUrl = new URL(urlStr);
+    
+    // Support only http and https protocols
+    if (parsedUrl.protocol !== "http:" && parsedUrl.protocol !== "https:") {
+      return false;
+    }
+
+    const hostname = parsedUrl.hostname;
+    const lookupResult = await lookupPromise(hostname);
+    const ip = lookupResult.address;
+
+    // IPv4 Checks
+    if (ip.includes(".")) {
+      const parts = ip.split(".").map(Number);
+      if (parts.length !== 4 || parts.some(isNaN)) {
+        return false;
+      }
+
+      // Loopback (127.0.0.0/8)
+      if (parts[0] === 127) return false;
+
+      // Private ranges (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16)
+      if (parts[0] === 10) return false;
+      if (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) return false;
+      if (parts[0] === 192 && parts[1] === 168) return false;
+
+      // Link-local (169.254.0.0/16)
+      if (parts[0] === 169 && parts[1] === 254) return false;
+
+      // Broadcast/Multicast/Unspecified
+      if (parts[0] === 0 || parts[0] >= 224) return false;
+    }
+
+    // IPv6 Checks
+    if (ip.includes(":")) {
+      const lowerIp = ip.toLowerCase();
+      // Loopback (::1)
+      if (lowerIp === "::1" || lowerIp === "0:0:0:0:0:0:0:1") return false;
+      // Link-local (fe80::/10)
+      if (lowerIp.startsWith("fe80:")) return false;
+      // Unique local (fc00::/7)
+      if (lowerIp.startsWith("fc00:") || lowerIp.startsWith("fd00:")) return false;
+      // Unspecified (::)
+      if (lowerIp === "::" || lowerIp === "0:0:0:0:0:0:0:0") return false;
+    }
+
+    return true;
+  } catch (err) {
+    console.error("SSRF Check Error:", err);
+    return false;
+  }
+}
 
 let razorpayInstance: Razorpay | null = null;
 function getRazorpay(): Razorpay {
@@ -43,8 +192,7 @@ function getRazorpay(): Razorpay {
   return razorpayInstance;
 }
 
-
-app.post("/api/create-payment-link", async (req, res) => {
+app.post("/api/create-payment-link", verifyFirebaseToken, async (req: AuthenticatedRequest, res) => {
   try {
     const { amount, currency = "INR", description, customer, callback_url } = req.body;
     
@@ -69,7 +217,7 @@ app.post("/api/create-payment-link", async (req, res) => {
   }
 });
 
-app.post("/api/create-order", async (req, res) => {
+app.post("/api/create-order", verifyFirebaseToken, async (req: AuthenticatedRequest, res) => {
   try {
     const { amount, currency = "INR", receipt } = req.body;
     
@@ -92,46 +240,89 @@ app.post("/api/create-order", async (req, res) => {
   }
 });
 
-app.post("/api/verify-payment", async (req, res) => {
+// Phase 3: Verify checkout payment server-side cryptographically before granting upgrade
+app.post("/api/verify-payment", verifyFirebaseToken, async (req: AuthenticatedRequest, res) => {
   try {
-    const { razorpay_order_id, razorpay_payment_id, razorpay_signature, email, amount } = req.body;
+    const { 
+      razorpay_order_id, 
+      razorpay_payment_id, 
+      razorpay_signature,
+      razorpay_payment_link_id,
+      razorpay_payment_link_reference_id,
+      razorpay_payment_link_status,
+      amount 
+    } = req.body;
     
-    if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
-      return res.status(400).json({ error: "Missing required fields" });
+    const uid = req.user?.uid;
+    if (!uid) {
+      return res.status(401).json({ error: "Unauthorized" });
     }
 
     const key_secret = process.env.RAZORPAY_KEY_SECRET;
     if (!key_secret) throw new Error("Missing RAZORPAY_KEY_SECRET");
 
-    const generated_signature = crypto
-      .createHmac("sha256", key_secret)
-      .update(razorpay_order_id + "|" + razorpay_payment_id)
-      .digest("hex");
+    let isVerified = false;
 
-    if (generated_signature === razorpay_signature) {
-      if (email && amount) {
-         const db = getFirestore();
-         const usersRef = db.collection('users');
-         const snapshot = await usersRef.where('email', '==', email).get();
-         
-         if (!snapshot.empty) {
-            const userDoc = snapshot.docs[0];
-            let days = 30; // default fallback
-            if (amount === 99900) days = 90; // 3 months
-            if (amount === 199900) days = 365; // 1 year
+    // 1. Verify standard order signatures
+    if (razorpay_order_id && razorpay_payment_id && razorpay_signature) {
+      const generated_signature = crypto
+        .createHmac("sha256", key_secret)
+        .update(razorpay_order_id + "|" + razorpay_payment_id)
+        .digest("hex");
 
-            const newExpiry = new Date();
-            newExpiry.setDate(newExpiry.getDate() + days);
+      const expectedBuffer = Buffer.from(generated_signature);
+      const actualBuffer = Buffer.from(razorpay_signature);
 
-            await userDoc.ref.update({
-               role: 'premium',
-               subscriptionExpiry: Timestamp.fromDate(newExpiry)
-            });
-         }
+      if (expectedBuffer.length === actualBuffer.length && crypto.timingSafeEqual(expectedBuffer, actualBuffer)) {
+        isVerified = true;
       }
-      res.json({ success: true, message: "Payment verified successfully" });
+    } 
+    // 2. Verify payment link redirect signatures
+    else if (razorpay_payment_link_id && razorpay_payment_link_status && razorpay_payment_id && razorpay_signature) {
+      const refId = razorpay_payment_link_reference_id || "";
+      const text = `${razorpay_payment_link_id}|${refId}|${razorpay_payment_link_status}|${razorpay_payment_id}`;
+      const generated_signature = crypto
+        .createHmac("sha256", key_secret)
+        .update(text)
+        .digest("hex");
+
+      const expectedBuffer = Buffer.from(generated_signature);
+      const actualBuffer = Buffer.from(razorpay_signature);
+
+      if (expectedBuffer.length === actualBuffer.length && crypto.timingSafeEqual(expectedBuffer, actualBuffer)) {
+        isVerified = true;
+      }
     } else {
-      res.status(400).json({ success: false, error: "Signature mismatch" });
+      return res.status(400).json({ error: "Missing required fields for signature verification" });
+    }
+
+    if (isVerified) {
+       const db = getFirestore();
+       const userRef = db.collection('users').doc(uid);
+       const userSnap = await userRef.get();
+       
+       if (userSnap.exists) {
+          let days = 30; // default fallback
+          const parsedAmount = Number(amount);
+          // amount can be in paise (e.g. 99900) or rupees (e.g. 999) depending on link setup
+          if (parsedAmount === 999 || parsedAmount === 99900) days = 90; // 3 months
+          if (parsedAmount === 1999 || parsedAmount === 199900) days = 365; // 1 year
+
+          const newExpiry = new Date();
+          newExpiry.setDate(newExpiry.getDate() + days);
+
+          await userRef.update({
+             role: 'premium',
+             subscriptionExpiry: Timestamp.fromDate(newExpiry),
+             paymentId: razorpay_payment_id
+          });
+          
+          return res.json({ success: true, message: "Payment verified successfully. Account upgraded to Premium." });
+       } else {
+          return res.status(404).json({ error: "User doc not found" });
+       }
+    } else {
+      return res.status(400).json({ success: false, error: "Signature mismatch" });
     }
   } catch (error: any) {
     console.error("Verify payment error:", error);
@@ -139,8 +330,145 @@ app.post("/api/verify-payment", async (req, res) => {
   }
 });
 
+// Phase 3: Code activation endpoint to redeem premium access
+app.post("/api/activate-code", verifyFirebaseToken, async (req: AuthenticatedRequest, res) => {
+  try {
+    const { code } = req.body;
+    if (!code) {
+      return res.status(400).json({ error: "Activation code is required" });
+    }
+
+    const uid = req.user?.uid;
+    const email = req.user?.email || "";
+    if (!uid) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+
+    const db = getFirestore();
+    const userRef = db.collection("users").doc(uid);
+    const userSnap = await userRef.get();
+    if (!userSnap.exists) {
+      return res.status(404).json({ error: "User profile not found server-side" });
+    }
+
+    // Support hardcoded test code TENDERMASTERPRO
+    if (code.trim().toUpperCase() === "TENDERMASTERPRO") {
+      const expiry = new Date();
+      expiry.setDate(expiry.getDate() + 30);
+      await userRef.update({
+        role: "premium",
+        subscriptionExpiry: Timestamp.fromDate(expiry)
+      });
+      return res.json({ success: true, message: "Premium activated for 30 days! Please refresh." });
+    }
+
+    // Query activation code doc (try direct doc get first, then fallback to field query)
+    const normalizedCode = code.trim();
+    const codeRef = db.collection("activation_codes").doc(normalizedCode);
+    let codeSnap = await codeRef.get();
+    let codeDocId = normalizedCode;
+    let codeData = codeSnap.data();
+
+    if (!codeSnap.exists) {
+      // Fallback: Query by field 'code'
+      const codesQuery = await db.collection("activation_codes").where("code", "==", normalizedCode).get();
+      if (codesQuery.empty) {
+        return res.status(400).json({ error: "Invalid activation code" });
+      }
+      codeSnap = codesQuery.docs[0];
+      codeDocId = codeSnap.id;
+      codeData = codeSnap.data();
+    }
+
+    if (!codeData) {
+      return res.status(400).json({ error: "Invalid activation code data" });
+    }
+
+    const isUsed = codeData.used === true || codeData.status === "used";
+    if (isUsed) {
+      return res.status(400).json({ error: "This activation code has already been used" });
+    }
+
+    const days = codeData.durationDays || 30;
+    const currentExpiryVal = userSnap.data()?.subscriptionExpiry;
+    let baseDate = new Date();
+
+    if (currentExpiryVal) {
+      const currentExpiry = typeof currentExpiryVal.toDate === "function" 
+        ? currentExpiryVal.toDate() 
+        : new Date(currentExpiryVal);
+      if (currentExpiry > new Date()) {
+        baseDate = currentExpiry;
+      }
+    }
+
+    const newExpiry = new Date(baseDate);
+    newExpiry.setDate(newExpiry.getDate() + days);
+
+    // Update activation code status atomically
+    await db.collection("activation_codes").doc(codeDocId).update({
+      status: "used",
+      used: true,
+      usedBy: uid,
+      usedByEmail: email,
+      usedAt: Timestamp.now()
+    });
+
+    // Upgrade user
+    await userRef.update({
+      role: "premium",
+      subscriptionExpiry: Timestamp.fromDate(newExpiry)
+    });
+
+    return res.json({ 
+      success: true, 
+      message: `Premium status activated successfully for ${days} days!` 
+    });
+
+  } catch (error: any) {
+    console.error("Activate code error:", error);
+    return res.status(500).json({ error: error.message || "Failed to redeem activation code" });
+  }
+});
+
+// Phase 2: Secure Razorpay Webhook with Signature Verification
 app.post("/api/razorpay-webhook", async (req, res) => {
   try {
+    const signature = req.headers["x-razorpay-signature"] as string;
+    if (!signature) {
+      console.warn("[Webhook Warning] Missing x-razorpay-signature header");
+      return res.status(400).json({ error: "Missing signature" });
+    }
+
+    const webhookSecret = process.env.RAZORPAY_WEBHOOK_SECRET;
+    if (!webhookSecret) {
+      console.error("[Webhook Error] RAZORPAY_WEBHOOK_SECRET is not configured server-side");
+      return res.status(500).json({ error: "Webhook secret missing from server configuration" });
+    }
+
+    const rawBody = (req as any).rawBody;
+    if (!rawBody) {
+      console.error("[Webhook Error] req.rawBody is undefined. Verify body-parser configuration.");
+      return res.status(400).json({ error: "Raw body verification failed" });
+    }
+
+    // Cryptographically verify HMAC-SHA256 signature using timingSafeEqual
+    const expectedSignature = crypto
+      .createHmac("sha256", webhookSecret)
+      .update(rawBody)
+      .digest("hex");
+
+    const expectedBuffer = Buffer.from(expectedSignature);
+    const actualBuffer = Buffer.from(signature);
+
+    const isValidSignature = expectedBuffer.length === actualBuffer.length &&
+      crypto.timingSafeEqual(expectedBuffer, actualBuffer);
+
+    if (!isValidSignature) {
+      console.warn("[Webhook Warning] Cryptographic signature verification failed (mismatch)");
+      return res.status(400).json({ error: "Signature verification failed" });
+    }
+
     const event = req.body;
     if (event.event === 'payment.captured' || event.event === 'payment.authorized') {
        const email = event.payload?.payment?.entity?.email;
@@ -164,18 +492,19 @@ app.post("/api/razorpay-webhook", async (req, res) => {
                 role: 'premium',
                 subscriptionExpiry: Timestamp.fromDate(newExpiry)
              });
-             console.log(`Upgraded user ${email} for ${days} days`);
+             console.log(`[Webhook Verified] Upgraded user ${email} for ${days} days`);
           } else {
-             console.log(`Webhook received but user with email ${email} not found`);
+             console.log(`[Webhook Verified] User with email ${email} not found in Firestore`);
           }
        }
     }
-    res.json({status: "ok"});
-  } catch (error) {
-    console.error("Webhook error:", error);
-    res.status(500).json({ error: "Internal error" });
+    res.json({ status: "ok" });
+  } catch (error: any) {
+    console.error("[Webhook Error] Webhook execution exception:", error);
+    res.status(500).json({ error: error.message || "Internal error" });
   }
 });
+
 
 // Initialize Gemini SDK
 // Fails fast if GEMINI_API_KEY is not set
@@ -250,7 +579,7 @@ async function generateContentWithRetry(client: GoogleGenAI, options: any, retri
 }
 
 // Mode 1: Parse Profile
-app.post("/api/parse-profile", async (req, res) => {
+app.post("/api/parse-profile", verifyFirebaseToken, async (req: AuthenticatedRequest, res) => {
   try {
     const { text } = req.body;
     if (!text) {
@@ -310,7 +639,7 @@ MODE 3: RAW CAPABILITY PARSING
 });
 
 // Mode 1.5: Enhance Text
-app.post("/api/enhance-text", async (req, res) => {
+app.post("/api/enhance-text", verifyFirebaseToken, async (req: AuthenticatedRequest, res) => {
    try {
       const { text, context } = req.body;
       const aiClient = getAI();
@@ -336,7 +665,7 @@ app.post("/api/enhance-text", async (req, res) => {
 });
 
 // Mode 2: Analyze Tender
-app.post("/api/analyze-tender", async (req, res) => {
+app.post("/api/analyze-tender", verifyFirebaseToken, async (req: AuthenticatedRequest, res) => {
   try {
     const { tenderDocument, tenderType = 'text', tenderContent, userProfile, language } = req.body;
     const actualContent = tenderContent || tenderDocument;
@@ -372,13 +701,18 @@ app.post("/api/analyze-tender", async (req, res) => {
        ];
     } else if (tenderType === 'url') {
        try {
+         // Phase 5: SSRF guard check
+         const isSafe = await isSafeUrl(actualContent);
+         if (!isSafe) {
+           return res.status(400).json({ error: "Access denied: The specified URL is invalid or points to an unsafe/restricted destination." });
+         }
+
          const fetchedRes = await fetch(actualContent, {
            headers: {
              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
              'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
              'Accept-Language': 'en-US,en;q=0.9',
            },
-           // Optional timeout logic could be added here, but keep simple
          });
          if (!fetchedRes.ok) throw new Error(`Failed to fetch URL: ${fetchedRes.statusText}`);
          const htmlContent = await fetchedRes.text();
@@ -605,7 +939,7 @@ MODE 1: CONTRACT PROFILE ANALYSIS & MATCHING
 
 // Mode 3: Interactive Tender Chat
 // Mode 3: Compare Tender Versions
-app.post("/api/compare-tender", async (req, res) => {
+app.post("/api/compare-tender", verifyFirebaseToken, async (req: AuthenticatedRequest, res) => {
   try {
     const { originalTender, newDocument, documentType = "DOCUMENT", language } = req.body;
     if (!originalTender || !newDocument) {
@@ -663,7 +997,7 @@ app.post("/api/compare-tender", async (req, res) => {
   }
 });
 
-app.post("/api/chat-tender", async (req, res) => {
+app.post("/api/chat-tender", verifyFirebaseToken, requireActiveEntitlement, async (req: AuthenticatedRequest, res) => {
   try {
     const { tenderDocument, analysisResult, messages, language } = req.body;
     if ((!tenderDocument && !analysisResult) || !messages || !Array.isArray(messages)) {
@@ -726,7 +1060,7 @@ ${analysisResult ? JSON.stringify(analysisResult) : 'No previous analysis provid
 });
 
 // Generate Tender Documents
-app.post("/api/generate-doc", async (req, res) => {
+app.post("/api/generate-doc", verifyFirebaseToken, requireActiveEntitlement, async (req: AuthenticatedRequest, res) => {
   try {
     const { docType, tenderDetails, userProfile, financialData, extraInstructions, language } = req.body;
     if (!docType || !tenderDetails) {

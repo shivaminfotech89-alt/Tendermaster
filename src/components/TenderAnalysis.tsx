@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { TenderAnalysisResult, UserProfile } from "../types";
 import { Loader2, ShieldCheck } from "lucide-react";
+import { fetchWithAuth } from "../lib/api";
 
 export default function TenderAnalysis({
   tenderDoc,
@@ -22,7 +23,7 @@ export default function TenderAnalysis({
     setAnalysis(null);
     
     try {
-      const res = await fetch("/api/analyze-tender", {
+      const res = await fetchWithAuth("/api/analyze-tender", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ tenderDocument: tenderDoc, userProfile: JSON.stringify(userProfile) }),

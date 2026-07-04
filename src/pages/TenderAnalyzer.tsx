@@ -10,6 +10,7 @@ import JSZip from "jszip";
 import * as XLSX from "xlsx";
 import { toast } from "react-hot-toast";
 import { useTranslation } from "react-i18next";
+import { fetchWithAuth } from "../lib/api";
 
 const CollapsibleSection = ({ title, defaultOpen = true, children }: { title: string, defaultOpen?: boolean, children: React.ReactNode }) => {
   const [isOpen, setIsOpen] = useState(defaultOpen);
@@ -223,7 +224,7 @@ export default function TenderAnalyzer() {
       const profile = userSnap.exists() ? userSnap.data() : { turnover: 0, experienceYears: 0 };
       setBusinessProfile(userSnap.exists() ? userSnap.data() : null);
 
-      const response = await fetch("/api/analyze-tender", {
+      const response = await fetchWithAuth("/api/analyze-tender", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 
@@ -327,7 +328,7 @@ export default function TenderAnalyzer() {
     setGeneratedDoc("Generating...");
     setIsEditingDoc(false);
     try {
-      const res = await fetch("/api/generate-doc", {
+      const res = await fetchWithAuth("/api/generate-doc", {
          method: "POST",
          headers: { "Content-Type": "application/json" },
          body: JSON.stringify({
@@ -365,7 +366,7 @@ export default function TenderAnalyzer() {
     setTimeout(() => chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
 
     try {
-      const response = await fetch("/api/chat-tender", {
+      const response = await fetchWithAuth("/api/chat-tender", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

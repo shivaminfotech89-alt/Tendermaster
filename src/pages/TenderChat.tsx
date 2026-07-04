@@ -6,6 +6,7 @@ import { MessageSquare, Search, Send, Loader2, ArrowLeft, FolderOpen } from "luc
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useTranslation } from "react-i18next";
+import { fetchWithAuth } from "../lib/api";
 
 export default function TenderChat() {
   const { user, role } = useAuth();
@@ -55,7 +56,7 @@ export default function TenderChat() {
     setChatLoading(true);
 
     try {
-      const res = await fetch("/api/chat-tender", {
+      const res = await fetchWithAuth("/api/chat-tender", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

@@ -10,6 +10,7 @@ import { toast } from "react-hot-toast";
 import { useTranslation } from "react-i18next";
 import { useAuth } from "../auth/AuthProvider";
 import { useAnalyzerStore } from "../context/AnalyzerContext";
+import { fetchWithAuth } from "../lib/api";
 
 export default function ProjectDetails() {
   const { projectId } = useParams();
@@ -130,7 +131,7 @@ export default function ProjectDetails() {
       const expenseTotal = materials.reduce((a, m) => a + (m.cost_num || 0), 0) + labour.reduce((a, l) => a + (l.cost_num || 0), 0);
       const payload = `--- CURRENT FINANCIAL STATE (MANUALLY UPDATED BY USER) ---\nBid Value / Revenue: ₹${revenue}\nTotal Expenses: ₹${expenseTotal}\n\nPlease critically re-analyze the bid recommendation and winning probability using these precise user-provided numbers.`;
         
-      const response = await fetch("/api/analyze-tender", {
+      const response = await fetchWithAuth("/api/analyze-tender", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 
@@ -202,7 +203,7 @@ export default function ProjectDetails() {
     try {
         const payload = `--- CURRENT STATE TO BE IMPROVED ---\n${JSON.stringify(project.details)}\n\nPlease re-analyze this tender from scratch and return the JSON. Ensure risk values and projections are thoroughly detailed.`;
         
-        const response = await fetch("/api/analyze-tender", {
+        const response = await fetchWithAuth("/api/analyze-tender", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ 
@@ -290,7 +291,7 @@ export default function ProjectDetails() {
              });
           }
           
-          const response = await fetch("/api/analyze-tender", {
+          const response = await fetchWithAuth("/api/analyze-tender", {
              method: "POST",
              headers: { "Content-Type": "application/json" },
              body: JSON.stringify({ 
@@ -349,7 +350,7 @@ export default function ProjectDetails() {
      setComparisonResult(null);
      
      try {
-       const res = await fetch("/api/compare-tender", {
+       const res = await fetchWithAuth("/api/compare-tender", {
          method: "POST",
          headers: { "Content-Type": "application/json" },
          body: JSON.stringify({
@@ -382,7 +383,7 @@ export default function ProjectDetails() {
     setGeneratedDoc("Generating...");
     setIsEditingDoc(false);
     try {
-      const res = await fetch("/api/generate-doc", {
+      const res = await fetchWithAuth("/api/generate-doc", {
          method: "POST",
          headers: { "Content-Type": "application/json" },
          body: JSON.stringify({
@@ -425,7 +426,7 @@ export default function ProjectDetails() {
     setTimeout(() => chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
 
     try {
-      const response = await fetch("/api/chat-tender", {
+      const response = await fetchWithAuth("/api/chat-tender", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

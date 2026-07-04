@@ -4,6 +4,7 @@ import { Save, Bell, Shield, Key, User, Settings2, Loader2, IndianRupee } from '
 import { db } from '../lib/firebase';
 import { doc, getDoc, updateDoc } from 'firebase/firestore';
 import { toast } from 'react-hot-toast';
+import { fetchWithAuth } from "../lib/api";
 
 export default function Settings() {
   const { user, role, subscriptionExpiry } = useAuth();
@@ -42,7 +43,7 @@ export default function Settings() {
       callbackUrl.searchParams.set("payment", "success");
       callbackUrl.searchParams.set("amount", amountInRupees.toString());
 
-      const response = await fetch('/api/create-payment-link', {
+      const response = await fetchWithAuth('/api/create-payment-link', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
@@ -81,20 +82,19 @@ export default function Settings() {
     if (!activationCode) return;
     setActivating(true);
     try {
-      const codeRef = doc(db, "activation_codes", activationCode);
-      const codeSnap = await getDoc(codeRef);
-      if (!codeSnap.exists() || codeSnap.data().status !== "active") {
-         throw new Error("Invalid or already used activation code");
+      const res = await fetchWithAuth('/api/activate-code', {
+        method: 'POST',
+        body: JSON.stringify({ code: activationCode })
+      });
+      if (!res.ok) {
+        const errData = await res.json();
+        throw new Error(errData.error || "Failed to redeem code");
       }
-      
-      // Update code
-      await updateDoc(codeRef, { status: "used", usedBy: user.email, usedAt: new Date() });
-      
-      // Upgrade user
-      await updateDoc(doc(db, "users", user.uid), { role: "premium" });
-      
-      toast.success("Success! Your account has been upgraded to PREMIUM. Please refresh the page.");
-      window.location.reload();
+      const data = await res.json();
+      toast.success(data.message || "Success! Your account has been upgraded to PREMIUM. Please refresh the page.");
+      setTimeout(() => {
+        window.location.reload();
+      }, 1500);
     } catch (e: any) {
       toast.error("Activation failed: " + e.message);
     } finally {
@@ -107,24 +107,44 @@ export default function Settings() {
     const params = new URLSearchParams(window.location.search);
     if (params.get('payment') === 'success') {
       const pId = params.get('razorpay_payment_id');
-      if (pId) {
-         toast.success("Payment completed successfully!");
-         const activatePremium = async () => {
+      const plId = params.get('razorpay_payment_link_id');
+      const refId = params.get('razorpay_payment_link_reference_id');
+      const status = params.get('razorpay_payment_link_status');
+      const sig = params.get('razorpay_signature');
+      const amount = params.get('amount') || "999";
+
+      if (pId && sig) {
+         const verifyPayment = async () => {
             if (user) {
+               toast.loading("Verifying payment security signature...");
                try {
-                 await updateDoc(doc(db, "users", user.uid), {
-                   role: "premium",
-                   subscriptionExpiry: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString(),
-                   paymentId: pId
+                 const res = await fetchWithAuth('/api/verify-payment', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                       razorpay_payment_id: pId,
+                       razorpay_payment_link_id: plId,
+                       razorpay_payment_link_reference_id: refId,
+                       razorpay_payment_link_status: status,
+                       razorpay_signature: sig,
+                       amount: amount
+                    })
                  });
-                 toast.success("Premium features activated!");
-                 setTimeout(() => window.location.href = "/settings", 2000);
-               } catch (e) {
-                 console.error(e);
+                 if (!res.ok) {
+                    const errData = await res.json();
+                    throw new Error(errData.error || "Payment verification failed");
+                 }
+                 toast.dismiss();
+                 toast.success("Payment verified! Your account is upgraded to Premium.");
+                 setTimeout(() => {
+                    window.location.href = "/settings";
+                 }, 2000);
+               } catch (e: any) {
+                 toast.dismiss();
+                 toast.error("Security verification failed: " + e.message);
                }
             }
          };
-         activatePremium();
+         verifyPayment();
       } else {
          toast.success("Payment link processed. Awaiting confirmation.");
       }

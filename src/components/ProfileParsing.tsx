@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { UserProfile } from "../types";
 import { Loader2, Zap, Save } from "lucide-react";
+import { fetchWithAuth } from "../lib/api";
 
 export default function ProfileParsing({
   userProfile,
@@ -24,7 +25,7 @@ export default function ProfileParsing({
     setError(null);
     
     try {
-      const res = await fetch("/api/parse-profile", {
+      const res = await fetchWithAuth("/api/parse-profile", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ text }),

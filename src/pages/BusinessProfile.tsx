@@ -5,6 +5,7 @@ import { db } from "../lib/firebase";
 import { Save, Loader2, Info, Sparkles, Crown, Key } from "lucide-react";
 import { toast } from "react-hot-toast";
 import { useTranslation } from "react-i18next";
+import { fetchWithAuth } from "../lib/api";
 
 export default function BusinessProfile() {
   const { user, role, subscriptionExpiry } = useAuth();
@@ -116,7 +117,7 @@ export default function BusinessProfile() {
      
      setEnhancing(field);
      try {
-       const response = await fetch("/api/enhance-text", {
+       const response = await fetchWithAuth("/api/enhance-text", {
          method: "POST",
          headers: { "Content-Type": "application/json" },
          body: JSON.stringify({
@@ -143,60 +144,28 @@ export default function BusinessProfile() {
     
     setActivating(true);
     try {
-      // Allow a test code or check db
-      if (activationCode.toUpperCase() === "TENDERMASTERPRO") {
-        const expiry = new Date();
-        expiry.setDate(expiry.getDate() + 30);
-        await updateDoc(doc(db, "users", user.uid), {
-          role: "premium",
-          subscriptionExpiry: expiry
-        });
-        toast.success("Premium activated for 30 days! Please refresh.");
-        setActivationCode("");
-        setActivating(false);
-        return;
-      }
-
-      const q = query(collection(db, "activation_codes"), where("code", "==", activationCode));
-      const snapshot = await getDocs(q);
-      
-      if (snapshot.empty) {
-        toast.error("Invalid activation code.");
-        setActivating(false);
-        return;
-      }
-      
-      const codeDoc = snapshot.docs[0];
-      const codeData = codeDoc.data();
-      
-      if (codeData.used) {
-        toast.error("This code has already been used.");
-        setActivating(false);
-        return;
-      }
-      
-      const days = codeData.durationDays || 30;
-      let newExpiry = subscriptionExpiry && subscriptionExpiry > new Date() ? new Date(subscriptionExpiry) : new Date();
-      newExpiry.setDate(newExpiry.getDate() + days);
-      
-      await updateDoc(doc(db, "users", user.uid), {
-        role: "premium",
-        subscriptionExpiry: newExpiry
+      const response = await fetchWithAuth("/api/activate-code", {
+        method: "POST",
+        body: JSON.stringify({ code: activationCode })
       });
       
-      await updateDoc(doc(db, "activation_codes", codeDoc.id), {
-        used: true,
-        usedBy: user.uid,
-        usedAt: new Date()
-      });
+      if (!response.ok) {
+        const errData = await response.json();
+        throw new Error(errData.error || "Failed to redeem code");
+      }
       
-      toast.success(`Premium activated for ${days} days! Please refresh.`);
+      const data = await response.json();
+      toast.success(data.message || "Premium activated! Please refresh.");
       setActivationCode("");
-    } catch (err) {
+      setTimeout(() => {
+         window.location.reload();
+      }, 1500);
+    } catch (err: any) {
       console.error(err);
-      toast.error("Failed to activate code.");
+      toast.error("Failed to activate code: " + err.message);
+    } finally {
+      setActivating(false);
     }
-    setActivating(false);
   };
 
   if (loading) return <div className="p-8 flex justify-center"><Loader2 className="w-8 h-8 animate-spin text-slate-400" /></div>;

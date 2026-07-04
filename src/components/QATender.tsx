@@ -2,6 +2,7 @@ import { useState } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Loader2, Send, MessageSquareText } from "lucide-react";
+import { fetchWithAuth } from "../lib/api";
 
 export default function QATender({
   tenderDoc,
@@ -26,7 +27,7 @@ export default function QATender({
     setError(null);
     
     try {
-      const res = await fetch("/api/qa-tender", {
+      const res = await fetchWithAuth("/api/qa-tender", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ tenderDocument: tenderDoc, question: userQ }),

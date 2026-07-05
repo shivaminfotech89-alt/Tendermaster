@@ -1,10 +1,10 @@
 {
-  "projectId": "gen-lang-client-0926506821",
-  "appId": "1:323694169586:web:cbfb4ac5a3c1df7474af6b",
-  "apiKey": "AIzaSyDgFodBd0f4BTY_hff_1hqv93MUO5nS_fs",
-  "authDomain": "gen-lang-client-0926506821.firebaseapp.com",
-  "firestoreDatabaseId": "ai-studio-c4e31b45-0537-4d35-9963-ee2ad83145d3",
-  "storageBucket": "gen-lang-client-0926506821.firebasestorage.app",
-  "messagingSenderId": "323694169586",
+  "projectId": "tendermaster-ai",
+  "appId": "1:948388661079:web:aab521874d403fdb296012",
+  "apiKey": "AIzaSyDM3T2L7OKgUNDTk2P-g1XCuJxIGpZQEjQ",
+  "authDomain": "tendermaster-ai.firebaseapp.com",
+  "firestoreDatabaseId": "ai-studio-tender2-c4e31b45-0537-4d35-9963-ee2ad83145d3",
+  "storageBucket": "tendermaster-ai.firebasestorage.app",
+  "messagingSenderId": "948388661079",
   "measurementId": ""
 }

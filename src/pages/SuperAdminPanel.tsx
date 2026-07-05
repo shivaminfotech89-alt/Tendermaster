@@ -4,6 +4,7 @@ import { db } from "../lib/firebase";
 import { collection, query, getDocs, doc, setDoc, getDoc, updateDoc, deleteDoc } from "firebase/firestore";
 import { Shield, Key, FileText, UserPlus, Trash2, Edit2, Loader2, IndianRupee } from "lucide-react";
 import { toast } from "react-hot-toast";
+import { fetchWithAuth } from "../lib/api";
 
 export default function SuperAdminPanel() {
   const { user } = useAuth();
@@ -24,8 +25,11 @@ export default function SuperAdminPanel() {
 
   useEffect(() => {
     fetchSettings();
-    if (activeTab === "admins") fetchUsers();
-  }, [activeTab]);
+  }, []);
+
+  useEffect(() => {
+    fetchUsers();
+  }, []);
 
   const fetchSettings = async () => {
     try {
@@ -144,7 +148,7 @@ export default function SuperAdminPanel() {
       </div>
 
       <div className="flex bg-white rounded-lg p-1 border border-slate-200 mb-8 inline-flex">
-        <button onClick={() => setActiveTab("admins")} className={`px-4 py-2 rounded-md font-medium text-sm transition-colors ${activeTab === 'admins' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-50'}`}>Admin Accounts</button>
+        <button onClick={() => setActiveTab("admins")} className={`px-4 py-2 rounded-md font-medium text-sm transition-colors ${activeTab === 'admins' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-50'}`}>Users & Roles</button>
         <button onClick={() => setActiveTab("plans")} className={`px-4 py-2 rounded-md font-medium text-sm transition-colors ${activeTab === 'plans' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-50'}`}>Plans & Pricing</button>
         <button onClick={() => setActiveTab("logs")} className={`px-4 py-2 rounded-md font-medium text-sm transition-colors ${activeTab === 'logs' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-50'}`}>Activity Logs</button>
       </div>

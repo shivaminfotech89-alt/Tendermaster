@@ -62,38 +62,38 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             }
           }
 
-          unsubscribeSnapshot = onSnapshot(userDocRef, async (snap) => {
-            let currentRole = "free";
-            let currentExpiry = null;
+          
+
+          
+          // Use Firestore user document for role mapping
+          unsubscribeSnapshot = onSnapshot(userDocRef, (snap) => {
             if (snap.exists()) {
               const data = snap.data();
-              currentRole = data.role || "free";
-              if (data.subscriptionExpiry) {
-                currentExpiry = data.subscriptionExpiry.toDate();
-                if (currentRole === "premium" && currentExpiry < new Date()) {
-                  currentRole = "free";
-                  try {
-                    await setDoc(userDocRef, { role: "free" }, { merge: true });
-                  } catch(e) {}
-                }
+              let docRole = data.role || "free";
+              let docExpiry = data.subscriptionExpiry ? data.subscriptionExpiry.toDate() : null;
+              
+              // Hardcoded superadmin email check
+              if (firebaseUser.email === "shivaminfotech89@gmail.com") {
+                docRole = "superadmin";
               }
-            }
-
-            if (firebaseUser.email === "shivaminfotech89@gmail.com") {
-              currentRole = "superadmin";
-              try {
-                await setDoc(userDocRef, { role: "superadmin" }, { merge: true });
-              } catch (err) {
-                console.log("Superadmin role set locally (firestore write rejected by rules, but local role granted).");
+              
+              if (docRole === "premium" && docExpiry && docExpiry < new Date()) {
+                 docRole = "free";
               }
+              setRole(docRole);
+              setSubscriptionExpiry(docExpiry);
+            } else {
+               if (firebaseUser.email === "shivaminfotech89@gmail.com") {
+                  setRole("superadmin");
+               } else {
+                  setRole("free");
+               }
+               setSubscriptionExpiry(null);
             }
-            
-            setRole(currentRole as any);
-            setSubscriptionExpiry(currentExpiry);
-            setLoading(false);
           });
+          setLoading(false);
         } catch (error) {
-          console.error("Error fetching user role", error);
+          console.error("Error fetching user claims", error);
           setRole("free");
           setSubscriptionExpiry(null);
           setLoading(false);

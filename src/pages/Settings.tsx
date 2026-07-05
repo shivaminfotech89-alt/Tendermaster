@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../auth/AuthProvider';
-import { Save, Bell, Shield, Key, User, Settings2, Loader2, IndianRupee } from 'lucide-react';
+import { ExternalLink, Save, Bell, Shield, Key, User, Settings2, Loader2, IndianRupee } from 'lucide-react';
 import { db } from '../lib/firebase';
 import { doc, getDoc, updateDoc } from 'firebase/firestore';
 import { toast } from 'react-hot-toast';
@@ -143,11 +143,13 @@ export default function Settings() {
                  if (data.success && data.newExpiry) {
                     const { doc, updateDoc, Timestamp } = await import('firebase/firestore');
                     const { db } = await import('../lib/firebase');
-                    await updateDoc(doc(db, 'users', user.uid), {
-                       role: 'premium',
-                       subscriptionExpiry: Timestamp.fromDate(new Date(data.newExpiry)),
-                       paymentId: pId
-                    });
+                    if (user) {
+                       await updateDoc(doc(db, 'users', user.uid), {
+                          role: 'premium',
+                          subscriptionExpiry: Timestamp.fromDate(new Date(data.newExpiry)),
+                          paymentId: pId
+                       });
+                    }
                  }
                  toast.dismiss();
                  toast.success("Payment verified! Your account is upgraded to Premium.");
@@ -340,10 +342,49 @@ export default function Settings() {
            )}
            
            {activeTab === "preferences" && (
-              <div className="max-w-md space-y-6">
+              <div className="max-w-2xl space-y-6">
                  <div>
                     <h2 className="text-xl font-bold text-slate-900">General Preferences</h2>
-                    <p className="text-sm text-slate-500 mt-1">Configure your app experience.</p>
+                    <p className="text-sm text-slate-500 mt-1">Configure your app experience and notifications.</p>
+                 </div>
+                 
+                 <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+                    <div className="p-6 border-b border-slate-100 flex items-center justify-between">
+                       <div>
+                          <h3 className="font-semibold text-slate-900">Email Notifications</h3>
+                          <p className="text-sm text-slate-500 mt-1">Receive updates about new tenders and analysis results.</p>
+                       </div>
+                       <label className="relative inline-flex items-center cursor-pointer">
+                          <input type="checkbox" className="sr-only peer" defaultChecked />
+                          <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                       </label>
+                    </div>
+                    <div className="p-6 border-b border-slate-100 flex items-center justify-between">
+                       <div>
+                          <h3 className="font-semibold text-slate-900">Weekly Digest</h3>
+                          <p className="text-sm text-slate-500 mt-1">Get a weekly summary of matching tenders and insights.</p>
+                       </div>
+                       <label className="relative inline-flex items-center cursor-pointer">
+                          <input type="checkbox" className="sr-only peer" defaultChecked />
+                          <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                       </label>
+                    </div>
+                 </div>
+
+                 <div>
+                    <h2 className="text-xl font-bold text-slate-900 mt-8">Legal & Compliance</h2>
+                    <p className="text-sm text-slate-500 mt-1">Important documents and policies.</p>
+                 </div>
+
+                 <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+                    <button onClick={() => window.open('/privacy', '_blank')} className="w-full p-4 border-b border-slate-100 flex items-center justify-between hover:bg-slate-50 transition-colors">
+                       <span className="font-medium text-slate-800">Privacy Policy</span>
+                       <ExternalLink className="w-4 h-4 text-slate-400" />
+                    </button>
+                    <button onClick={() => window.open('/terms', '_blank')} className="w-full p-4 flex items-center justify-between hover:bg-slate-50 transition-colors">
+                       <span className="font-medium text-slate-800">Terms & Conditions</span>
+                       <ExternalLink className="w-4 h-4 text-slate-400" />
+                    </button>
                  </div>
               </div>
            )}

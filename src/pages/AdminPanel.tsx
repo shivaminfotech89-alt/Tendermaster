@@ -3,6 +3,7 @@ import { useState, useEffect } from "react";
 import { db } from "../lib/firebase";
 import { collection, doc, setDoc, query, getDocs, updateDoc } from "firebase/firestore";
 import { toast } from "react-hot-toast";
+import { fetchWithAuth } from "../lib/api";
 
 export default function AdminPanel() {
   const [activeTab, setActiveTab] = useState("dashboard");
@@ -45,44 +46,40 @@ export default function AdminPanel() {
   const [usersLoading, setUsersLoading] = useState(false);
 
   useEffect(() => {
-    if (activeTab === "users") {
-      const fetchUsers = async () => {
-        setUsersLoading(true);
-        try {
-          const snap = await getDocs(query(collection(db, "users")));
-          const userList = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }))
-            .sort((a: any, b: any) => (b.createdAt?.toMillis() || 0) - (a.createdAt?.toMillis() || 0));
-          setUsers(userList);
-        } catch (e) {
-          console.error(e);
-        }
-        setUsersLoading(false);
-      };
-      fetchUsers();
-    }
-  }, [activeTab]);
+    const fetchUsers = async () => {
+      setUsersLoading(true);
+      try {
+        const snap = await getDocs(query(collection(db, "users")));
+        const userList = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }))
+          .sort((a: any, b: any) => (b.createdAt?.toMillis() || 0) - (a.createdAt?.toMillis() || 0));
+        setUsers(userList);
+      } catch (e) {
+        console.error(e);
+      }
+      setUsersLoading(false);
+    };
+    fetchUsers();
+  }, []);
 
-  const handleActivateUser = async (userId: string, days: number) => {
+  const updateRole = async (userId: string, newRole: string, days?: number) => {
     try {
-      if (days === 0) {
-        await updateDoc(doc(db, "users", userId), {
-          role: "free",
-          subscriptionExpiry: null
-        });
-        setUsers(users.map(u => u.id === userId ? { ...u, role: "free", subscriptionExpiry: null } : u));
-        toast.success(`User downgraded to free plan`);
-      } else {
+      if (newRole === 'premium' && days) {
         const newExpiry = new Date();
         newExpiry.setDate(newExpiry.getDate() + days);
-        await updateDoc(doc(db, "users", userId), {
-          role: "premium",
-          subscriptionExpiry: newExpiry
-        });
-        setUsers(users.map(u => u.id === userId ? { ...u, role: "premium", subscriptionExpiry: { toDate: () => newExpiry } } : u));
+        await updateDoc(doc(db, "users", userId), { role: newRole, subscriptionExpiry: newExpiry });
+        setUsers(users.map(u => u.id === userId ? { ...u, role: newRole, subscriptionExpiry: { toDate: () => newExpiry } } : u));
         toast.success(`User activated for ${days} days`);
+      } else if (newRole === 'free') {
+        await updateDoc(doc(db, "users", userId), { role: newRole, subscriptionExpiry: null });
+        setUsers(users.map(u => u.id === userId ? { ...u, role: newRole, subscriptionExpiry: null } : u));
+        toast.success("User downgraded to free plan");
+      } else {
+        await updateDoc(doc(db, "users", userId), { role: newRole });
+        setUsers(users.map(u => u.id === userId ? { ...u, role: newRole } : u));
+        toast.success(`User granted ${newRole} role`);
       }
     } catch (error: any) {
-      toast.error("Failed to activate user: " + error.message);
+      toast.error("Failed to update user: " + error.message);
     }
   };
 
@@ -183,7 +180,7 @@ export default function AdminPanel() {
                 </div>
              </div>
              <p className="text-sm font-medium text-slate-400 uppercase tracking-widest">Total Users</p>
-             <h3 className="text-3xl font-black mt-1">1,204</h3>
+             <h3 className="text-3xl font-black mt-1">{users.length}</h3>
           </div>
 
           <div className="bg-slate-900 text-white p-6 rounded-xl shadow-sm border border-slate-800">
@@ -390,10 +387,15 @@ export default function AdminPanel() {
                           {u.createdAt?.toDate ? u.createdAt.toDate().toLocaleDateString() : 'N/A'}
                         </td>
                         <td className="p-3 text-right">
-                          <div className="flex justify-end gap-2">
-                            <button onClick={() => handleActivateUser(u.id, 90)} className="px-3 py-1 bg-emerald-100 hover:bg-emerald-200 text-emerald-700 text-xs font-bold rounded transition-colors">3 Months</button>
-                            <button onClick={() => handleActivateUser(u.id, 365)} className="px-3 py-1 bg-indigo-100 hover:bg-indigo-200 text-indigo-700 text-xs font-bold rounded transition-colors">1 Year</button>
-                            <button onClick={() => handleActivateUser(u.id, 0)} className="px-3 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded transition-colors">Free</button>
+                          <div className="flex flex-wrap justify-end gap-2">
+                            {u.role !== 'admin' && <button onClick={() => updateRole(u.id, 'admin')} className="px-3 py-1 bg-blue-100 text-blue-700 text-xs font-bold rounded hover:bg-blue-200">Make Admin</button>}
+                            {u.role !== 'free' && <button onClick={() => updateRole(u.id, 'free')} className="px-3 py-1 bg-slate-100 text-slate-700 text-xs font-bold rounded hover:bg-slate-200">Make Free</button>}
+                            {u.role !== 'premium' && (
+                               <>
+                                 <button onClick={() => updateRole(u.id, 'premium', 90)} className="px-3 py-1 bg-emerald-100 text-emerald-700 text-xs font-bold rounded hover:bg-emerald-200">3 Months</button>
+                                 <button onClick={() => updateRole(u.id, 'premium', 365)} className="px-3 py-1 bg-indigo-100 text-indigo-700 text-xs font-bold rounded hover:bg-indigo-200">1 Year</button>
+                               </>
+                            )}
                           </div>
                         </td>
                       </tr>

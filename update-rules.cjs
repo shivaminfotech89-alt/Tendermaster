@@ -1,4 +1,5 @@
-rules_version = '2';
+const fs = require('fs');
+const rules = `rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     match /{document=**} {
@@ -8,31 +9,22 @@ service cloud.firestore {
     function isSignedIn() { return request.auth != null; }
     function isOwner(userId) { return request.auth.uid == userId; }
     
-    function getUserRole() { 
-       return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role; 
-    }
-    
+    // Phase 5: Admin checks based on token claims instead of Firestore lookup
     function isAdmin() { 
-      return isSignedIn() && (
-        getUserRole() == 'admin' || 
-        getUserRole() == 'superadmin' || 
-        request.auth.token.email == 'shivaminfotech89@gmail.com'
-      ); 
+      return isSignedIn() && 
+        (request.auth.token.role == 'admin' || request.auth.token.role == 'superadmin'); 
     }
     
     function isSuperAdmin() { 
-      return isSignedIn() && (
-        getUserRole() == 'superadmin' ||
-        request.auth.token.email == 'shivaminfotech89@gmail.com'
-      ); 
+      return isSignedIn() && request.auth.token.role == 'superadmin'; 
     }
 
     match /users/{userId} {
       allow read: if isSignedIn() && (isOwner(userId) || isAdmin());
-      // Admins and SuperAdmins can update users
+      // Phase 5: Disallow role and subscriptionExpiry updates from ANY client
       allow update: if isSignedIn() && (
-        isSuperAdmin() || isAdmin() || 
-        (isOwner(userId) && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role', 'subscriptionExpiry']))
+        (isOwner(userId) || isAdmin() || isSuperAdmin()) && 
+        !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role', 'subscriptionExpiry'])
       );
       allow create: if isSignedIn() && 
          request.resource.data.role == 'free' && 
@@ -85,3 +77,5 @@ service cloud.firestore {
     }
   }
 }
+`;
+fs.writeFileSync('firestore.rules', rules);

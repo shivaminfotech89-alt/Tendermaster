@@ -145,11 +145,11 @@ export default function Layout() {
       </main>
 
       {/* Global Analysis Progress Indicator (Only visible outside of analyzer page or when processing) */}
-      {!hidePopup && (isGlobalAnalyzing || (analysisResult && location.pathname !== '/analyzer' && !location.pathname.startsWith('/projects/'))) && (
+      {!hidePopup && (isGlobalAnalyzing || (analysisResult && location.pathname !== '/analyzer' && !location.pathname.startsWith('/dashboard/projects/'))) && (
         <div 
           onClick={() => {
             if (reanalyzing) return; // Stay on project page if reanalyzing
-            navigate('/analyzer');
+            navigate('/dashboard/analyzer');
           }}
           className="fixed top-4 right-4 md:top-6 md:right-6 bg-white border border-blue-200 shadow-xl rounded-xl p-4 flex items-center gap-4 cursor-pointer hover:shadow-2xl transition-all z-50 group hover:border-blue-400"
         >

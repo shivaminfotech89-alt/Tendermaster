@@ -93,7 +93,7 @@ export default function TenderChat() {
            <h2 className="text-2xl font-bold text-slate-900 mb-2">{t("locked_feature")}</h2>
            <p className="text-slate-600 mb-6">{t("premium_required")}</p>
            <button 
-             onClick={() => window.location.href = '/profile'}
+             onClick={() => window.location.href = '/dashboard/profile'}
              className="bg-amber-500 hover:bg-amber-600 text-white px-6 py-3 rounded-lg font-bold shadow-sm transition-colors w-full"
            >
              {t("upgrade_to_premium")}

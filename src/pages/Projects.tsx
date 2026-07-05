@@ -70,7 +70,7 @@ export default function Projects() {
                      const isActive = t.details?.tender_simplified?.is_active ?? true;
                      
                      return (
-                    <tr key={t.id} className="hover:bg-slate-50/50 cursor-pointer transition-colors" onClick={() => navigate(`/projects/${t.id}`)}>
+                    <tr key={t.id} className="hover:bg-slate-50/50 cursor-pointer transition-colors" onClick={() => navigate(`/dashboard/projects/${t.id}`)}>
                        <td className="p-4 pl-6 font-medium text-slate-900 max-w-xs">
                          <div className="line-clamp-2 text-sm text-blue-800 font-bold mb-1">{t.projectName || "Unnamed Project"}</div>
                          <div className="text-xs text-slate-500 line-clamp-1" title={tenderTitle}>{tenderTitle}</div>

@@ -500,10 +500,10 @@ async function generateContentWithRetry(client: GoogleGenAI, options: any, retri
          isRetryable = true;
          
          // Fallback to older model if quota is hit to avoid completely blocking the user
-         if (options.model === "gemini-2.5-flash") {
-             options.model = "gemini-2.0-flash";
+         if (options.model === "gemini-3.5-flash") {
+             options.model = "gemini-3.1-flash-lite";
              modelChanged = true;
-             console.warn(`[AI Engine] Falling back to gemini-2.0-flash due to quota/rate limit.`);
+             console.warn(`[AI Engine] Falling back to gemini-3.1-flash-lite due to quota/rate limit.`);
          } else {
              // Exhausted fallbacks, if it's still a quota error, just throw
              if (isQuotaError) throw err;
@@ -559,7 +559,7 @@ MODE 3: RAW CAPABILITY PARSING
 }`;
 
     const response = await generateContentWithRetry(aiClient, {
-      model: "gemini-2.5-flash",
+      model: "gemini-3.5-flash",
       contents: [text],
       config: {
          systemInstruction,
@@ -609,7 +609,7 @@ app.post("/api/enhance-text", verifyFirebaseToken, async (req: AuthenticatedRequ
       Provide ONLY the enhanced text, nothing else.`;
 
       const response = await generateContentWithRetry(aiClient, {
-         model: "gemini-2.5-flash",
+         model: "gemini-3.5-flash",
          contents: [prompt],
       });
       
@@ -761,7 +761,7 @@ MODE 1: CONTRACT PROFILE ANALYSIS & MATCHING
 }`;
 
     const response = await generateContentWithRetry(aiClient, {
-      model: "gemini-2.5-flash",
+      model: "gemini-3.5-flash",
       contents: docContents,
       config: {
         systemInstruction,
@@ -925,7 +925,7 @@ app.post("/api/compare-tender", verifyFirebaseToken, async (req: AuthenticatedRe
     const systemInstruction = `You are a Tender Document Comparison Engine. Compare the Original Tender Details against the New ${safeDocType} uploaded by the user. Highlight EXACTLY what changed. Outputs must be clear and direct.${language && language !== 'en' ? `\nCRITICAL LANGUAGE REQUIREMENT: You MUST output all content STRICTLY in ${language === 'hi' ? 'Hindi' : language === 'gu' ? 'Gujarati' : language}.` : `\nCRITICAL LANGUAGE REQUIREMENT: You MUST output all content STRICTLY in English.`}`;
 
     const response = await generateContentWithRetry(aiClient, {
-      model: "gemini-2.5-flash",
+      model: "gemini-3.5-flash",
       contents: [{ role: 'user', parts: docContents.map(d => typeof d === 'string' ? {text: d || " "} : d) }],
       config: {
         systemInstruction,
@@ -1001,7 +1001,7 @@ ${analysisResult ? JSON.stringify(analysisResult) : 'No previous analysis provid
     const systemInstruction = { parts: [{ text: instructionText }] };
 
     const response = await generateContentWithRetry(aiClient, {
-      model: "gemini-2.5-flash",
+      model: "gemini-3.5-flash",
       contents: formattedContents,
       config: {
         systemInstruction,
@@ -1056,7 +1056,7 @@ ${JSON.stringify(tenderDetails)}
     const prompt = docPromptInstructions;
 
     const response = await generateContentWithRetry(aiClient, {
-      model: "gemini-2.5-flash",
+      model: "gemini-3.5-flash",
       contents: [{ role: 'user', parts: [{ text: prompt || " " }] }],
       config: {
         systemInstruction,

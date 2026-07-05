@@ -441,7 +441,7 @@ export default function TenderAnalyzer() {
       </div>
 
       <button 
-        onClick={() => window.location.href = '/settings'}
+        onClick={() => window.location.href = '/dashboard/settings'}
         className="bg-amber-500 hover:bg-amber-600 text-white px-6 py-3 rounded-lg font-bold shadow-sm transition-colors"
       >
         Go to Settings to Upgrade

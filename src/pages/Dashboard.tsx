@@ -63,7 +63,7 @@ export default function Dashboard() {
           <p className="text-slate-500 mt-1">Here's your strategic tender intelligence overview.</p>
         </div>
         <Link 
-          to="/analyzer" 
+          to="/dashboard/analyzer" 
           className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2.5 rounded-lg font-semibold shadow-sm flex items-center gap-2 transition-colors"
         >
           <FileSearch className="w-5 h-5" />
@@ -74,7 +74,7 @@ export default function Dashboard() {
       {/* KPI Cards */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
         <div 
-          onClick={() => navigate('/projects')}
+          onClick={() => navigate('/dashboard/projects')}
           className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm cursor-pointer hover:border-blue-300 hover:shadow-md transition-all group"
         >
           <div className="w-12 h-12 rounded-full bg-blue-50 group-hover:bg-blue-100 flex items-center justify-center text-blue-600 mb-4 transition-colors">
@@ -88,7 +88,7 @@ export default function Dashboard() {
         </div>
         
         <div 
-          onClick={() => navigate('/projects')}
+          onClick={() => navigate('/dashboard/projects')}
           className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm cursor-pointer hover:border-emerald-300 hover:shadow-md transition-all group"
         >
           <div className="w-12 h-12 rounded-full bg-emerald-50 group-hover:bg-emerald-100 flex items-center justify-center text-emerald-600 mb-4 transition-colors">
@@ -102,7 +102,7 @@ export default function Dashboard() {
         </div>
         
         <div 
-           onClick={() => navigate('/notifications')}
+           onClick={() => navigate('/dashboard/notifications')}
            className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm cursor-pointer hover:border-amber-300 hover:shadow-md transition-all group"
         >
           <div className="w-12 h-12 rounded-full bg-amber-50 group-hover:bg-amber-100 flex items-center justify-center text-amber-600 mb-4 transition-colors relative">

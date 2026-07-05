@@ -156,10 +156,10 @@ export default function AdminPanel() {
           <p className="text-slate-500 mt-1">Platform management and daily operations.</p>
         </div>
         <button 
-          onClick={() => window.location.href = "/"}
+          onClick={() => window.location.href = "/dashboard"}
           className="px-4 py-2 bg-slate-100 text-slate-700 hover:bg-slate-200 rounded-lg font-medium transition-colors border border-slate-200"
         >
-          Back to Main App
+          Back to Dashboard
         </button>
       </div>
 

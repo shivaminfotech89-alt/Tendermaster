@@ -154,7 +154,7 @@ export default function Settings() {
                  toast.dismiss();
                  toast.success("Payment verified! Your account is upgraded to Premium.");
                  setTimeout(() => {
-                    window.location.href = "/settings";
+                    window.location.href = "/dashboard/settings";
                  }, 2000);
                } catch (e: any) {
                  toast.dismiss();

@@ -175,7 +175,7 @@ export default function ProjectDetails() {
     try {
       await deleteDoc(doc(db, "saved_tenders", projectId));
       setShowDeleteModal(false);
-      navigate("/projects");
+      navigate("/dashboard/projects");
     } catch (e: any) {
       console.error(e);
       toast.error("Failed to delete project: " + e.message);

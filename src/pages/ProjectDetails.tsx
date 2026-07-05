@@ -956,7 +956,7 @@ export default function ProjectDetails() {
                 )}
                 
                 {/* Financial Summary */}
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                   <div className="bg-white p-4 rounded-xl border border-slate-200">
                      <p className="text-xs font-bold text-slate-500 uppercase">Estimated Revenue (Bid Value)</p>
                      <div className="flex items-center mt-2">
@@ -986,6 +986,23 @@ export default function ProjectDetails() {
                           {((estimatedProfit / revenue) * 100).toFixed(1)}% Margin
                         </p>
                      )}
+                  </div>
+                  <div className="bg-white p-4 rounded-xl border border-slate-200">
+                     <p className="text-xs font-bold text-slate-500 uppercase">Target Margin (%) &rarr; Auto Bid</p>
+                     <div className="flex items-center mt-2">
+                       <input 
+                         type="number"
+                         placeholder="e.g. 15"
+                         onChange={e => {
+                            const margin = Number(e.target.value);
+                            if (margin > 0 && margin < 100) {
+                               setRevenue(Math.round(totalExpense / (1 - margin / 100)));
+                            }
+                         }}
+                         className="bg-transparent border-0 font-bold text-2xl text-slate-900 w-full p-0 focus:ring-0 outline-none"
+                       />
+                       <span className="text-slate-400 ml-1 text-lg font-bold">%</span>
+                     </div>
                   </div>
                 </div>
 
@@ -1405,7 +1422,7 @@ export default function ProjectDetails() {
                         </div>
                      </div>
                      
-                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                     <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                         <div className="p-4 border border-amber-200 bg-amber-50 rounded-xl">
                            <p className="text-xs font-bold uppercase text-amber-700 tracking-wider mb-1">Changed Dates</p>
                            {comparisonResult.changed_dates?.map((d: string, j: number) => <p key={j} className="text-sm font-medium text-amber-900">{d}</p>)}

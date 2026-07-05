@@ -869,7 +869,7 @@ MODE 1: CONTRACT PROFILE ANALYSIS & MATCHING
                  risk_level: { type: "string" },
                  rationale: { type: "string" }
                },
-               required: ["conservative", "recommended", "aggressive", "margin_range", "risk_level", "rationale"]
+               required: ["estimated_value", "conservative", "safe_range", "recommended", "aggressive", "margin_range", "risk_level", "rationale"]
              },
              winning_probability: {
                type: "object",

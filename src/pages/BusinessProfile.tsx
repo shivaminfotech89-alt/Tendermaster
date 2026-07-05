@@ -64,6 +64,7 @@ export default function BusinessProfile() {
     services: "",
     keywords: "",
     turnover: "",
+    turnoverUnit: "Lakhs",
     experienceYears: "",
     certifications: "",
     majorClients: "", letterheadHeader: "", letterheadFooter: "", letterheadBackgroundImage: "",
@@ -87,6 +88,7 @@ export default function BusinessProfile() {
              products: data.products?.join(", ") || "",
              services: data.services?.join(", ") || "",
              keywords: data.keywords?.join(", ") || "",
+             turnoverUnit: data.turnoverUnit || "Lakhs",
              certifications: data.certifications?.join(", ") || "",
              majorClients: data.majorClients?.join(", ") || "",
           }));
@@ -130,6 +132,7 @@ export default function BusinessProfile() {
         certifications: profile.certifications.split(",").map(s => s.trim()).filter(Boolean),
         majorClients: profile.majorClients.split(",").map(s => s.trim()).filter(Boolean),
         turnover: Number(profile.turnover) || 0,
+        turnoverUnit: profile.turnoverUnit || "Lakhs",
         experienceYears: Number(profile.experienceYears) || 0,
       };
       await setDoc(doc(db, "business_profiles", user.uid), dataToSave);
@@ -314,8 +317,14 @@ export default function BusinessProfile() {
             </div>
             
             <div className="flex flex-col gap-2">
-               <label className="text-sm font-semibold text-slate-700">Annual Turnover (INR in Lakhs)</label>
-               <input name="turnover" type="number" value={profile.turnover} onChange={handleChange} className="border border-slate-300 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 outline-none" min="0" />
+               <label className="text-sm font-semibold text-slate-700">Annual Turnover</label>
+               <div className="flex gap-2">
+                 <input name="turnover" type="number" value={profile.turnover} onChange={handleChange} className="border border-slate-300 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 outline-none flex-1" min="0" placeholder="Amount" />
+                 <select name="turnoverUnit" value={profile.turnoverUnit} onChange={handleChange} className="border border-slate-300 rounded-lg px-3 py-2 bg-slate-50 outline-none">
+                   <option value="Lakhs">Lakhs</option>
+                   <option value="Crores">Crores</option>
+                 </select>
+               </div>
             </div>
             <div className="flex flex-col gap-2">
                <label className="text-sm font-semibold text-slate-700">Years of Experience</label>

@@ -10,6 +10,7 @@ import BusinessProfile from "./pages/BusinessProfile";
 import AdminPanel from "./pages/AdminPanel";
 import SuperAdminPanel from "./pages/SuperAdminPanel";
 import Login from "./pages/Login";
+import LandingPage from "./pages/LandingPage";
 import ProjectDetails from "./pages/ProjectDetails";
 import TenderChat from "./pages/TenderChat";
 
@@ -58,11 +59,12 @@ export default function App() {
         <AnalyzerProvider>
           <BrowserRouter>
             <Routes>
+              <Route path="/" element={<LandingPage />} />
               <Route path="/login" element={<Login />} />
               <Route path="/terms" element={<TermsAndConditions />} />
               <Route path="/privacy" element={<PrivacyPolicy />} />
               
-              <Route path="/" element={<ProtectedRoute><Layout /></ProtectedRoute>}>
+              <Route path="/dashboard" element={<ProtectedRoute><Layout /></ProtectedRoute>}>
                 <Route index element={<Dashboard />} />
                 <Route path="projects" element={<Projects />} />
                 <Route path="analyzer" element={<TenderAnalyzer />} />

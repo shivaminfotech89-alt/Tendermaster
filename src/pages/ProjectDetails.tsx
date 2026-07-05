@@ -477,7 +477,7 @@ export default function ProjectDetails() {
       const element = document.getElementById('report-container');
       
       const opt = {
-        margin:       0.3,
+        margin:       [0.3, 0.3, 0.8, 0.3],
         filename:     `${projectName.replace(/[^a-z0-9]/gi, '_').toLowerCase()}_report.pdf`,
         image:        { type: 'jpeg' as const, quality: 0.98 },
         html2canvas:  { scale: 2, useCORS: true, windowWidth: 1024 },
@@ -517,7 +517,7 @@ export default function ProjectDetails() {
       
       {/* Header */}
       <div>
-        <Link to="/" className="inline-flex items-center text-sm font-medium text-blue-600 hover:text-blue-800 mb-4">
+        <Link to="/dashboard" className="inline-flex items-center text-sm font-medium text-blue-600 hover:text-blue-800 mb-4">
           <ArrowLeft className="w-4 h-4 mr-1" /> Back to Dashboard
         </Link>
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
@@ -727,8 +727,8 @@ export default function ProjectDetails() {
                                    bodyPadding = '0 20mm'; // Add side margins via body padding
                                    
                                    // A4 height is 297mm. Add top/bottom space for the graphics.
-                                   headerHtml = `<div style="height: 35mm; width: 100%;"></div>`;
-                                   footerHtml = `<div style="height: 25mm; width: 100%;"></div>`;
+                                   headerHtml = `<div style="height: 45mm; width: 100%;"></div>`;
+                                   footerHtml = `<div style="height: 45mm; width: 100%;"></div>`;
                                 } else {
                                    headerHtml = businessProfile.letterheadHeader || `<div style="text-align:center; padding-bottom: 5mm; border-bottom: 2px solid #000; margin-bottom: 5mm;"><h2>${businessProfile.companyName || 'Company Name'}</h2><p>${businessProfile.contactDetails || ''}</p></div>`;
                                    footerHtml = businessProfile.letterheadFooter || `<div style="text-align:center; padding-top: 5mm; border-top: 1px solid #000; margin-top: 5mm; font-size: 12px;"><p>${businessProfile.website || ''}</p></div>`;

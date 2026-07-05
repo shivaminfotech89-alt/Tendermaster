@@ -23,15 +23,15 @@ export default function Layout() {
   const analyzingText = reanalyzing ? 'Re-Analyzing Project' : 'Analysis In Progress';
 
   const navItems = [
-    { path: "/", id: "dashboard", label: t("dashboard"), icon: LayoutDashboard },
-    { path: "/projects", id: "projects", label: t("projects"), icon: FileText },
-    { path: "/analyzer", id: "analyzer", label: t("analyzer"), icon: FileSearch },
-    { path: "/chat", id: "chat", label: t("chat"), icon: MessageSquare },
-    { path: "/documents", id: "documents", label: t("documents"), icon: FileText },
-    { path: "/reports", id: "reports", label: t("reports"), icon: TrendingUp },
-    { path: "/notifications", id: "notifications", label: t("notifications"), icon: Bell },
-    { path: "/profile", id: "profile", label: t("profile"), icon: Building2 },
-    { path: "/settings", id: "settings", label: t("settings"), icon: Settings },
+    { path: "/dashboard", id: "dashboard", label: t("dashboard"), icon: LayoutDashboard },
+    { path: "/dashboard/projects", id: "projects", label: t("projects"), icon: FileText },
+    { path: "/dashboard/analyzer", id: "analyzer", label: t("analyzer"), icon: FileSearch },
+    { path: "/dashboard/chat", id: "chat", label: t("chat"), icon: MessageSquare },
+    { path: "/dashboard/documents", id: "documents", label: t("documents"), icon: FileText },
+    { path: "/dashboard/reports", id: "reports", label: t("reports"), icon: TrendingUp },
+    { path: "/dashboard/notifications", id: "notifications", label: t("notifications"), icon: Bell },
+    { path: "/dashboard/profile", id: "profile", label: t("profile"), icon: Building2 },
+    { path: "/dashboard/settings", id: "settings", label: t("settings"), icon: Settings },
   ];
 
   if (role === "admin" || role === "superadmin") {

@@ -42,7 +42,7 @@ export default function TenderAnalyzer() {
 
   const [inputType, setInputType] = useState<'url' | 'pdf' | 'zip'>('pdf');
   const [tenderUrl, setTenderUrl] = useState("");
-  const [tenderPdfBase64, setTenderPdfBase64] = useState("");
+  const [tenderPdfBase64, setTenderPdfBase64] = useState<string | string[]>("");
   const [pdfFileName, setPdfFileName] = useState("");
   const [zipFilesData, setZipFilesData] = useState<string[]>([]);
   const [zipFileName, setZipFileName] = useState("");
@@ -109,23 +109,33 @@ export default function TenderAnalyzer() {
     return () => window.removeEventListener("beforeunload", handleBeforeUnload);
   }, [analysisResult, hasSaved]);
 
-  const handlePdfUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  const handlePdfUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    if (files.length === 0) return;
     
-    if (file.size > 30 * 1024 * 1024) {
-      setError("PDF size must be less than 30MB");
+    let totalSize = 0;
+    const base64Files: string[] = [];
+    
+    for (const file of files) {
+      totalSize += file.size;
+    }
+    
+    if (totalSize > 30 * 1024 * 1024) {
+      setError("Total size must be less than 30MB");
       return;
     }
     
-    setPdfFileName(file.name);
-    const reader = new FileReader();
-    reader.onload = () => {
-      if (typeof reader.result === "string") {
-        setTenderPdfBase64(reader.result);
-      }
-    };
-    reader.readAsDataURL(file);
+    setPdfFileName(files.length === 1 ? files[0].name : `${files.length} PDFs selected`);
+    
+    for (const file of files) {
+       const base64 = await new Promise<string>((resolve) => {
+         const reader = new FileReader();
+         reader.onload = () => resolve(reader.result as string);
+         reader.readAsDataURL(file);
+       });
+       base64Files.push(base64);
+    }
+    setTenderPdfBase64(base64Files as any);
   };
 
   const handleZipUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -204,7 +214,7 @@ export default function TenderAnalyzer() {
       if (!tenderUrl.trim()) return setError("Please enter a valid tender URL.");
       payload = tenderUrl;
     } else if (inputType === 'pdf') {
-      if (!tenderPdfBase64) return setError("Please upload a PDF document.");
+      if (!tenderPdfBase64 || tenderPdfBase64.length === 0) return setError("Please upload a PDF document.");
       payload = tenderPdfBase64;
     } else if (inputType === 'zip') {
       if (!zipFilesData || zipFilesData.length === 0) return setError("Please upload a ZIP folder containing PDF documents.");
@@ -513,7 +523,7 @@ export default function TenderAnalyzer() {
                     </div>
                   </div>
                 )}
-                <input type="file" ref={fileInputRef} className="hidden" accept=".pdf,application/pdf" onChange={(e) => (inputType as string) === 'pdf' ? handlePdfUpload(e) : handleZipUpload(e)} />
+                <input type="file" ref={fileInputRef} className="hidden" accept=".pdf,application/pdf" multiple onChange={(e) => (inputType as string) === 'pdf' ? handlePdfUpload(e) : handleZipUpload(e)} />
               </div>
             )}
             
@@ -1017,20 +1027,33 @@ export default function TenderAnalyzer() {
                                    <head>
                                      <title>Print Document - ${docType}</title>
                                      <style>
-                                       body { font-family: system-ui, -apple-system, sans-serif; padding: 40px; color: #111827; max-width: 100%; overflow-wrap: break-word; word-wrap: break-word; }
+                                       @page { size: A4; margin: 20mm; }
+                                       body { 
+                                         font-family: system-ui, -apple-system, sans-serif; 
+                                         color: #111827; 
+                                         max-width: 100%; 
+                                         overflow-wrap: break-word; 
+                                         word-wrap: break-word; 
+                                         padding: 0;
+                                         margin: 0;
+                                       }
+                                       .content { font-size: 11pt; line-height: 1.6; }
                                        table { width: 100%; border-collapse: collapse; margin-top: 10px; margin-bottom: 20px; page-break-inside: auto; }
                                        tr { page-break-inside: avoid; page-break-after: auto; }
                                        th, td { border: 1px solid #d1d5db; padding: 8px 12px; text-align: left; overflow-wrap: break-word; word-wrap: break-word; }
                                        th { background-color: #f3f4f6; }
                                        h1, h2, h3, h4, h5 { margin-top: 20px; margin-bottom: 10px; page-break-after: avoid; }
-                                       p { margin-bottom: 10px; line-height: 1.5; }
+                                       p { margin-bottom: 10px; }
                                        ul, ol { margin-bottom: 10px; padding-left: 20px; }
-                                       @page { size: auto; margin: 20mm; }
-                                       @media print { body { padding: 0; } }
+                                       @media print { 
+                                         body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+                                       }
                                      </style>
                                    </head>
                                    <body>
-                                     ${content}
+                                     <div class="content">
+                                       ${content}
+                                     </div>
                                    </body>
                                  </html>
                                `);

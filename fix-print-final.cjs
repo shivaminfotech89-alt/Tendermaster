@@ -1,5 +1,4 @@
 const fs = require('fs');
-
 const file = 'src/pages/ProjectDetails.tsx';
 let content = fs.readFileSync(file, 'utf8');
 
@@ -10,20 +9,22 @@ if (match) {
 const replacement = `let headerHtml = '';
                              let footerHtml = '';
                              let bgImageHtml = '';
-                             let bodyPadding = '0';
                              let pageMargin = '20mm'; // Standard A4 margin
+                             let bodyPadding = '0';
                              
                              if (useLetterhead && businessProfile) {
                                 if (businessProfile.letterheadBackgroundImage) {
-                                   bgImageHtml = \`<img src="\${businessProfile.letterheadBackgroundImage}" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: -1; pointer-events: none; object-fit: cover; margin: 0; padding: 0;" />\`;
-                                   bodyPadding = '0 20mm'; // Emulate side margins because @page margin must be 0 for full-bleed image
-                                   pageMargin = '0'; // Full bleed for background image
-                                   // A4 height is 297mm. Letterhead top is often ~45mm. Bottom ~30mm.
-                                   headerHtml = \`<div style="height: 45mm;"></div>\`;
-                                   footerHtml = \`<div style="height: 30mm;"></div>\`;
+                                   bgImageHtml = \`<img src="\${businessProfile.letterheadBackgroundImage}" style="position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; z-index: -1; pointer-events: none; object-fit: cover; margin: 0; padding: 0;" />\`;
+                                   // Full bleed for letterhead image
+                                   pageMargin = '0';
+                                   bodyPadding = '0 20mm'; // Add side margins via body padding
+                                   
+                                   // A4 height is 297mm. Add top/bottom space for the graphics.
+                                   headerHtml = \`<div style="height: 35mm; width: 100%;"></div>\`;
+                                   footerHtml = \`<div style="height: 25mm; width: 100%;"></div>\`;
                                 } else {
-                                   headerHtml = businessProfile.letterheadHeader || \`<div style="text-align:center; padding-bottom: 5mm; border-bottom: 2px solid #000; margin-bottom: 10mm;"><h2>\${businessProfile.companyName || 'Company Name'}</h2><p>\${businessProfile.contactDetails || ''}</p></div>\`;
-                                   footerHtml = businessProfile.letterheadFooter || \`<div style="text-align:center; padding-top: 5mm; border-top: 1px solid #000; margin-top: 10mm; font-size: 12px;"><p>\${businessProfile.website || ''}</p></div>\`;
+                                   headerHtml = businessProfile.letterheadHeader || \`<div style="text-align:center; padding-bottom: 5mm; border-bottom: 2px solid #000; margin-bottom: 5mm;"><h2>\${businessProfile.companyName || 'Company Name'}</h2><p>\${businessProfile.contactDetails || ''}</p></div>\`;
+                                   footerHtml = businessProfile.letterheadFooter || \`<div style="text-align:center; padding-top: 5mm; border-top: 1px solid #000; margin-top: 5mm; font-size: 12px;"><p>\${businessProfile.website || ''}</p></div>\`;
                                 }
                              }
                              
@@ -32,24 +33,22 @@ const replacement = `let headerHtml = '';
                                  <head>
                                    <title>Print Document - \${docType}</title>
                                    <style>
-                                     /* Standard A4 */
                                      @page { size: A4; margin: \${pageMargin}; }
                                      body { 
                                        font-family: system-ui, -apple-system, sans-serif; 
-                                       padding: \${bodyPadding}; 
                                        color: #111827; 
-                                       max-width: 100%; 
-                                       overflow-wrap: break-word; 
-                                       word-wrap: break-word; 
                                        margin: 0;
+                                       padding: \${bodyPadding};
                                        box-sizing: border-box;
                                      }
-                                     .content { position: relative; z-index: 1; font-size: 11pt; line-height: 1.6; }
+                                     .content { font-size: 11pt; line-height: 1.6; }
                                      
                                      /* Layout tables (header/footer) */
-                                     table.layout-table { width: 100%; border-collapse: collapse; border: none; margin: 0; padding: 0; }
-                                     table.layout-table > thead > tr > td, 
-                                     table.layout-table > tbody > tr > td, 
+                                     table.layout-table { width: 100%; border-collapse: collapse; border: none; margin: 0; padding: 0; table-layout: fixed; }
+                                     table.layout-table > thead { display: table-header-group; }
+                                     table.layout-table > tfoot { display: table-footer-group; }
+                                     table.layout-table > tbody > tr > td { border: none; padding: 0; }
+                                     table.layout-table > thead > tr > td { border: none; padding: 0; }
                                      table.layout-table > tfoot > tr > td { border: none; padding: 0; }
                                      
                                      /* Content tables inside the document */
@@ -63,7 +62,7 @@ const replacement = `let headerHtml = '';
                                      ul, ol { margin-bottom: 10px; padding-left: 20px; }
                                      
                                      @media print {
-                                        body { -webkit-print-color-adjust: exact; print-color-adjust: exact; padding: \${bodyPadding} !important; }
+                                        body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
                                       }
                                    </style>
                                  </head>

@@ -1,0 +1,1 @@
+sed -i 's/<h2 className="text-xl font-bold text-slate-800">Custom Letterhead Settings<\/h2>/<h2 className="text-xl font-bold text-slate-800">Custom Letterhead Settings<\/h2>/g' src/pages/BusinessProfile.tsx

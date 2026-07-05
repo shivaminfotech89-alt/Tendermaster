@@ -475,19 +475,11 @@ async function generateContentWithRetry(client: GoogleGenAI, options: any, retri
          
          // Fallback to older model if quota is hit to avoid completely blocking the user
          if (options.model === "gemini-2.5-flash") {
-             options.model = "gemini-1.5-flash";
+             options.model = "gemini-2.0-flash";
              modelChanged = true;
-             console.warn(`[AI Engine] Falling back to gemini-1.5-flash due to quota/rate limit.`);
-         } else if (options.model === "gemini-1.5-flash") {
-             options.model = "gemini-1.5-flash-8b";
-             modelChanged = true;
-             console.warn(`[AI Engine] Falling back to gemini-1.5-flash-8b due to quota/rate limit.`);
-         } else if (options.model === "gemini-1.5-flash-8b") {
-             options.model = "gemini-1.0-pro";
-             modelChanged = true;
-             console.warn(`[AI Engine] Falling back to gemini-1.0-pro due to quota/rate limit.`);
+             console.warn(`[AI Engine] Falling back to gemini-2.0-flash due to quota/rate limit.`);
          } else {
-             // Exhausted fallbacks, if it's still a quota error, just throw to avoid looping 8 times
+             // Exhausted fallbacks, if it's still a quota error, just throw
              if (isQuotaError) throw err;
          }
 
@@ -617,7 +609,7 @@ app.post("/api/analyze-tender", verifyFirebaseToken, async (req: AuthenticatedRe
     
     const extraContextStr = req.body.extraContext ? `\n\n--- EXTRA CONTEXT / RE-ANALYSIS UPDATE ---\n${req.body.extraContext}\n` : "";
     
-    if (tenderType === 'pdfs' || tenderType === 'zip') {
+    if (tenderType === 'pdfs' || tenderType === 'zip' || (tenderType === 'pdf' && Array.isArray(actualContent))) {
        docContents = [
          `--- USER PROFILE ---\n${userProfile}${extraContextStr}\n\n--- TENDER DOCUMENTS (Attached as PDFs) ---\n`
        ];
@@ -668,14 +660,14 @@ app.post("/api/analyze-tender", verifyFirebaseToken, async (req: AuthenticatedRe
     }
 
     const systemInstruction = `You are "Tender MasterAI", the premier strategic procurement intelligence engine for Indian entrepreneurs and enterprises. Your role is to decode dense bureaucratic tender documents (from GeM, nProcure, CPPP, and private entities), match them ruthlessly against an Indian businessman's profile, and provide a clear, risk-managed path to winning the bid. BE EXTREMELY IN-DEPTH AND DETAILED in your rationales, lists, and steps. Elaborate heavily.
-${language && language !== 'en' ? `\nCRITICAL LANGUAGE REQUIREMENT: You MUST output all your analysis and content STRICTLY in ${language === 'hi' ? 'Hindi' : language === 'gu' ? 'Gujarati' : language}. Do not use English unless it is for technical terms that have no direct translation.` : ''}
+${language && language !== 'en' ? `\nCRITICAL LANGUAGE REQUIREMENT: You MUST output all your analysis and content STRICTLY in ${language === 'hi' ? 'Hindi' : language === 'gu' ? 'Gujarati' : language}. Do not use English unless it is for technical terms that have no direct translation.` : `\nCRITICAL LANGUAGE REQUIREMENT: You MUST output all your analysis and content STRICTLY in English. Do NOT output in Hindi, Gujarati, or any other regional language.`}
 
 You switch between three operational modes based on input.
 
 ---
 MODE 1: CONTRACT PROFILE ANALYSIS & MATCHING
 - Trigger: Input contains a Tender Document and a User Business Profile JSON.
-- Task: Compare technical eligibility, turnover requirements, and location preferences. Calculate an objective compatibility score out of 100. Translate complex terms into Gujarati/Hindi-influenced professional plain English that a local businessman easily understands.
+- Task: Compare technical eligibility, turnover requirements, and location preferences. Calculate an objective compatibility score out of 100. Translate complex terms into professional plain English that a local businessman easily understands.
 - Required Output Format: Valid JSON matching this layout:
 {
   "compatibility": {
@@ -904,7 +896,7 @@ app.post("/api/compare-tender", verifyFirebaseToken, async (req: AuthenticatedRe
         ];
     }
 
-    const systemInstruction = `You are a Tender Document Comparison Engine. Compare the Original Tender Details against the New ${safeDocType} uploaded by the user. Highlight EXACTLY what changed. Outputs must be clear and direct.${language && language !== 'en' ? `\nCRITICAL LANGUAGE REQUIREMENT: You MUST output all content STRICTLY in ${language === 'hi' ? 'Hindi' : language === 'gu' ? 'Gujarati' : language}.` : ''}`;
+    const systemInstruction = `You are a Tender Document Comparison Engine. Compare the Original Tender Details against the New ${safeDocType} uploaded by the user. Highlight EXACTLY what changed. Outputs must be clear and direct.${language && language !== 'en' ? `\nCRITICAL LANGUAGE REQUIREMENT: You MUST output all content STRICTLY in ${language === 'hi' ? 'Hindi' : language === 'gu' ? 'Gujarati' : language}.` : `\nCRITICAL LANGUAGE REQUIREMENT: You MUST output all content STRICTLY in English.`}`;
 
     const response = await generateContentWithRetry(aiClient, {
       model: "gemini-2.5-flash",
@@ -961,7 +953,7 @@ app.post("/api/chat-tender", verifyFirebaseToken, requireActiveEntitlement, asyn
     }
     
     const instructionText = `You are a specialized Procurement Chatbot assisting an Indian business with a specific tender. 
-You have access to the original tender document and the AI analysis. Answer their questions clearly, concisely, and realistically based on the provided context. Follow Indian tendering terminology (EMD, PBG, BOQ, etc.). If a detail is missing, state it is not specified and advise to check for corrigendums.${language && language !== 'en' ? `\nCRITICAL LANGUAGE REQUIREMENT: You MUST answer the user STRICTLY in ${language === 'hi' ? 'Hindi' : language === 'gu' ? 'Gujarati' : language}.` : ''}
+You have access to the original tender document and the AI analysis. Answer their questions clearly, concisely, and realistically based on the provided context. Follow Indian tendering terminology (EMD, PBG, BOQ, etc.). If a detail is missing, state it is not specified and advise to check for corrigendums.${language && language !== 'en' ? `\nCRITICAL LANGUAGE REQUIREMENT: You MUST answer the user STRICTLY in ${language === 'hi' ? 'Hindi' : language === 'gu' ? 'Gujarati' : language}.` : `\nCRITICAL LANGUAGE REQUIREMENT: You MUST answer the user STRICTLY in English.`}
 
 --- TENDER CONTEXT ---
 ${tenderContextText || 'No raw text provided.'}
@@ -1020,7 +1012,7 @@ app.post("/api/generate-doc", verifyFirebaseToken, requireActiveEntitlement, asy
 Your task is to generate high-quality, professional draft documents based on the provided tender analysis and the user's business profile. 
 Use the business profile data (Company Name, Address, GST, PAN, etc.) and Tender Details (Tender No., Dates, Authority Name, etc.) to automatically fill in ALL placeholders. 
 CRITICAL RULE: DO NOT leave placeholders like "[Tender Number - To be filled by bidder]" or "[Date]" or "[Bidder Name]" in the output. You MUST aggressively find and replace all such "fill in the blank" brackets with the actual data from the provided Tender Details and Business Profile. If an exact piece of information is missing, use a logical assumed default or current date rather than leaving a bracketed placeholder.
-If the document requested is an "Auto-Fill: [Annexure Name]", your job is to auto-generate the filled-up annexure exactly as it should be submitted. Since real annexures are often tabular forms in PDFs, YOU MUST Reconstruct the exact Annexure/Schedule/Form tabular layout required by the agency using clean, well-structured Markdown tables and lists. Place the bidder's information directly into the respective form fields/cells as if they were filling out the actual PDF form. Ensure it visually resembles a structured printable form that can be submitted to the agency. Do not leave blanks if information can be reasonably derived or if standard boilerplate is applicable.${language && language !== 'en' ? `\nCRITICAL LANGUAGE REQUIREMENT: You MUST draft the document STRICTLY in ${language === 'hi' ? 'Hindi' : language === 'gu' ? 'Gujarati' : language}, unless the user asks otherwise.` : ''}
+If the document requested is an "Auto-Fill: [Annexure Name]", your job is to auto-generate the filled-up annexure exactly as it should be submitted. Since real annexures are often tabular forms in PDFs, YOU MUST Reconstruct the exact Annexure/Schedule/Form tabular layout required by the agency using clean, well-structured Markdown tables and lists. Place the bidder's information directly into the respective form fields/cells as if they were filling out the actual PDF form. Ensure it visually resembles a structured printable form that can be submitted to the agency. Do not leave blanks if information can be reasonably derived or if standard boilerplate is applicable.${language && language !== 'en' ? `\nCRITICAL LANGUAGE REQUIREMENT: You MUST draft the document STRICTLY in ${language === 'hi' ? 'Hindi' : language === 'gu' ? 'Gujarati' : language}, unless the user asks otherwise.` : `\nCRITICAL LANGUAGE REQUIREMENT: You MUST draft the document STRICTLY in English, unless the user asks otherwise.`}
 ${financialContext}${extraContext}
 
 --- BUSINESS PROFILE ---

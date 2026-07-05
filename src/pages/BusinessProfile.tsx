@@ -1,11 +1,12 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useAuth } from "../auth/AuthProvider";
 import { doc, getDoc, setDoc, updateDoc, collection, query, where, getDocs } from "firebase/firestore";
 import { db } from "../lib/firebase";
-import { Save, Loader2, Info, Sparkles, Crown, Key } from "lucide-react";
+import { Save, Loader2, Info, Sparkles, Crown, Key, Upload, FileText, Image as ImageIcon, Trash2 } from "lucide-react";
 import { toast } from "react-hot-toast";
 import { useTranslation } from "react-i18next";
 import { fetchWithAuth } from "../lib/api";
+import { convertPdfToImage } from "../lib/pdfToImage";
 
 export default function BusinessProfile() {
   const { user, role, subscriptionExpiry } = useAuth();
@@ -15,6 +16,41 @@ export default function BusinessProfile() {
   const [activating, setActivating] = useState(false);
   const [activationCode, setActivationCode] = useState("");
   const [enhancing, setEnhancing] = useState<string | null>(null);
+  const [uploadingImage, setUploadingImage] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setUploadingImage(true);
+    try {
+      let base64Image = "";
+      if (file.type === "application/pdf") {
+        base64Image = await convertPdfToImage(file);
+      } else if (file.type.startsWith("image/")) {
+        base64Image = await new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = (e) => resolve(e.target?.result as string);
+          reader.onerror = (e) => reject(e);
+          reader.readAsDataURL(file);
+        });
+      } else {
+        toast.error("Unsupported file type. Please upload a PDF or an Image.");
+        return;
+      }
+      
+      setProfile(prev => ({ ...prev, letterheadBackgroundImage: base64Image }));
+      toast.success("Letterhead uploaded successfully!");
+    } catch (err: any) {
+      console.error(err);
+      toast.error("Failed to process file. It may be too large or corrupted.");
+    } finally {
+      setUploadingImage(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  };
+
   const [profile, setProfile] = useState({
     companyName: "",
     proprietorName: "",
@@ -30,7 +66,7 @@ export default function BusinessProfile() {
     turnover: "",
     experienceYears: "",
     certifications: "",
-    majorClients: "",
+    majorClients: "", letterheadHeader: "", letterheadFooter: "", letterheadBackgroundImage: "",
     state: "",
     city: "",
     website: "",
@@ -344,6 +380,75 @@ export default function BusinessProfile() {
                  </button>
                </div>
                <textarea name="majorClients" value={profile.majorClients} onChange={handleChange} rows={2} className="border border-slate-300 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 outline-none placeholder:text-slate-400" placeholder="e.g., ONGC, BHEL, State Transport Department" />
+            </div>
+          </div>
+        </div>
+        
+        <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden mb-6">
+          <div className="p-6 border-b border-slate-100 bg-slate-50/50">
+            <h2 className="text-xl font-bold text-slate-800">Custom Letterhead Settings</h2>
+            <p className="text-slate-500 text-sm mt-1">Configure your organization's letterhead to automatically apply when printing auto-generated tender drafts. You can either upload a PDF/Image of your existing letterhead, or type HTML/Text.</p>
+          </div>
+          <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="flex flex-col gap-4 md:col-span-2">
+              <label className="text-sm font-semibold text-slate-700 border-b pb-2">Option 1: Upload Letterhead (PDF or Image)</label>
+              
+              <div className="flex items-start gap-4">
+                <div className="flex-1">
+                   <input 
+                     type="file" 
+                     accept=".pdf,image/*" 
+                     ref={fileInputRef} 
+                     onChange={handleFileUpload} 
+                     className="hidden" 
+                   />
+                   <button 
+                     type="button" 
+                     onClick={() => fileInputRef.current?.click()} 
+                     disabled={uploadingImage}
+                     className="bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 disabled:opacity-50 transition-colors"
+                   >
+                     {uploadingImage ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
+                     {uploadingImage ? "Processing..." : "Upload Letterhead PDF / Image"}
+                   </button>
+                   <p className="text-xs text-slate-500 mt-2">Uploading a PDF will convert the first page to a high-quality image background for printing.</p>
+                </div>
+                
+                {(profile as any).letterheadBackgroundImage && (
+                  <div className="w-24 h-32 border border-slate-200 rounded overflow-hidden bg-slate-50 flex items-center justify-center relative group">
+                    <img src={(profile as any).letterheadBackgroundImage} alt="Letterhead" className="max-w-full max-h-full object-contain" />
+                    <button 
+                      type="button" 
+                      onClick={() => setProfile(prev => ({ ...prev, letterheadBackgroundImage: "" }))}
+                      className="absolute inset-0 bg-black/50 text-white flex flex-col items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                    >
+                      <Trash2 className="w-5 h-5 mb-1" />
+                      <span className="text-[10px] font-medium">Remove</span>
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="col-span-2">
+              <div className="flex items-center gap-4 my-2">
+                <div className="h-px bg-slate-200 flex-1"></div>
+                <span className="text-xs font-semibold text-slate-400 uppercase">OR</span>
+                <div className="h-px bg-slate-200 flex-1"></div>
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-2 md:col-span-2">
+               <label className="text-sm font-semibold text-slate-700 border-b pb-2">Option 2: Text / HTML Header & Footer</label>
+            </div>
+
+            <div className="flex flex-col gap-2 md:col-span-2 mt-[-10px]">
+               <label className="text-xs font-semibold text-slate-600">Letterhead Header (HTML / Text)</label>
+               <textarea name="letterheadHeader" value={profile.letterheadHeader || ""} onChange={handleChange} rows={4} className="border border-slate-300 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 outline-none placeholder:text-slate-400 font-mono text-xs" placeholder="<div style='text-align:center; border-bottom: 2px solid black; padding-bottom: 10px;'><h1>YOUR COMPANY NAME</h1><p>123 Business Road, City, State - ZIP</p></div>" />
+            </div>
+            <div className="flex flex-col gap-2 md:col-span-2">
+               <label className="text-xs font-semibold text-slate-600">Letterhead Footer (HTML / Text)</label>
+               <textarea name="letterheadFooter" value={profile.letterheadFooter || ""} onChange={handleChange} rows={4} className="border border-slate-300 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 outline-none placeholder:text-slate-400 font-mono text-xs" placeholder="<div style='text-align:center; border-top: 1px solid black; padding-top: 10px;'><p>Contact: +91 9999999999 | Email: contact@company.com</p></div>" />
             </div>
           </div>
         </div>

@@ -122,12 +122,12 @@ export default function Layout() {
         </header>
 
         {/* Dynamic Route Content */}
-        <div className="flex-1 overflow-auto bg-slate-50 relative pb-16 md:pb-0">
+        <div className="flex-1 overflow-auto bg-slate-50 relative pb-24 md:pb-0">
            <Outlet />
         </div>
 
         {/* Mobile Bottom Navigation */}
-        <nav className="md:hidden fixed bottom-0 left-0 right-0 h-16 bg-white border-t border-slate-200 flex items-center justify-around px-2 pb-safe z-50">
+        <nav className="md:hidden fixed bottom-0 left-0 right-0 h-16 bg-white border-t border-slate-200 flex items-center justify-around px-2 pb-[env(safe-area-inset-bottom)] z-50">
           {navItems.map((item) => {
             const isActive = location.pathname === item.path || (item.path !== "/" && location.pathname.startsWith(item.path));
             return (

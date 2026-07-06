@@ -270,7 +270,7 @@ app.post("/api/create-payment-link", verifyFirebaseToken, async (req: Authentica
     res.json(paymentLink);
   } catch (error: any) {
     console.error("Create payment link error:", error);
-    res.status(500).json({ error: error.message || "Failed to create payment link" });
+    res.status(error?.statusCode || 400).json({ error: error?.error?.description || error?.message || "Failed to create payment link" });
   }
 });
 

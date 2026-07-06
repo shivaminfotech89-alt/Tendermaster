@@ -11,6 +11,7 @@ export default function LandingPage() {
   const navigate = useNavigate();
   const handleRazorpayClick = async (amount: number) => {
     if (!user) {
+      toast("Please create an account first to subscribe.");
       navigate('/login');
       return;
     }
@@ -39,7 +40,12 @@ export default function LandingPage() {
         })
       });
       
-      const paymentLink = await response.json();
+      let paymentLink;
+      try {
+        paymentLink = await response.json();
+      } catch (e) {
+        throw new Error("A server error occurred or invalid response returned.");
+      }
       
       if (!response.ok) {
         throw new Error(paymentLink.error || "Failed to create payment link");

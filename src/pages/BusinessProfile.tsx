@@ -166,7 +166,10 @@ export default function BusinessProfile() {
        });
        
        if (!response.ok) throw new Error("Enhancement failed");
-       const data = await response.json();
+       
+        let data;
+        try { data = await response.json(); } catch(e) { throw new Error("A server error occurred. Please try again."); }
+  
        
        setProfile(p => ({ ...p, [field]: data.enhanced }));
      } catch (err: any) {
@@ -193,7 +196,10 @@ export default function BusinessProfile() {
         throw new Error(errData.error || "Failed to redeem code");
       }
       
-      const data = await response.json();
+      
+        let data;
+        try { data = await response.json(); } catch(e) { throw new Error("A server error occurred. Please try again."); }
+  
       if (data.success && data.newExpiry) {
         const { doc, updateDoc, Timestamp } = await import('firebase/firestore');
         const { db } = await import('../lib/firebase');

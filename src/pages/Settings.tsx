@@ -57,7 +57,12 @@ export default function Settings() {
         })
       });
       
-      const paymentLink = await response.json();
+      let paymentLink;
+      try {
+        paymentLink = await response.json();
+      } catch (e) {
+        throw new Error("A server error occurred or invalid response returned.");
+      }
       
       if (!response.ok) {
         throw new Error(paymentLink.error || "Failed to create payment link");
@@ -87,10 +92,16 @@ export default function Settings() {
         body: JSON.stringify({ code: activationCode })
       });
       if (!res.ok) {
-        const errData = await res.json();
+        
+        let errData;
+        try { errData = await res.json(); } catch(e) { errData = { error: "A server error occurred." }; }
+  
         throw new Error(errData.error || "Failed to redeem code");
       }
-      const data = await res.json();
+      
+        let data;
+        try { data = await res.json(); } catch(e) { throw new Error("A server error occurred. Please try again."); }
+  
       if (data.success && data.newExpiry) {
         const { doc, updateDoc, Timestamp } = await import('firebase/firestore');
         const { db } = await import('../lib/firebase');
@@ -139,7 +150,10 @@ export default function Settings() {
                        amount: amount
                     })
                  });
-                 const data = await res.json();
+                 
+        let data;
+        try { data = await res.json(); } catch(e) { throw new Error("A server error occurred. Please try again."); }
+  
                  if (data.success && data.newExpiry) {
                     const { doc, updateDoc, Timestamp } = await import('firebase/firestore');
                     const { db } = await import('../lib/firebase');

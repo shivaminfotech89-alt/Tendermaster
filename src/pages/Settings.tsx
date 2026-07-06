@@ -126,16 +126,8 @@ export default function Settings() {
         let data;
         try { data = await res.json(); } catch(e) { throw new Error("A server error occurred. Please try again."); }
   
-      if (data.success && data.newExpiry) {
-        const { doc, updateDoc, Timestamp } = await import('firebase/firestore');
-        const { db } = await import('../lib/firebase');
-        if (user) {
-          await updateDoc(doc(db, 'users', user.uid), {
-            role: 'premium',
-            subscriptionExpiry: Timestamp.fromDate(new Date(data.newExpiry))
-          });
-        }
-      }
+      // Server has already written role/subscriptionExpiry via Admin SDK.
+      // The onSnapshot listener in AuthProvider will pick up the change automatically.
       toast.success(data.message || "Success! Your account has been upgraded to PREMIUM. Please refresh the page.");
       setTimeout(() => {
         window.location.reload();
@@ -178,14 +170,8 @@ export default function Settings() {
         let data;
         try { data = await res.json(); } catch(e) { throw new Error("A server error occurred. Please try again."); }
   
-                 if (data.success && data.newExpiry) {
-                    // Phase 1: Client side role write removed. Role is written server-side.
-                    // Just force an ID token refresh to get new claims if we were using them,
-                    // or just let the app reload.
-                    if (user && typeof user.getIdToken === 'function') {
-                       await user.getIdToken(true);
-                    }
-                 }
+                 // Server has already written role/subscriptionExpiry via Admin SDK.
+                 // The onSnapshot listener in AuthProvider will pick up the change automatically.
                  toast.dismiss();
                  toast.success("Payment verified! Your account is upgraded to Premium.");
                  setTimeout(() => {

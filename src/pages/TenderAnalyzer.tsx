@@ -249,7 +249,7 @@ export default function TenderAnalyzer() {
         
         for (let i = 0; i < dataUris.length; i++) {
           const dataUri = dataUris[i];
-          const storageRef = ref(storage, `tenders/${user?.uid || 'anon'}_${Date.now()}_${i}`);
+          const storageRef = ref(storage, `users/${user?.uid || 'anon'}/tenders/${Date.now()}_${i}`);
           await uploadString(storageRef, dataUri, 'data_url');
           const url = await getDownloadURL(storageRef);
           uploadedUrls.push(url);

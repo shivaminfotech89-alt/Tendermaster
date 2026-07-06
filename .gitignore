@@ -7,18 +7,29 @@ coverage/
 .env*
 !.env.example
 
+# Firebase service account key (NEVER commit)
+serviceAccountKey.json
+
+# Error dumps from generate-doc (removed from code, guard in case old file exists)
+doc-error.txt
+
 # Temporary development scripts
 test-*.ts
-scrape.js
-check.js
-fix-markdown.js
-fix-markdown2.js
-fix.cjs
-fix_percentage.js
-reorder.js
-*.cjs
-test*.js
-test*.ts
-fix*.js
+test-*.cjs
+test-*.js
+test_*.cjs
+test_*.js
+fix-*.cjs
+fix-*.sh
+fix_*.cjs
 seed*.js
-doc-error.txt
+seed*.cjs
+seed*.mjs
+update-*.cjs
+update-*.sh
+sanity.cjs
+replace-print.*
+dummy-wait.sh
+revert_rules.patch
+seed_rules.patch
+temp.json

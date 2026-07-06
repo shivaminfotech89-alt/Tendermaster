@@ -200,11 +200,8 @@ export default function BusinessProfile() {
         let data;
         try { data = await response.json(); } catch(e) { throw new Error("A server error occurred. Please try again."); }
   
-      if (data.success && data.newExpiry) {
-        if (user && typeof user.getIdToken === 'function') {
-           await user.getIdToken(true);
-        }
-      }
+      // Server has already written role/subscriptionExpiry via Admin SDK.
+      // The onSnapshot listener in AuthProvider will pick up the change automatically.
       toast.success(data.message || "Premium activated! Please refresh.");
       setActivationCode("");
       setTimeout(() => {

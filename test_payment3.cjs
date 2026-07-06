@@ -1,0 +1,11 @@
+const fetch = (...args) => import('node-fetch').then(({default: fetch}) => fetch(...args));
+async function run() {
+  const res = await fetch("http://127.0.0.1:3000/api/create-payment-link", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "Authorization": "Bearer BAD_TOKEN" },
+    body: JSON.stringify({ amount: 10 })
+  });
+  console.log("STATUS:", res.status);
+  console.log("BODY:", await res.text());
+}
+run();

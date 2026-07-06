@@ -59,9 +59,14 @@ export default function Settings() {
       
       let paymentLink;
       try {
-        paymentLink = await response.json();
+        const text = await response.text();
+        try {
+          paymentLink = JSON.parse(text);
+        } catch (e) {
+          throw new Error("Invalid response JSON. Body: " + text.substring(0, 100));
+        }
       } catch (e) {
-        throw new Error("A server error occurred or invalid response returned.");
+        throw e;
       }
       
       if (!response.ok) {

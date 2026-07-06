@@ -151,7 +151,7 @@ export default function Layout() {
             if (reanalyzing) return; // Stay on project page if reanalyzing
             navigate('/dashboard/analyzer');
           }}
-          className="fixed top-4 right-4 md:top-6 md:right-6 bg-white border border-blue-200 shadow-xl rounded-xl p-4 flex items-center gap-4 cursor-pointer hover:shadow-2xl transition-all z-50 group hover:border-blue-400"
+          className="fixed bottom-20 right-4 md:top-6 md:right-6 md:bottom-auto bg-white border border-blue-200 shadow-xl rounded-xl p-4 flex items-center gap-4 cursor-pointer hover:shadow-2xl transition-all z-50 group hover:border-blue-400"
         >
 
           <button 

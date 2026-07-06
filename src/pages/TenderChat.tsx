@@ -163,7 +163,7 @@ export default function TenderChat() {
   }
 
   return (
-    <div className="h-[calc(100vh-64px)] flex flex-col bg-slate-50 relative">
+    <div className="h-full min-h-[calc(100vh-160px)] md:min-h-[calc(100vh-64px)] flex flex-col bg-slate-50 relative">
       <div className="bg-white border-b border-slate-200 p-4 flex items-center gap-4 sticky top-0 z-10 shadow-sm">
          <button onClick={() => setSelectedProject(null)} className="p-2 hover:bg-slate-100 rounded-full transition-colors text-slate-500">
            <ArrowLeft className="w-5 h-5" />

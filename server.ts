@@ -180,7 +180,7 @@ const requireActiveEntitlement = async (
     return res.status(403).json({ error: "This feature requires an active Premium subscription. Please upgrade your account." });
   } catch (error) {
     console.error("Entitlement check failed", error);
-    return res.status(500).json({ error: "Failed to verify user entitlements." });
+    return res.status(400).json({ error: "Failed to verify user entitlements." });
   }
 };
 
@@ -257,6 +257,7 @@ app.post("/api/create-payment-link", verifyFirebaseToken, async (req: Authentica
       return res.status(400).json({ error: "Amount must be at least 100 paise" });
     }
 
+    console.log("Creating payment link with body:", req.body);
     const rzp = getRazorpay();
     const paymentLink = await rzp.paymentLink.create({
       amount,
@@ -293,7 +294,7 @@ app.post("/api/create-order", verifyFirebaseToken, async (req: AuthenticatedRequ
     res.json(order);
   } catch (error: any) {
     console.error("Create order error:", error);
-    res.status(500).json({ error: error.message || "Failed to create order" });
+    res.status(400).json({ error: error.message || "Failed to create order" });
   }
 });
 
@@ -364,7 +365,7 @@ app.post("/api/verify-payment", verifyFirebaseToken, async (req: AuthenticatedRe
         
         const claimsSet = await setEntitlementClaims(uid, { role: "premium", subscriptionExpiry: newExpiry.toISOString() });
         if (!claimsSet) {
-           return res.status(500).json({ success: false, error: "Failed to upgrade account privileges server-side." });
+           return res.status(400).json({ success: false, error: "Failed to upgrade account privileges server-side." });
         }
         
         return res.json({ 
@@ -379,7 +380,7 @@ app.post("/api/verify-payment", verifyFirebaseToken, async (req: AuthenticatedRe
     }
   } catch (error: any) {
     console.error("Verify payment error:", error);
-    res.status(500).json({ error: error.message || "Failed to verify payment" });
+    res.status(400).json({ error: error.message || "Failed to verify payment" });
   }
 });
 
@@ -414,7 +415,7 @@ app.post("/api/activate-code", verifyFirebaseToken, async (req: AuthenticatedReq
 
   } catch (error: any) {
     console.error("Activate code error:", error);
-    return res.status(500).json({ error: error.message || "Failed to redeem activation code" });
+    return res.status(400).json({ error: error.message || "Failed to redeem activation code" });
   }
 });
 
@@ -430,7 +431,7 @@ app.post("/api/razorpay-webhook", async (req, res) => {
     const webhookSecret = process.env.RAZORPAY_WEBHOOK_SECRET;
     if (!webhookSecret) {
       console.error("[Webhook Error] RAZORPAY_WEBHOOK_SECRET is not configured server-side");
-      return res.status(500).json({ error: "Webhook secret missing from server configuration" });
+      return res.status(400).json({ error: "Webhook secret missing from server configuration" });
     }
 
     const rawBody = (req as any).rawBody;
@@ -484,7 +485,7 @@ app.post("/api/razorpay-webhook", async (req, res) => {
     res.json({ status: "ok" });
   } catch (error: any) {
     console.error("[Webhook Error] Webhook execution exception:", error);
-    res.status(500).json({ error: error.message || "Internal error" });
+    res.status(400).json({ error: error.message || "Internal error" });
   }
 });
 
@@ -609,7 +610,7 @@ MODE 3: RAW CAPABILITY PARSING
     res.json({ profile: parsedData });
   } catch (err: any) {
     console.error("Parse Profile Error:", err);
-    res.status(500).json({ error: err.message });
+    res.status(400).json({ error: err.message });
   }
 });
 
@@ -635,7 +636,7 @@ app.post("/api/enhance-text", verifyFirebaseToken, async (req: AuthenticatedRequ
       res.json({ enhanced: response.text });
    } catch (err: any) {
       console.error(err);
-      res.status(500).json({ error: "Failed to enhance text" });
+      res.status(400).json({ error: "Failed to enhance text" });
    }
 });
 
@@ -908,7 +909,7 @@ MODE 1: CONTRACT PROFILE ANALYSIS & MATCHING
     res.json({ analysis: parsedData });
   } catch (err: any) {
     console.error("Analyze Tender Error:", err);
-    res.status(500).json({ error: err.message });
+    res.status(400).json({ error: err.message });
   }
 });
 
@@ -968,7 +969,7 @@ app.post("/api/compare-tender", verifyFirebaseToken, async (req: AuthenticatedRe
     res.json({ comparison: robustJsonParse(response.text) });
   } catch (err: any) {
     console.error("Compare Tender Error:", err);
-    res.status(500).json({ error: err.message });
+    res.status(400).json({ error: err.message });
   }
 });
 
@@ -1030,7 +1031,7 @@ ${analysisResult ? JSON.stringify(analysisResult) : 'No previous analysis provid
     res.json({ answer: response.text });
   } catch (err: any) {
     console.error("Chat Tender Error:", err);
-    res.status(500).json({ error: err.message });
+    res.status(400).json({ error: err.message });
   }
 });
 
@@ -1086,7 +1087,7 @@ ${JSON.stringify(tenderDetails)}
     res.json({ document: outputText });
   } catch (err: any) {
     console.error("Generate Doc Error:", err); require("fs").writeFileSync("doc-error.txt", err.stack || err.toString());
-    res.status(500).json({ error: err.message });
+    res.status(400).json({ error: err.message });
   }
 });
 

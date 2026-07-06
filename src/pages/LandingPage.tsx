@@ -42,9 +42,16 @@ export default function LandingPage() {
       
       let paymentLink;
       try {
-        paymentLink = await response.json();
+        const cloned = response.clone();
+        const text = await cloned.text();
+        console.log("Raw payment response:", text);
+        try {
+          paymentLink = JSON.parse(text);
+        } catch(e2) {
+          throw new Error("Server returned invalid JSON: " + text.substring(0, 50));
+        }
       } catch (e) {
-        throw new Error("A server error occurred or invalid response returned.");
+        throw e;
       }
       
       if (!response.ok) {

@@ -70,7 +70,7 @@ export default function Layout() {
 
         <div className="p-4 border-t border-slate-100 flex flex-col gap-2">
            
-           {role !== "PREMIUM" && (
+           {role !== "premium" && (
              <Link to="/dashboard/settings?tab=subscription" className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white py-2 rounded-lg text-sm font-bold shadow-md transition-all mb-2 animate-pulse hover:animate-none">
                <ShieldCheck className="w-4 h-4" />
                Subscribe Now
@@ -117,7 +117,7 @@ export default function Layout() {
             </div>
             
             <div className="flex items-center gap-2">
-              {role !== "PREMIUM" && (
+              {role !== "premium" && (
                  <Link to="/dashboard/settings?tab=subscription" className="flex items-center justify-center bg-gradient-to-r from-amber-500 to-orange-500 text-white p-1.5 rounded text-xs font-bold shadow-md animate-pulse">
                    <ShieldCheck className="w-4 h-4 mr-1" />
                    UPGRADE

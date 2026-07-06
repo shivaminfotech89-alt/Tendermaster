@@ -19,7 +19,7 @@ export default function Reports() {
         const q = query(collection(db, "saved_tenders"), where("userId", "==", user.uid));
         const snapshot = await getDocs(q);
         const docs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-        docs.sort((a, b) => b.savedAt?.toMillis() - a.savedAt?.toMillis());
+        docs.sort((a, b) => (b as any).savedAt?.toMillis() - (a as any).savedAt?.toMillis());
         setTenders(docs);
       } catch (err) {
         console.error(err);

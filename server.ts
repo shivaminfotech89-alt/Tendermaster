@@ -379,7 +379,8 @@ app.post("/api/activate-code", verifyFirebaseToken, async (req: AuthenticatedReq
     }
 
     // Support hardcoded test code TENDERMASTERPRO
-    if (code.trim().toUpperCase() === "TENDERMASTERPRO") {
+    const validCodesEnv = (process.env.VALID_ACTIVATION_CODES || "TENDERMASTERPRO").split(",").map(c => c.trim().toUpperCase());
+    if (validCodesEnv.includes(code.trim().toUpperCase())) {
       const expiry = new Date();
       expiry.setDate(expiry.getDate() + 30);
       

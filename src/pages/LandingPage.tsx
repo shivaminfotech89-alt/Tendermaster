@@ -8,8 +8,13 @@ export default function LandingPage() {
   const { user } = useAuth();
   const [isMenuOpen, setIsMenuOpen] = useState(false);
 
+  const navigate = useNavigate();
   const handleRazorpayClick = () => {
-    toast.success("Razorpay payment modal would open here. (Integration pending on live site)");
+    if (user) {
+      navigate('/dashboard/settings');
+    } else {
+      navigate('/login');
+    }
   };
 
   return (

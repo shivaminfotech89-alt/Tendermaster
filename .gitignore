@@ -16,3 +16,9 @@ fix-markdown2.js
 fix.cjs
 fix_percentage.js
 reorder.js
+*.cjs
+test*.js
+test*.ts
+fix*.js
+seed*.js
+doc-error.txt

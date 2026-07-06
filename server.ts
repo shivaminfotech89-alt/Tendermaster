@@ -10,9 +10,60 @@ import { getFirestore as adminGetFirestore, Timestamp } from "firebase-admin/fir
 import Razorpay from "razorpay";
 import crypto from "crypto";
 import dns from "dns";
+import { GoogleAuth } from "google-auth-library";
 import { promisify } from "util";
 
 const lookupPromise = promisify(dns.lookup);
+
+const isSafeIp = (ip: string) => {
+  if (ip === "::1" || ip === "0:0:0:0:0:0:0:1") return false;
+  if (ip.includes(":")) {
+    const lower = ip.toLowerCase();
+    if (lower.startsWith('fc') || lower.startsWith('fd') || lower.startsWith('fe8') || lower.startsWith('fe9') || lower.startsWith('fea') || lower.startsWith('feb')) return false;
+  }
+  const parts = ip.split('.').map(p => parseInt(p, 10));
+  if (parts.length === 4) {
+    if (parts[0] === 127 || parts[0] === 10 || parts[0] === 0) return false;
+    if (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) return false;
+    if (parts[0] === 192 && parts[1] === 168) return false;
+    if (parts[0] === 169 && parts[1] === 254) return false;
+  }
+  return true;
+};
+
+const safeFetch = async (targetUrl: string, options?: RequestInit) => {
+  const parsed = new URL(targetUrl);
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    throw new Error("Only HTTP/HTTPS allowed");
+  }
+  if (parsed.hostname.toLowerCase() === 'metadata.google.internal' || parsed.hostname.toLowerCase() === 'localhost') {
+    throw new Error("Blocked host");
+  }
+  
+  // Reject IPv6 literals in URL (they are enclosed in [])
+  if (parsed.hostname.startsWith('[')) {
+     throw new Error("IPv6 literals blocked");
+  }
+  
+  const { address } = await lookupPromise(parsed.hostname);
+  if (!isSafeIp(address)) {
+    throw new Error("Resolved to blocked IP");
+  }
+  
+  const ipUrl = new URL(targetUrl);
+  ipUrl.hostname = address;
+  
+  const newOptions: RequestInit = {
+    ...options,
+    headers: {
+      ...(options?.headers || {}),
+      'Host': parsed.host
+    }
+  };
+  
+  return fetch(ipUrl.toString(), newOptions);
+};
+
 
 let firebaseConfig: any = {};
 try {
@@ -24,7 +75,7 @@ try {
   console.error("Failed to read firebase-applet-config.json", err);
 }
 
-if (admin.getApps().length === 0) {
+if (admin.apps.length === 0) {
   try {
     admin.initializeApp({
       projectId: firebaseConfig.projectId,
@@ -79,9 +130,51 @@ interface AuthenticatedRequest extends express.Request {
 
 // Phase 1: Custom Claims Helper
 const setEntitlementClaims = async (uid: string, claims: { role: string; subscriptionExpiry?: string }) => {
-  // Bypassing Custom Claims because the AI Studio environment does not have identitytoolkit.googleapis.com API enabled.
-  // We rely on Firestore documents + Rules for authorization.
-  return true;
+  try {
+    const db = getFirestore();
+    const updateData: any = { role: claims.role };
+    if (claims.subscriptionExpiry) {
+      updateData.subscriptionExpiry = Timestamp.fromDate(new Date(claims.subscriptionExpiry));
+    }
+    await db.collection("users").doc(uid).set(updateData, { merge: true });
+    return true;
+  } catch (error) {
+    console.error("Admin SDK write failed, falling back to REST", error);
+    try {
+      const auth = new GoogleAuth({
+        scopes: ['https://www.googleapis.com/auth/datastore']
+      });
+      const client = await auth.getClient();
+      const token = await client.getAccessToken();
+      const projectId = firebaseConfig.projectId;
+      const databaseId = firebaseConfig.firestoreDatabaseId || "(default)";
+      const url = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/${databaseId}/documents/users/${uid}?updateMask.fieldPaths=role${claims.subscriptionExpiry ? '&updateMask.fieldPaths=subscriptionExpiry' : ''}`;
+      
+      const fields: any = {
+        role: { stringValue: claims.role }
+      };
+      if (claims.subscriptionExpiry) {
+        fields.subscriptionExpiry = { timestampValue: claims.subscriptionExpiry };
+      }
+      
+      const res = await fetch(url, {
+        method: 'PATCH',
+        headers: {
+          'Authorization': `Bearer ${token.token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ name: `projects/${projectId}/databases/${databaseId}/documents/users/${uid}`, fields })
+      });
+      
+      if (!res.ok) {
+        throw new Error(`REST fallback failed: ${await res.text()}`);
+      }
+      return true;
+    } catch (restErr) {
+      console.error("REST fallback also failed", restErr);
+      throw restErr;
+    }
+  }
 };
 
 // Phase 1: Firebase Auth ID Token Verification Middleware
@@ -355,10 +448,19 @@ app.post("/api/verify-payment", verifyFirebaseToken, async (req: AuthenticatedRe
     }
 
     if (isVerified) {
+        const rzp = getRazorpay();
+        const paymentDetails = await rzp.payments.fetch(razorpay_payment_id);
+        
+        if (paymentDetails.status !== 'captured' && paymentDetails.status !== 'authorized') {
+            return res.status(400).json({ error: "Payment is not in captured or authorized state." });
+        }
+        
+        const realAmount = Number(paymentDetails.amount); // amount in paise
         let days = 30; // default fallback
-        const parsedAmount = Number(amount);
-        if (parsedAmount === 999 || parsedAmount === 99900) days = 90; // 3 months
-        if (parsedAmount === 1999 || parsedAmount === 199900) days = 365; // 1 year
+        if (realAmount === 99900) days = 90; // 3 months
+        else if (realAmount === 199900) days = 365; // 1 year
+        else if (realAmount === 999) days = 90; // just in case
+        else if (realAmount === 1999) days = 365; // just in case
 
         const newExpiry = new Date();
         newExpiry.setDate(newExpiry.getDate() + days);
@@ -675,7 +777,34 @@ app.post("/api/analyze-tender", verifyFirebaseToken, async (req: AuthenticatedRe
          `--- USER PROFILE ---\n${userProfile}${extraContextStr}\n\n--- TENDER DOCUMENT (Attached as PDF) ---\n`,
          { inlineData: { mimeType: "application/pdf", data: actualContent.replace(/^data:application\/pdf;base64,/, '') } }
        ];
+
+    } else if (tenderType === 'storage_urls') {
+       docContents = [
+         `--- USER PROFILE ---\n${userProfile}${extraContextStr}\n\n--- TENDER DOCUMENTS (Fetched from Storage) ---\n`
+       ];
+       if (Array.isArray(actualContent)) {
+         for (const url of actualContent) {
+           try {
+             const fetched = await safeFetch(url);
+             if (!fetched.ok) continue;
+             
+             const contentType = fetched.headers.get('content-type') || 'application/pdf';
+             const buffer = await fetched.arrayBuffer();
+             const base64 = Buffer.from(buffer).toString('base64');
+             
+             if (contentType.includes('text/plain')) {
+               const text = Buffer.from(buffer).toString('utf-8');
+               docContents.push(`\n--- DOCUMENT CONTENT ---\n${text}\n`);
+             } else {
+               docContents.push({ inlineData: { mimeType: contentType, data: base64 } });
+             }
+           } catch(err) {
+             console.error("Failed to fetch storage URL", url, err);
+           }
+         }
+       }
     } else if (tenderType === 'url') {
+
        try {
          // Phase 5: SSRF guard check
          const isSafe = await isSafeUrl(actualContent);
@@ -683,7 +812,7 @@ app.post("/api/analyze-tender", verifyFirebaseToken, async (req: AuthenticatedRe
            return res.status(400).json({ error: "Access denied: The specified URL is invalid or points to an unsafe/restricted destination." });
          }
 
-         const fetchedRes = await fetch(actualContent, {
+         const fetchedRes = await safeFetch(actualContent, {
            headers: {
              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
              'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
@@ -989,11 +1118,31 @@ app.post("/api/chat-tender", verifyFirebaseToken, requireActiveEntitlement, asyn
     } else if (Array.isArray(tenderDocument)) {
       tenderContextText = "Multiple documents attached as files.";
       for (const item of tenderDocument) {
-        if (typeof item === 'string' && item.startsWith('data:')) {
-           const match = item.match(/^data:([^;]+);base64,(.*)$/);
-           if (match) {
-             documentParts.push({ inlineData: { mimeType: match[1], data: match[2] } });
-           }
+        if (typeof item === 'string') {
+          if (item.startsWith('data:')) {
+             const match = item.match(/^data:([^;]+);base64,(.*)$/);
+             if (match) {
+               documentParts.push({ inlineData: { mimeType: match[1], data: match[2] } });
+             }
+          } else if (item.startsWith('http')) {
+             try {
+               const fetched = await safeFetch(item);
+               if (fetched.ok) {
+                 const contentType = fetched.headers.get('content-type') || 'application/pdf';
+                 const buffer = await fetched.arrayBuffer();
+                 const base64 = Buffer.from(buffer).toString('base64');
+                 
+                 if (contentType.includes('text/plain')) {
+                   const text = Buffer.from(buffer).toString('utf-8');
+                   tenderContextText += `\n--- DOCUMENT CONTENT ---\n${text}\n`;
+                 } else {
+                   documentParts.push({ inlineData: { mimeType: contentType, data: base64 } });
+                 }
+               }
+             } catch(err) {
+               console.error("Failed to fetch storage URL in chat", item, err);
+             }
+          }
         }
       }
     }
@@ -1086,7 +1235,7 @@ ${JSON.stringify(tenderDetails)}
     const outputText = response.text || "Empty response from AI.";
     res.json({ document: outputText });
   } catch (err: any) {
-    console.error("Generate Doc Error:", err); require("fs").writeFileSync("doc-error.txt", err.stack || err.toString());
+    console.error("Generate Doc Error:", err); 
     res.status(400).json({ error: err.message });
   }
 });

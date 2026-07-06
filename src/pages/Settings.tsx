@@ -27,6 +27,12 @@ export default function Settings() {
   const [activationCode, setActivationCode] = useState("");
   const [activating, setActivating] = useState(false);
   const [checkingOut, setCheckingOut] = useState<number | null>(null);
+  const [upiId, setUpiId] = useState("");
+  useEffect(() => {
+    getDoc(doc(db, "system_settings", "payments")).then(snap => {
+      if(snap.exists()) setUpiId(snap.data().upi_id || "");
+    });
+  }, []);
   
   const [premiumFeatures, setPremiumFeatures] = useState(["Unlimited Tender Analysis", "Automated Document Generation", "Dedicated Tender Chat AI", "PDF Exports & Competitor Analysis"]);
 
@@ -173,14 +179,11 @@ export default function Settings() {
         try { data = await res.json(); } catch(e) { throw new Error("A server error occurred. Please try again."); }
   
                  if (data.success && data.newExpiry) {
-                    const { doc, updateDoc, Timestamp } = await import('firebase/firestore');
-                    const { db } = await import('../lib/firebase');
-                    if (user) {
-                       await updateDoc(doc(db, 'users', user.uid), {
-                          role: 'premium',
-                          subscriptionExpiry: Timestamp.fromDate(new Date(data.newExpiry)),
-                          paymentId: pId
-                       });
+                    // Phase 1: Client side role write removed. Role is written server-side.
+                    // Just force an ID token refresh to get new claims if we were using them,
+                    // or just let the app reload.
+                    if (user && typeof user.getIdToken === 'function') {
+                       await user.getIdToken(true);
                     }
                  }
                  toast.dismiss();
@@ -349,6 +352,38 @@ export default function Settings() {
                           </div>
                        </div>
                      </div>
+                  </div>
+                )}
+                
+                {role !== "premium" && (
+                  <div className="mt-8 bg-white border border-slate-200 p-6 rounded-2xl shadow-sm">
+                    <h3 className="text-lg font-bold text-slate-900 mb-2">Alternative: Manual Payment</h3>
+                    {upiId ? (
+                      <p className="text-sm text-slate-600 mb-4">
+                        If you are facing issues with Razorpay, you can send the payment via UPI to <strong className="text-slate-900">{upiId}</strong> and request an activation code from support.
+                      </p>
+                    ) : (
+                      <p className="text-sm text-slate-600 mb-4">
+                        If you have purchased a subscription through offline channels, you can redeem your activation code here.
+                      </p>
+                    )}
+                    
+                    <div className="flex gap-3">
+                      <input 
+                        type="text" 
+                        value={activationCode}
+                        onChange={(e) => setActivationCode(e.target.value)}
+                        placeholder="Enter 16-digit activation code"
+                        className="flex-1 bg-slate-50 border border-slate-200 text-slate-900 text-sm rounded-lg px-4 py-2.5 outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                      <button 
+                        onClick={handleActivate}
+                        disabled={!activationCode || activating}
+                        className="bg-slate-900 hover:bg-slate-800 text-white px-6 py-2.5 rounded-lg font-semibold transition-colors disabled:opacity-50 whitespace-nowrap flex items-center gap-2"
+                      >
+                        {activating ? <Loader2 className="w-4 h-4 animate-spin" /> : "Redeem Code"}
+                      </button>
+                    </div>
                   </div>
                 )}
              </div>

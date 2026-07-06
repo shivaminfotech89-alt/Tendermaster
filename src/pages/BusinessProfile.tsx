@@ -201,13 +201,8 @@ export default function BusinessProfile() {
         try { data = await response.json(); } catch(e) { throw new Error("A server error occurred. Please try again."); }
   
       if (data.success && data.newExpiry) {
-        const { doc, updateDoc, Timestamp } = await import('firebase/firestore');
-        const { db } = await import('../lib/firebase');
-        if (user) {
-          await updateDoc(doc(db, 'users', user.uid), {
-            role: 'premium',
-            subscriptionExpiry: Timestamp.fromDate(new Date(data.newExpiry))
-          });
+        if (user && typeof user.getIdToken === 'function') {
+           await user.getIdToken(true);
         }
       }
       toast.success(data.message || "Premium activated! Please refresh.");

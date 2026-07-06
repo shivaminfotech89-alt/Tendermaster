@@ -136,7 +136,7 @@ export default function ProjectDetails() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 
-          tenderType: 'text',
+          tenderType: Array.isArray(project.payloadRef) ? 'storage_urls' : (typeof project.payloadRef === 'string' && project.payloadRef.startsWith('http') ? 'url' : 'text'),
           tenderContent: (project.payloadRef && project.payloadRef !== 'Text/PDF Document') ? project.payloadRef : JSON.stringify(project.details),
           userProfile: JSON.stringify(businessProfile || {}),
           extraContext: payload,
@@ -208,7 +208,7 @@ export default function ProjectDetails() {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ 
-            tenderType: 'text',
+            tenderType: Array.isArray(project.payloadRef) ? 'storage_urls' : (typeof project.payloadRef === 'string' && project.payloadRef.startsWith('http') ? 'url' : 'text'),
             tenderContent: project.payloadRef || project.details.tender_simplified.scope_of_work,
             userProfile: JSON.stringify(businessProfile || {}),
             extraContext: payload,
@@ -296,7 +296,7 @@ export default function ProjectDetails() {
              method: "POST",
              headers: { "Content-Type": "application/json" },
              body: JSON.stringify({ 
-               tenderType: tenderTypeToSend,
+               tenderType: Array.isArray(contentToSend) ? 'storage_urls' : (typeof contentToSend === 'string' && contentToSend.startsWith('http') ? 'url' : 'text'),
                tenderContent: contentToSend,
                userProfile: JSON.stringify(businessProfile || {}),
                extraContext: payload,

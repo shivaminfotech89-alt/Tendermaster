@@ -51,6 +51,7 @@ export default function TenderAnalyzer() {
   const [projectName, setProjectName] = useState("");
   
   const [saving, setSaving] = useState(false);
+  const [analyzedPayload, setAnalyzedPayload] = useState<any>(null);
   const [hasSaved, setHasSaved] = useState(false);
   
   // Chat state
@@ -235,16 +236,42 @@ export default function TenderAnalyzer() {
       const profile = userSnap.exists() ? userSnap.data() : { turnover: 0, experienceYears: 0 };
       setBusinessProfile(userSnap.exists() ? userSnap.data() : null);
 
+
+      const { ref, uploadString, getDownloadURL } = await import("firebase/storage");
+      const { storage } = await import("../lib/firebase");
+
+      let processedPayload = payload;
+      let finalTenderType: string = inputType;
+
+      if (inputType === 'pdf' || inputType === 'zip') {
+        const dataUris = Array.isArray(payload) ? payload : [payload];
+        const uploadedUrls = [];
+        
+        for (let i = 0; i < dataUris.length; i++) {
+          const dataUri = dataUris[i];
+          const storageRef = ref(storage, `tenders/${user?.uid || 'anon'}_${Date.now()}_${i}`);
+          await uploadString(storageRef, dataUri, 'data_url');
+          const url = await getDownloadURL(storageRef);
+          uploadedUrls.push(url);
+        }
+        
+        processedPayload = uploadedUrls;
+        finalTenderType = 'storage_urls';
+      }
+      
+      setAnalyzedPayload(processedPayload);
+
       const response = await fetchWithAuth("/api/analyze-tender", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 
-          tenderType: inputType,
-          tenderContent: payload,
+          tenderType: finalTenderType,
+          tenderContent: processedPayload,
           userProfile: JSON.stringify(profile),
           language: i18n.language
         })
       });
+
 
       let data;
       const responseText = await response.text();
@@ -277,7 +304,7 @@ export default function TenderAnalyzer() {
          projectName: projectName || analysisResult.tender_title || "Unnamed Project",
          tenderId: Date.now().toString(),
          details: analysisResult,
-         payloadRef: inputType === 'url' ? tenderUrl : 'Text/PDF Document',
+         payloadRef: inputType === 'url' ? tenderUrl : (analyzedPayload ? analyzedPayload : 'Text/PDF Document'),
          savedAt: new Date()
        });
 

@@ -32,4 +32,17 @@ export interface TenderAnalysisResult {
     next_immediate_steps: string[];
     winning_strategy_tips: string[];
   };
+  bid_recommendation?: {
+    estimated_value?: string;
+    conservative?: string;
+    recommended?: string;
+    aggressive?: string;
+    safe_range?: string;
+    margin_range?: string;
+    risk_level?: string;
+    rationale?: string;
+  };
+  financial_estimate?: {
+    total_estimated_cost?: string;
+  };
 }

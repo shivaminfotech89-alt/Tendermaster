@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { TenderAnalysisResult, UserProfile } from "../types";
-import { Loader2, ShieldCheck } from "lucide-react";
+import { Loader2, ShieldCheck, Target } from "lucide-react";
 import { fetchWithAuth } from "../lib/api";
 
 export default function TenderAnalysis({
@@ -28,7 +28,12 @@ export default function TenderAnalysis({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ tenderDocument: tenderDoc, userProfile: JSON.stringify(userProfile) }),
       });
-      const data = await res.json();
+      let data;
+      try {
+        data = await res.json();
+      } catch (e) {
+        throw new Error("Server returned an invalid response. This is usually caused by the file being too large (max 4.5MB) or taking too long to process (Vercel 60s timeout). Please try a smaller document.");
+      }
       if (!res.ok) throw new Error(data.error || "Failed to analyze");
       setAnalysis(data.analysis);
     } catch (err: any) {
@@ -40,7 +45,40 @@ export default function TenderAnalysis({
 
   return (
     <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500 h-full flex flex-col">
-      <div className="bg-white rounded-lg p-6 border border-slate-200 shadow-sm shrink-0">
+      
+            {analysis.bid_recommendation && (
+              <div className="bg-white rounded-lg border border-slate-200 shadow-sm overflow-hidden flex flex-col shrink-0 mb-6">
+                <div className="p-6">
+                  <h3 className="font-bold text-slate-800 flex items-center gap-2 mb-4">
+                    <Target className="w-5 h-5 text-indigo-600" /> AI Risk & Bid Calculator
+                  </h3>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+                    <div className="bg-slate-50 p-3 rounded-lg border border-slate-100">
+                      <p className="text-xs text-slate-500 mb-1">Estimated Value</p>
+                      <p className="font-bold text-slate-800">{analysis.bid_recommendation.estimated_value || '₹ -'}</p>
+                    </div>
+                    <div className="bg-blue-50 p-3 rounded-lg border border-blue-100">
+                      <p className="text-xs text-blue-600 font-semibold mb-1">Target Bid</p>
+                      <p className="font-black text-blue-700">{analysis.bid_recommendation.recommended || '₹ -'}</p>
+                    </div>
+                    <div className="bg-slate-50 p-3 rounded-lg border border-slate-100">
+                      <p className="text-xs text-slate-500 mb-1">Safe Range</p>
+                      <p className="font-semibold text-slate-700 text-sm overflow-hidden text-ellipsis whitespace-nowrap" title={analysis.bid_recommendation.safe_range}>{analysis.bid_recommendation.safe_range || '₹ -'}</p>
+                    </div>
+                    <div className="bg-slate-50 p-3 rounded-lg border border-slate-100">
+                      <p className="text-xs text-slate-500 mb-1">Risk Level</p>
+                      <p className="font-bold text-slate-800">{analysis.bid_recommendation.risk_level || '-'}</p>
+                    </div>
+                  </div>
+                  <div className="bg-slate-50 p-4 rounded-lg text-sm text-slate-600 border border-slate-100">
+                    <span className="font-semibold text-slate-700">Rationale: </span>
+                    {analysis.bid_recommendation.rationale}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <div className="bg-white rounded-lg p-6 border border-slate-200 shadow-sm shrink-0">
         <h2 className="text-[10px] font-bold text-slate-400 tracking-[0.2em] uppercase mb-1">Tender Analysis & Risk Profile</h2>
         <p className="text-slate-500 text-sm mb-6">
           Provide the raw tender document and your structured profile JSON to evaluate compatibility and risks.

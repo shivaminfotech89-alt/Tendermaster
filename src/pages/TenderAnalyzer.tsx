@@ -251,7 +251,7 @@ export default function TenderAnalyzer() {
       try {
         data = JSON.parse(responseText);
       } catch (e) {
-        throw new Error(`Failed to parse response: ${responseText.slice(0, 100)}`);
+        throw new Error(`The document is too large or the analysis took too long for Vercel limits (60s). Please try a smaller document or check back later.`);
       }
 
       if (!response.ok) {
@@ -355,7 +355,7 @@ export default function TenderAnalyzer() {
       try {
          data = JSON.parse(resText);
       } catch (e) {
-         throw new Error(`Failed to parse response: ${resText.slice(0, 100)}`);
+         throw new Error(`The document is too large or the analysis took too long for Vercel limits (60s). Please try a smaller document or check back later.`);
       }
       if (!res.ok) throw new Error(data.error || "Failed to generate document");
       setGeneratedDoc(data.document);
@@ -393,7 +393,7 @@ export default function TenderAnalyzer() {
       try {
          data = JSON.parse(resText);
       } catch (e) {
-         throw new Error(`Failed to parse response: ${resText.slice(0, 100)}`);
+         throw new Error(`The document is too large or the analysis took too long for Vercel limits (60s). Please try a smaller document or check back later.`);
       }
       if (!response.ok) throw new Error(data.error || "Failed to process query");
       

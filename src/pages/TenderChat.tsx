@@ -67,7 +67,12 @@ export default function TenderChat() {
         })
       });
 
-      const data = await res.json();
+      let data;
+      try {
+        data = await res.json();
+      } catch (e) {
+        throw new Error("Server returned an invalid response. This is usually caused by the file being too large (max 4.5MB) or taking too long to process (Vercel 60s timeout). Please try a smaller document.");
+      }
       if (!res.ok) throw new Error(data.error);
 
       setMessages(prev => [...prev, { role: 'model', text: data.answer || data.reply }]);

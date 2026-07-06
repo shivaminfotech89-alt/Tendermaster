@@ -51,7 +51,7 @@ export default function Settings() {
           description: "Premium Subscription",
           customer: {
             email: user.email || "",
-            contact: "9999999999" // Fallback contact
+            name: user.displayName || "User"
           },
           callback_url: callbackUrl.toString()
         })

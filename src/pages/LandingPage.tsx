@@ -9,11 +9,51 @@ export default function LandingPage() {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
 
   const navigate = useNavigate();
-  const handleRazorpayClick = () => {
-    if (user) {
-      navigate('/dashboard/settings');
-    } else {
+  const handleRazorpayClick = async (amount: number) => {
+    if (!user) {
       navigate('/login');
+      return;
+    }
+    
+    try {
+      const { fetchWithAuth } = await import('../lib/api');
+      const toast = (await import('react-hot-toast')).default;
+      
+      toast.loading("Generating payment link...", { id: "payment" });
+      const callbackUrl = new URL(window.location.origin);
+      callbackUrl.pathname = '/dashboard/settings';
+      callbackUrl.searchParams.set("payment", "success");
+      callbackUrl.searchParams.set("amount", amount.toString());
+      
+      const response = await fetchWithAuth('/api/create-payment-link', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          amount: amount * 100, 
+          description: "Premium Subscription",
+          customer: {
+            email: user.email || "",
+            name: user?.displayName || "User"
+          },
+          callback_url: callbackUrl.toString()
+        })
+      });
+      
+      const paymentLink = await response.json();
+      
+      if (!response.ok) {
+        throw new Error(paymentLink.error || "Failed to create payment link");
+      }
+      
+      if (paymentLink.short_url) {
+         toast.dismiss("payment");
+         window.location.href = paymentLink.short_url;
+      } else {
+         throw new Error("Invalid payment link returned");
+      }
+    } catch (err: any) {
+      const toast = (await import('react-hot-toast')).default;
+      toast.error(err.message || "Checkout failed", { id: "payment" });
     }
   };
 
@@ -247,7 +287,7 @@ export default function LandingPage() {
                 <li className="flex gap-3 text-slate-600"><Check className="w-5 h-5 text-emerald-500 shrink-0" /> Custom Digital Letterhead Export</li>
               </ul>
               
-              <button onClick={handleRazorpayClick} className="w-full py-4 rounded-xl font-bold text-center bg-[#002b5b] text-white hover:bg-[#001f42] transition-all shadow-md flex items-center justify-center gap-2">
+              <button onClick={() => handleRazorpayClick(999)} className="w-full py-4 rounded-xl font-bold text-center bg-[#002b5b] text-white hover:bg-[#001f42] transition-all shadow-md flex items-center justify-center gap-2">
                 Subscribe Quarterly <ArrowRight className="w-5 h-5" />
               </button>
             </div>
@@ -275,7 +315,7 @@ export default function LandingPage() {
                 <li className="flex gap-3 text-blue-100"><Check className="w-5 h-5 text-emerald-400 shrink-0" /> Multi-user Team Accounts (Coming Soon)</li>
               </ul>
               
-              <button onClick={handleRazorpayClick} className="w-full py-4 rounded-xl font-bold text-center bg-white text-[#002b5b] hover:bg-blue-50 transition-all shadow-lg flex items-center justify-center gap-2">
+              <button onClick={() => handleRazorpayClick(1999)} className="w-full py-4 rounded-xl font-bold text-center bg-white text-[#002b5b] hover:bg-blue-50 transition-all shadow-lg flex items-center justify-center gap-2">
                 Subscribe Annually <ArrowRight className="w-5 h-5" />
               </button>
             </div>

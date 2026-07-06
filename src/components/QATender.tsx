@@ -32,7 +32,12 @@ export default function QATender({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ tenderDocument: tenderDoc, question: userQ }),
       });
-      const data = await res.json();
+      let data;
+      try {
+        data = await res.json();
+      } catch (e) {
+        throw new Error("Server returned an invalid response. This is usually caused by the file being too large (max 4.5MB) or taking too long to process (Vercel 60s timeout). Please try a smaller document.");
+      }
       if (!res.ok) throw new Error(data.error || "Failed to get answer");
       
       setChatHistory(prev => [...prev, { role: 'assistant', content: data.answer }]);

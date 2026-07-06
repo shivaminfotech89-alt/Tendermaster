@@ -39,6 +39,24 @@ const getFirestore = () => {
   return adminGetFirestore(getApp(), firebaseConfig.firestoreDatabaseId || "(default)");
 };
 
+
+
+function robustJsonParse(text) {
+  if (!text) return {};
+  try {
+    return JSON.parse(text);
+  } catch (e) {
+    console.warn("Failed standard JSON.parse, trying to clean markdown...", e.message);
+    try {
+      let cleaned = text.replace(/^[sS]*?```json/i, '').replace(/```[sS]*?$/, '').trim();
+      return JSON.parse(cleaned);
+    } catch (e2) {
+      console.warn("Failed cleaned JSON.parse, trying relaxed parsing...", e2.message);
+      throw new Error("AI returned malformed data. Try again. " + e2.message);
+    }
+  }
+}
+
 const app = express();
 const PORT = 3000;
 
@@ -544,7 +562,7 @@ app.post("/api/parse-profile", verifyFirebaseToken, async (req: AuthenticatedReq
     }
 
     const aiClient = getAI();
-    const systemInstruction = `You are "Tender MasterAI", the premier strategic procurement intelligence engine for Indian entrepreneurs and enterprises. Your role is to decode dense bureaucratic tender documents (from GeM, nProcure, CPPP, and private entities), match them ruthlessly against an Indian businessman's profile, and provide a clear, risk-managed path to winning the bid.
+    const systemInstruction = `IMPORTANT: Keep your analysis extremely concise (under 800 words total) to ensure fast processing times and prevent timeouts. Use short bullet points and skip unnecessary pleasantries. \n\nYou are "Tender MasterAI", the premier strategic procurement intelligence engine for Indian entrepreneurs and enterprises. Your role is to decode dense bureaucratic tender documents (from GeM, nProcure, CPPP, and private entities), match them ruthlessly against an Indian businessman's profile, and provide a clear, risk-managed path to winning the bid.
 
 You switch between three operational modes based on input.
 
@@ -587,7 +605,7 @@ MODE 3: RAW CAPABILITY PARSING
       }
     });
 
-    const parsedData = response.text ? JSON.parse(response.text) : {};
+    const parsedData = robustJsonParse(response.text);
     res.json({ profile: parsedData });
   } catch (err: any) {
     console.error("Parse Profile Error:", err);
@@ -686,7 +704,7 @@ app.post("/api/analyze-tender", verifyFirebaseToken, async (req: AuthenticatedRe
        ];
     }
 
-    const systemInstruction = `You are "Tender MasterAI", the premier strategic procurement intelligence engine for Indian entrepreneurs and enterprises. Your role is to decode dense bureaucratic tender documents (from GeM, nProcure, CPPP, and private entities), match them ruthlessly against an Indian businessman's profile, and provide a clear, risk-managed path to winning the bid. BE EXTREMELY IN-DEPTH AND DETAILED in your rationales, lists, and steps. Elaborate heavily.
+    const systemInstruction = `IMPORTANT: Keep your analysis extremely concise (under 800 words total) to ensure fast processing times and prevent timeouts. Use short bullet points and skip unnecessary pleasantries. \n\nYou are "Tender MasterAI", the premier strategic procurement intelligence engine for Indian entrepreneurs and enterprises. Your role is to decode dense bureaucratic tender documents (from GeM, nProcure, CPPP, and private entities), match them ruthlessly against an Indian businessman's profile, and provide a clear, risk-managed path to winning the bid. BE EXTREMELY IN-DEPTH AND DETAILED in your rationales, lists, and steps. Elaborate heavily.
 ${language && language !== 'en' ? `\nCRITICAL LANGUAGE REQUIREMENT: You MUST output all your analysis and content STRICTLY in ${language === 'hi' ? 'Hindi' : language === 'gu' ? 'Gujarati' : language}. Do not use English unless it is for technical terms that have no direct translation.` : `\nCRITICAL LANGUAGE REQUIREMENT: You MUST output all your analysis and content STRICTLY in English. Do NOT output in Hindi, Gujarati, or any other regional language.`}
 
 You switch between three operational modes based on input.
@@ -886,7 +904,7 @@ MODE 1: CONTRACT PROFILE ANALYSIS & MATCHING
       }
     });
 
-    const parsedData = response.text ? JSON.parse(response.text) : {};
+    const parsedData = robustJsonParse(response.text);
     res.json({ analysis: parsedData });
   } catch (err: any) {
     console.error("Analyze Tender Error:", err);
@@ -947,7 +965,7 @@ app.post("/api/compare-tender", verifyFirebaseToken, async (req: AuthenticatedRe
       }
     });
 
-    res.json({ comparison: JSON.parse(response.text) });
+    res.json({ comparison: robustJsonParse(response.text) });
   } catch (err: any) {
     console.error("Compare Tender Error:", err);
     res.status(500).json({ error: err.message });
@@ -1035,7 +1053,7 @@ app.post("/api/generate-doc", verifyFirebaseToken, requireActiveEntitlement, asy
        extraContext = `\n--- USER SPECIFIC INSTRUCTIONS FOR THIS DOCUMENT ---\n${extraInstructions}\nPlease strictly incorporate the user's instructions above when filling out this document.`;
     }
 
-    const systemInstruction = `You are "Tender MasterAI", an expert legal and corporate procurement assistant specializing in Indian tenders. 
+    const systemInstruction = `IMPORTANT: Keep your analysis extremely concise (under 800 words total) to ensure fast processing times and prevent timeouts. Use short bullet points and skip unnecessary pleasantries. \n\nYou are "Tender MasterAI", an expert legal and corporate procurement assistant specializing in Indian tenders. 
 Your task is to generate high-quality, professional draft documents based on the provided tender analysis and the user's business profile. 
 Use the business profile data (Company Name, Address, GST, PAN, etc.) and Tender Details (Tender No., Dates, Authority Name, etc.) to automatically fill in ALL placeholders. 
 CRITICAL RULE: DO NOT leave placeholders like "[Tender Number - To be filled by bidder]" or "[Date]" or "[Bidder Name]" in the output. You MUST aggressively find and replace all such "fill in the blank" brackets with the actual data from the provided Tender Details and Business Profile. If an exact piece of information is missing, use a logical assumed default or current date rather than leaving a bracketed placeholder.
@@ -1093,4 +1111,8 @@ async function startServer() {
   });
 }
 
-startServer();
+if (!process.env.VERCEL) {
+  startServer();
+}
+
+export default app;

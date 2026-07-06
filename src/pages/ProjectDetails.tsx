@@ -149,7 +149,7 @@ export default function ProjectDetails() {
       try {
         data = JSON.parse(resText);
       } catch (e) {
-        throw new Error(`Failed to parse response: ${resText.slice(0, 100)}`);
+        throw new Error(`The document is too large or the analysis took too long for Vercel limits (60s). Please try a smaller document or check back later.`);
       }
       if (!response.ok) throw new Error(data.error || "Financial Re-analysis failed");
       const updatedDetails = data.analysis;
@@ -221,7 +221,7 @@ export default function ProjectDetails() {
         try {
           data = JSON.parse(resText);
         } catch (e) {
-          throw new Error(`Failed to parse response: ${resText.slice(0, 100)}`);
+          throw new Error(`The document is too large or the analysis took too long for Vercel limits (60s). Please try a smaller document or check back later.`);
         }
         if (!response.ok) throw new Error(data.error || "Re-analysis failed");
         
@@ -309,7 +309,7 @@ export default function ProjectDetails() {
           try {
             data = JSON.parse(resText);
           } catch (e) {
-            throw new Error(`Failed to parse response: ${resText.slice(0, 100)}`);
+            throw new Error(`The document is too large or the analysis took too long for Vercel limits (60s). Please try a smaller document or check back later.`);
           }
           if (!response.ok) throw new Error(data.error || "Re-analysis failed");
           
@@ -366,7 +366,7 @@ export default function ProjectDetails() {
        try {
           data = JSON.parse(resText);
        } catch (e) {
-          throw new Error(`Failed to parse response: ${resText.slice(0, 100)}`);
+          throw new Error(`The document is too large or the analysis took too long for Vercel limits (60s). Please try a smaller document or check back later.`);
        }
        if (!res.ok) throw new Error(data.error || "Failed to compare tender");
        setComparisonResult(data.comparison);
@@ -405,7 +405,7 @@ export default function ProjectDetails() {
       try {
          data = JSON.parse(resText);
       } catch (e) {
-         throw new Error(`Failed to parse response: ${resText.slice(0, 100)}`);
+         throw new Error(`The document is too large or the analysis took too long for Vercel limits (60s). Please try a smaller document or check back later.`);
       }
       if (!res.ok) throw new Error(data.error || "Failed to generate document");
       setGeneratedDoc(data.document);
@@ -443,7 +443,7 @@ export default function ProjectDetails() {
       try {
          data = JSON.parse(resText);
       } catch (e) {
-         throw new Error(`Failed to parse response: ${resText.slice(0, 100)}`);
+         throw new Error(`The document is too large or the analysis took too long for Vercel limits (60s). Please try a smaller document or check back later.`);
       }
       if (!response.ok) throw new Error(data.error || "Failed to process query");
       

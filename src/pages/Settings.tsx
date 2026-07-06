@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useLocation } from 'react-router-dom';
 import { useAuth } from '../auth/AuthProvider';
 import { ExternalLink, Save, Bell, Shield, Key, User, Settings2, Loader2, IndianRupee } from 'lucide-react';
 import { db } from '../lib/firebase';
@@ -9,7 +10,19 @@ import { fetchWithAuth } from "../lib/api";
 export default function Settings() {
   const { user, role, subscriptionExpiry } = useAuth();
   const [loading, setLoading] = useState(false);
-  const [activeTab, setActiveTab] = useState("account");
+  const location = useLocation();
+  const [activeTab, setActiveTab] = useState(() => {
+    const params = new URLSearchParams(location.search);
+    return params.get("tab") || "account";
+  });
+
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const tab = params.get("tab");
+    if (tab && tab !== activeTab) {
+      setActiveTab(tab);
+    }
+  }, [location.search]);
 
   const [activationCode, setActivationCode] = useState("");
   const [activating, setActivating] = useState(false);

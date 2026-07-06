@@ -69,7 +69,15 @@ export default function Layout() {
         </nav>
 
         <div className="p-4 border-t border-slate-100 flex flex-col gap-2">
+           
+           {role !== "PREMIUM" && (
+             <Link to="/dashboard/settings?tab=subscription" className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white py-2 rounded-lg text-sm font-bold shadow-md transition-all mb-2 animate-pulse hover:animate-none">
+               <ShieldCheck className="w-4 h-4" />
+               Subscribe Now
+             </Link>
+           )}
            <div className="flex items-center gap-2 px-2 pb-2 border-b border-slate-100">
+
              <Globe className="w-4 h-4 text-slate-400" />
              <select 
                value={i18n.language} 
@@ -107,8 +115,16 @@ export default function Layout() {
               <div className="w-6 h-6 bg-blue-600 rounded flex items-center justify-center font-bold text-white text-xs mr-2">T</div>
               <span className="text-lg font-bold tracking-tight text-slate-800">TenderMaster</span>
             </div>
+            
             <div className="flex items-center gap-2">
+              {role !== "PREMIUM" && (
+                 <Link to="/dashboard/settings?tab=subscription" className="flex items-center justify-center bg-gradient-to-r from-amber-500 to-orange-500 text-white p-1.5 rounded text-xs font-bold shadow-md animate-pulse">
+                   <ShieldCheck className="w-4 h-4 mr-1" />
+                   UPGRADE
+                 </Link>
+              )}
               <select 
+ 
                 value={i18n.language} 
                 onChange={(e) => changeLanguage(e.target.value)}
                 className="bg-transparent text-xs font-medium text-slate-600 outline-none cursor-pointer"

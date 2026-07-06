@@ -2,7 +2,6 @@ import "dotenv/config";
 import express from "express";
 import path from "path";
 import fs from "fs";
-import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
 import admin from "firebase-admin";
 import { getApp } from "firebase-admin/app";
@@ -271,7 +270,8 @@ app.post("/api/create-payment-link", verifyFirebaseToken, async (req: Authentica
     res.json(paymentLink);
   } catch (error: any) {
     console.error("Create payment link error:", error);
-    res.status(error?.statusCode || 400).json({ error: error?.error?.description || error?.message || "Failed to create payment link" });
+    const status = Number(error?.statusCode) || 400;
+    res.status(status >= 100 && status < 600 ? status : 400).json({ error: error?.error?.description || error?.message || "Failed to create payment link" });
   }
 });
 
@@ -1094,6 +1094,7 @@ ${JSON.stringify(tenderDetails)}
 async function startServer() {
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
+    const { createServer: createViteServer } = await import("vite");
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: "spa",

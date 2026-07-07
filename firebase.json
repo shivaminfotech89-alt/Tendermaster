@@ -1,9 +1,7 @@
 {
   "firestore": {
-    "rules": "firestore.rules",
-    "indexes": "firestore.indexes.json"
+    "database": "ai-studio-tender2-c4e31b45-0537-4d35-9963-ee2ad83145d3",
+    "rules": "firestore.rules"
   },
-  "storage": {
-    "rules": "storage.rules"
-  }
+  "storage": { "rules": "storage.rules" }
 }

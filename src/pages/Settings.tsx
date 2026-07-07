@@ -375,7 +375,8 @@ export default function Settings() {
              </div>
            )}
 
-           {activeTab === "notifications" && (
+           {/* Email Preferences tab — no email service / cron exists; hidden until backend is wired.
+           activeTab === "notifications" && (
               <div className="max-w-md space-y-6">
                  <div>
                     <h2 className="text-xl font-bold text-slate-900">Email Preferences</h2>
@@ -392,7 +393,8 @@ export default function Settings() {
                     </label>
                  </div>
               </div>
-           )}
+           )
+           */}
            
            {activeTab === "preferences" && (
               <div className="max-w-2xl space-y-6">
@@ -412,6 +414,7 @@ export default function Settings() {
                           <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
                        </label>
                     </div>
+                    {/* Weekly Digest — no email backend / cron yet; hidden until wired.
                     <div className="p-6 border-b border-slate-100 flex items-center justify-between">
                        <div>
                           <h3 className="font-semibold text-slate-900">Weekly Digest</h3>
@@ -422,6 +425,7 @@ export default function Settings() {
                           <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
                        </label>
                     </div>
+                    */}
                  </div>
 
                  <div>

@@ -697,7 +697,8 @@ export default function TenderAnalyzer() {
 
             {/* Bid Recommendation / Risk Calculator */}
             {activeTab === 'calculator' && role === 'free' && <LockedOverlay />}
-            {activeTab === 'calculator' && role !== 'free' && analysisResult.bid_recommendation && (
+            {activeTab === 'calculator' && role !== 'free' && (
+              analysisResult.bid_recommendation ? (
               <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden flex flex-col md:flex-row divide-y md:divide-y-0 md:divide-x divide-slate-100">
                 {/* Bid Recommendation */}
                 <div className="p-6 md:w-2/3">
@@ -724,7 +725,7 @@ export default function TenderAnalyzer() {
                   </div>
                   <div className="bg-slate-50 p-4 rounded-lg text-sm text-slate-600 border border-slate-100">
                     <span className="font-semibold text-slate-700">Rationale: </span>
-                    {analysisResult.bid_recommendation.rationale}
+                    {analysisResult.bid_recommendation.rationale || '-'}
                   </div>
                 </div>
 
@@ -747,6 +748,13 @@ export default function TenderAnalyzer() {
                   </div>
                 )}
               </div>
+              ) : (
+              <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-10 flex flex-col items-center justify-center text-center gap-3">
+                <Target className="w-10 h-10 text-slate-300" />
+                <p className="font-semibold text-slate-500">Bid calculator data unavailable for this analysis.</p>
+                <p className="text-sm text-slate-400">Save the project and re-analyse to regenerate the bid recommendation.</p>
+              </div>
+              )
             )}
 
             {activeTab === 'overview' && (

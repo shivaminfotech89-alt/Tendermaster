@@ -62,7 +62,7 @@ if (admin.apps.length === 0) {
 }
 
 const getFirestore = () =>
-  adminGetFirestore(getApp(), firebaseConfig.firestoreDatabaseId || "(default)");
+adminGetFirestore(getApp(), process.env.FIRESTORE_DATABASE_ID || firebaseConfig.firestoreDatabaseId || "(default)");
 
 // ---------------------------------------------------------------------------
 // JSON helpers
@@ -136,7 +136,7 @@ const setEntitlementClaims = async (
     const token = tokenRes.token;
     if (!token) throw new Error("google-auth-library returned empty token");
 
-    const dbId = firebaseConfig.firestoreDatabaseId || "(default)";
+ const dbId = process.env.FIRESTORE_DATABASE_ID || firebaseConfig.firestoreDatabaseId || "(default)";
     const docPath = `projects/${firebaseConfig.projectId}/databases/${dbId}/documents/users/${uid}`;
 
     const fields: Record<string, any> = { role: { stringValue: claims.role } };

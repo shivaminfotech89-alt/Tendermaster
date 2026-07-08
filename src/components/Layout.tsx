@@ -24,9 +24,14 @@ export default function Layout() {
   useEffect(() => { setMoreOpen(false); }, [location.pathname]);
   const { t, i18n } = useTranslation();
 
+  // True when the user can see analysis results — either a fresh analysis in
+  // TenderAnalyzer (context) or a saved project open in ProjectDetails (URL).
+  const hasActiveAnalysis =
+    !!analysisResult || /^\/dashboard\/projects\/.+/.test(location.pathname);
+
   const changeLanguage = (lng: string) => {
     i18n.changeLanguage(lng);
-    if (analysisResult) {
+    if (hasActiveAnalysis) {
       const name = LANG_NAMES[lng] ?? lng;
       toast(`Language changed to ${name}. Re-analyze your tender to see the analysis results in ${name}.`, {
         icon: "🌐",

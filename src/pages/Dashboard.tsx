@@ -11,6 +11,7 @@ import {
   PieChart, Pie, Cell, Tooltip, Legend, ResponsiveContainer,
   BarChart, Bar, XAxis, YAxis, CartesianGrid,
 } from "recharts";
+import { useDeadlineReminders } from "../hooks/useDeadlineReminders";
 
 // ── Helpers ─────────────────────────────────────────────────
 
@@ -100,6 +101,8 @@ export default function Dashboard() {
 
     return () => { unsubTenders(); unsubNotifs(); };
   }, [user]);
+
+  useDeadlineReminders(user?.uid, savedTenders, notifications);
 
   // ── Derived values ─────────────────────────────────────────
 

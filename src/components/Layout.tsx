@@ -31,13 +31,11 @@ export default function Layout() {
 
   const changeLanguage = (lng: string) => {
     i18n.changeLanguage(lng);
-    if (hasActiveAnalysis) {
-      const name = LANG_NAMES[lng] ?? lng;
-      toast(`Language changed to ${name}. Re-analyze your tender to see the analysis results in ${name}.`, {
-        icon: "🌐",
-        duration: 5000,
-      });
-    }
+    const name = LANG_NAMES[lng] ?? lng;
+    toast(`Language changed to ${name}. Existing tender analyses need to be re-analyzed to appear in ${name}.`, {
+      icon: "🌐",
+      duration: 5000,
+    });
   };
 
   const isGlobalAnalyzing = analyzing || reanalyzing;

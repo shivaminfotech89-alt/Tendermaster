@@ -18,6 +18,7 @@ import Projects from "./pages/Projects";
 import Notifications from "./pages/Notifications";
 import Reports from "./pages/Reports";
 import Settings from "./pages/Settings";
+import Documents from "./pages/Documents";
 import TermsAndConditions from "./pages/TermsAndConditions";
 import PrivacyPolicy from "./pages/PrivacyPolicy";
 
@@ -69,7 +70,7 @@ export default function App() {
                 <Route path="projects" element={<Projects />} />
                 <Route path="analyzer" element={<TenderAnalyzer />} />
                 <Route path="chat" element={<TenderChat />} />
-                <Route path="documents" element={<div className="p-8 text-center text-slate-500">Global Documents View (Coming Soon)</div>} />
+                <Route path="documents" element={<Documents />} />
                 <Route path="reports" element={<Reports />} />
                 <Route path="notifications" element={<Notifications />} />
                 <Route path="profile" element={<BusinessProfile />} />

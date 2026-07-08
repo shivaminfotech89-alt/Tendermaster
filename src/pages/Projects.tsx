@@ -5,6 +5,12 @@ import { useNavigate } from "react-router-dom";
 import { collection, query, where, onSnapshot, doc, deleteDoc } from "firebase/firestore";
 import { db } from "../lib/firebase";
 
+function fmtDate(ts: any): string {
+  if (!ts) return "";
+  const d = ts?.toDate ? ts.toDate() : new Date(ts);
+  return d.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
+}
+
 export default function Projects() {
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -74,6 +80,7 @@ export default function Projects() {
                        <td className="p-4 pl-6 font-medium text-slate-900 max-w-xs">
                          <div className="line-clamp-2 text-sm text-blue-800 font-bold mb-1">{t.projectName || "Unnamed Project"}</div>
                          <div className="text-xs text-slate-500 line-clamp-1" title={tenderTitle}>{tenderTitle}</div>
+                         {t.savedAt && <div className="text-[10px] text-slate-400 mt-0.5">Saved {fmtDate(t.savedAt)}</div>}
                        </td>
                        <td className="p-4 text-slate-700 max-w-xs">
                          <div className="line-clamp-2 text-sm">{authorityName}</div>

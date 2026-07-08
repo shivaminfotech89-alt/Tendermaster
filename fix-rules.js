@@ -1,4 +1,6 @@
-rules_version = '2';
+const fs = require('fs');
+
+const rules = `rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     match /{document=**} {
@@ -78,22 +80,12 @@ service cloud.firestore {
       allow read, write: if isAdmin();
     }
     
-   match /activity_logs/{logId} {
+    match /activity_logs/{logId} {
       allow read: if isSuperAdmin() || isAdmin();
       allow create: if isSignedIn();
       allow update, delete: if isSuperAdmin();
     }
-
-    match /user_documents/{docId} {
-      allow read: if isSignedIn() && resource.data.userId == request.auth.uid;
-      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
-      allow delete: if isSignedIn() && resource.data.userId == request.auth.uid;
-    }
-
-    match /chat_messages/{msgId} {
-      allow read:   if isSignedIn() && resource.data.userId == request.auth.uid;
-      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
-      allow delete: if isSignedIn() && resource.data.userId == request.auth.uid;
-    }
   }
 }
+`;
+fs.writeFileSync('firestore.rules', rules);

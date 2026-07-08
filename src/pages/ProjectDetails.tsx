@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
-import { doc, getDoc, updateDoc, deleteDoc, setDoc } from "firebase/firestore";
+import { doc, getDoc, updateDoc, deleteDoc, addDoc, collection, query, where, getDocs, writeBatch, serverTimestamp } from "firebase/firestore";
 import { db } from "../lib/firebase";
 import { ArrowLeft, Calculator, Building, Activity, Upload, FileText, Download, Loader2, Save, Plus, Target, CheckCircle, ListTodo, Calendar, MessageSquare, Send, X, Trash2, RefreshCw, Edit2, Check, ChevronRight } from "lucide-react";
 import Markdown from "react-markdown";
@@ -11,6 +11,12 @@ import { useTranslation } from "react-i18next";
 import { useAuth } from "../auth/AuthProvider";
 import { useAnalyzerStore } from "../context/AnalyzerContext";
 import { fetchWithAuth } from "../lib/api";
+
+function fmtDate(ts: any): string {
+  if (!ts) return "";
+  const d = ts?.toDate ? ts.toDate() : new Date(ts);
+  return d.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
+}
 
 export default function ProjectDetails() {
   const { projectId } = useParams();
@@ -46,7 +52,7 @@ export default function ProjectDetails() {
 
   // Chatbot state
   const [chatInput, setChatInput] = useState("");
-  const [messages, setMessages] = useState<{role: 'user' | 'model', text: string}[]>([]);
+  const [messages, setMessages] = useState<{role: 'user' | 'model', text: string, createdAt?: Date}[]>([]);
   const [chatLoading, setChatLoading] = useState(false);
   const chatBottomRef = useRef<HTMLDivElement>(null);
   
@@ -103,6 +109,28 @@ export default function ProjectDetails() {
     fetchProject();
   }, [projectId, user]);
 
+  useEffect(() => {
+    if (!projectId || !user) return;
+    const loadChatHistory = async () => {
+      try {
+        const q = query(collection(db, "chat_messages"), where("projectId", "==", projectId));
+        const snap = await getDocs(q);
+        const msgs = snap.docs
+          .map(d => d.data() as any)
+          .sort((a, b) => (a.createdAt?.toMillis?.() ?? 0) - (b.createdAt?.toMillis?.() ?? 0))
+          .map(d => ({
+            role: d.role as 'user' | 'model',
+            text: d.text as string,
+            createdAt: d.createdAt?.toDate?.() as Date | undefined,
+          }));
+        setMessages(msgs);
+      } catch (e) {
+        console.error("Failed to load chat history:", e);
+      }
+    };
+    loadChatHistory();
+  }, [projectId, user]);
+
   const handleSaveName = async () => {
     if (!projectId || !projectName.trim()) return;
     try {
@@ -155,7 +183,7 @@ export default function ProjectDetails() {
       const updatedDetails = data.analysis;
       
       setProject((prev: any) => ({ ...prev, details: updatedDetails }));
-      await updateDoc(docRef, { details: updatedDetails });
+      await updateDoc(docRef, { details: updatedDetails, lastReanalyzedAt: serverTimestamp() });
 
       toast.success("Calculations saved and Financial AI Risk re-analyzed!");
     } catch (e: any) {
@@ -183,16 +211,17 @@ export default function ProjectDetails() {
   };
 
   const handleClearChat = async () => {
-    if (projectId) {
-      try {
-        await setDoc(doc(db, "saved_tenders", projectId), {
-          chatHistory: []
-        }, { merge: true });
-        setMessages([]);
-        setShowClearChatModal(false);
-      } catch (e) {
-        console.error("Failed to clear chat:", e);
-      }
+    if (!projectId) return;
+    try {
+      const q = query(collection(db, "chat_messages"), where("projectId", "==", projectId));
+      const snap = await getDocs(q);
+      const batch = writeBatch(db);
+      snap.docs.forEach(d => batch.delete(d.ref));
+      await batch.commit();
+      setMessages([]);
+      setShowClearChatModal(false);
+    } catch (e) {
+      console.error("Failed to clear chat:", e);
     }
   };
 
@@ -229,8 +258,8 @@ export default function ProjectDetails() {
         setProject({ ...project, details: updatedDetails });
         
         const docRef = doc(db, "saved_tenders", projectId);
-        await updateDoc(docRef, { details: updatedDetails });
-        
+        await updateDoc(docRef, { details: updatedDetails, lastReanalyzedAt: serverTimestamp() });
+
         toast.success("Project thoroughly re-analyzed!");
     } catch (e: any) {
         console.error(e);
@@ -319,7 +348,7 @@ export default function ProjectDetails() {
           
           if (projectId) {
              const docRef = doc(db, "saved_tenders", projectId);
-             await updateDoc(docRef, { details: updatedDetails });
+             await updateDoc(docRef, { details: updatedDetails, lastReanalyzedAt: serverTimestamp() });
           }
           toast.success("Project completely re-analyzed with new document!");
       } catch (err: any) {
@@ -418,12 +447,24 @@ export default function ProjectDetails() {
 
   const handleSendMessage = async () => {
     if (!chatInput.trim() || chatLoading) return;
-    
-    const newMessages = [...messages, { role: 'user' as const, text: chatInput }];
+
+    const userText = chatInput;
+    const userMsg = { role: 'user' as const, text: userText, createdAt: new Date() };
+    const newMessages = [...messages, userMsg];
     setMessages(newMessages);
     setChatInput("");
     setChatLoading(true);
-    
+
+    if (projectId && user) {
+      addDoc(collection(db, "chat_messages"), {
+        userId: user.uid,
+        projectId,
+        role: 'user',
+        text: userText,
+        createdAt: serverTimestamp(),
+      }).catch(e => console.error("Failed to save user message:", e));
+    }
+
     setTimeout(() => chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
 
     try {
@@ -431,13 +472,13 @@ export default function ProjectDetails() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          tenderDocument: project.payloadRef, // passing reference text logic here
+          tenderDocument: project.payloadRef,
           analysisResult: project.details,
-          messages: newMessages,
+          messages: newMessages.map(m => ({ role: m.role, text: m.text })),
           language: i18n.language
         })
       });
-      
+
       const resText = await response.text();
       let data;
       try {
@@ -446,11 +487,24 @@ export default function ProjectDetails() {
          throw new Error(`The document is too large or the analysis took too long for Vercel limits (60s). Please try a smaller document or check back later.`);
       }
       if (!response.ok) throw new Error(data.error || "Failed to process query");
-      
-      setMessages([...newMessages, { role: 'model', text: data.answer }]);
+
+      const aiText = data.answer;
+      const aiMsg = { role: 'model' as const, text: aiText, createdAt: new Date() };
+      setMessages([...newMessages, aiMsg]);
+
+      if (projectId && user) {
+        addDoc(collection(db, "chat_messages"), {
+          userId: user.uid,
+          projectId,
+          role: 'model',
+          text: aiText,
+          createdAt: serverTimestamp(),
+        }).catch(e => console.error("Failed to save AI message:", e));
+      }
+
       setTimeout(() => chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
     } catch (err) {
-      setMessages([...newMessages, { role: 'model', text: "Error: Failed to process query. " + String(err) }]);
+      setMessages([...newMessages, { role: 'model', text: "Error: Failed to process query. " + String(err), createdAt: new Date() }]);
     } finally {
       setChatLoading(false);
     }
@@ -547,6 +601,10 @@ export default function ProjectDetails() {
                    Match Score: {project.details?.compatibility?.score}/100
                 </span>
              </p>
+             <div className="flex flex-wrap items-center gap-x-4 gap-y-0.5 mt-1 text-xs text-slate-400">
+               {project.savedAt && <span>Saved: {fmtDate(project.savedAt)}</span>}
+               {project.lastReanalyzedAt && <span>Last re-analyzed: {fmtDate(project.lastReanalyzedAt)}</span>}
+             </div>
            </div>
            <div className="flex flex-wrap gap-3 mt-4 md:mt-0">
              <button onClick={() => setShowReanalyzeModal(true)} disabled={reanalyzing} className="font-semibold px-4 py-2 rounded-lg text-sm border flex items-center gap-2 transition-colors shrink-0 print:hidden bg-blue-50 hover:bg-blue-100 text-blue-700 border-blue-200">

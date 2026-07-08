@@ -403,6 +403,7 @@ export default function Settings() {
                     <p className="text-sm text-slate-500 mt-1">Configure your app experience and notifications.</p>
                  </div>
                  
+                 {/* Email Notifications — no email service exists; hidden until backend is wired.
                  <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
                     <div className="p-6 border-b border-slate-100 flex items-center justify-between">
                        <div>
@@ -414,7 +415,8 @@ export default function Settings() {
                           <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
                        </label>
                     </div>
-                    {/* Weekly Digest — no email backend / cron yet; hidden until wired.
+                 */}
+                 {/* Weekly Digest — no email backend / cron yet; hidden until wired.
                     <div className="p-6 border-b border-slate-100 flex items-center justify-between">
                        <div>
                           <h3 className="font-semibold text-slate-900">Weekly Digest</h3>
@@ -425,8 +427,8 @@ export default function Settings() {
                           <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
                        </label>
                     </div>
-                    */}
-                 </div>
+                 */}
+                 {/* </div> (closing tag of email preferences card — hidden with the rows above) */}
 
                  <div>
                     <h2 className="text-xl font-bold text-slate-900 mt-8">Legal & Compliance</h2>

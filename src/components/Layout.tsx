@@ -4,6 +4,13 @@ import { LayoutDashboard, FileSearch, Building2, ShieldCheck, LogOut, Settings, 
 import { useAuth } from "../auth/AuthProvider";
 import { useAnalyzerStore } from "../context/AnalyzerContext";
 import { useTranslation } from "react-i18next";
+import toast from "react-hot-toast";
+
+const LANG_NAMES: Record<string, string> = {
+  en: "English",
+  hi: "हिंदी",
+  gu: "ગુજરાતી",
+};
 
 export default function Layout() {
   const { user, role, logout } = useAuth();
@@ -19,6 +26,13 @@ export default function Layout() {
 
   const changeLanguage = (lng: string) => {
     i18n.changeLanguage(lng);
+    if (analysisResult) {
+      const name = LANG_NAMES[lng] ?? lng;
+      toast(`Language changed to ${name}. Re-analyze your tender to see the analysis results in ${name}.`, {
+        icon: "🌐",
+        duration: 5000,
+      });
+    }
   };
 
   const isGlobalAnalyzing = analyzing || reanalyzing;

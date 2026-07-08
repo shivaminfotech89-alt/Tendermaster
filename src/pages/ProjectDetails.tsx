@@ -113,7 +113,7 @@ export default function ProjectDetails() {
     if (!projectId || !user) return;
     const loadChatHistory = async () => {
       try {
-        const q = query(collection(db, "chat_messages"), where("projectId", "==", projectId));
+        const q = query(collection(db, "chat_messages"), where("userId", "==", user.uid), where("projectId", "==", projectId));
         const snap = await getDocs(q);
         const msgs = snap.docs
           .map(d => d.data() as any)
@@ -213,7 +213,7 @@ export default function ProjectDetails() {
   const handleClearChat = async () => {
     if (!projectId) return;
     try {
-      const q = query(collection(db, "chat_messages"), where("projectId", "==", projectId));
+      const q = query(collection(db, "chat_messages"), where("userId", "==", user.uid), where("projectId", "==", projectId));
       const snap = await getDocs(q);
       const batch = writeBatch(db);
       snap.docs.forEach(d => batch.delete(d.ref));

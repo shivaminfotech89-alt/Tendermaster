@@ -63,7 +63,7 @@ export default function TenderChat() {
     if (!user) return;
     setMessages([]);
     try {
-      const q = query(collection(db, "chat_messages"), where("projectId", "==", pid));
+      const q = query(collection(db, "chat_messages"), where("userId", "==", user.uid), where("projectId", "==", pid));
       const snap = await getDocs(q);
       const msgs: ChatMsg[] = snap.docs
         .map(d => d.data() as any)
@@ -82,7 +82,7 @@ export default function TenderChat() {
   const handleClearChat = async () => {
     if (!selectedProject || !user) return;
     try {
-      const q = query(collection(db, "chat_messages"), where("projectId", "==", selectedProject.id));
+      const q = query(collection(db, "chat_messages"), where("userId", "==", user.uid), where("projectId", "==", selectedProject.id));
       const snap = await getDocs(q);
       const batch = writeBatch(db);
       snap.docs.forEach(d => batch.delete(d.ref));

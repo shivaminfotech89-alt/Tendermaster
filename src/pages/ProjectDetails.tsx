@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
-import { doc, getDoc, updateDoc, deleteDoc, addDoc, collection, query, where, getDocs, writeBatch, serverTimestamp } from "firebase/firestore";
+import { doc, getDoc, updateDoc, deleteDoc, addDoc, collection, query, where, getDocs, writeBatch, serverTimestamp, arrayUnion } from "firebase/firestore";
 import { db } from "../lib/firebase";
 import { ArrowLeft, AlertCircle, Calculator, Building, Activity, Upload, FileText, Download, Loader2, Save, Plus, Target, CheckCircle, ListTodo, Calendar, MessageSquare, Send, X, Trash2, RefreshCw, Edit2, Check, ChevronRight } from "lucide-react";
 import Markdown from "react-markdown";
@@ -320,7 +320,29 @@ export default function ProjectDetails() {
                  reader.readAsDataURL(file);
              });
           }
-          
+
+          // Upload files to Firebase Storage so they appear in Source Documents
+          const newSourceUrls: string[] = [];
+          try {
+            const { ref: sRef, uploadString: uploadStr, getDownloadURL } = await import("firebase/storage");
+            const { storage } = await import("../lib/firebase");
+            const dataUris = Array.isArray(contentToSend) ? contentToSend as string[] : [contentToSend as string];
+            for (let idx = 0; idx < dataUris.length; idx++) {
+              const fileRef = sRef(storage, `users/${user?.uid}/tenders/${Date.now()}_${idx}_${file.name}`);
+              await uploadStr(fileRef, dataUris[idx], 'data_url');
+              newSourceUrls.push(await getDownloadURL(fileRef));
+            }
+            if (newSourceUrls.length > 0 && projectId) {
+              await updateDoc(doc(db, "saved_tenders", projectId), { sourceDocuments: arrayUnion(...newSourceUrls) });
+              setProject(prev => prev ? {
+                ...prev,
+                sourceDocuments: [...((prev.sourceDocuments as string[]) || []), ...newSourceUrls]
+              } : prev);
+            }
+          } catch (uploadErr) {
+            console.warn("Source document storage upload failed — analysis will still proceed:", uploadErr);
+          }
+
           const response = await fetchWithAuth("/api/analyze-tender", {
              method: "POST",
              headers: { "Content-Type": "application/json" },
@@ -650,11 +672,14 @@ export default function ProjectDetails() {
                {/* Source Documents — original tender files stored in Firebase Storage */}
                {(() => {
                  const ref = project?.payloadRef;
-                 const urls: string[] = Array.isArray(ref)
+                 const payloadUrls: string[] = Array.isArray(ref)
                    ? ref.filter((u: any) => typeof u === 'string' && u.startsWith('http'))
                    : typeof ref === 'string' && ref.startsWith('http')
                    ? [ref]
                    : [];
+                 const sourceDocUrls: string[] = ((project?.sourceDocuments as string[]) || [])
+                   .filter((u: any) => typeof u === 'string' && u.startsWith('http'));
+                 const urls: string[] = [...payloadUrls, ...sourceDocUrls.filter(u => !payloadUrls.includes(u))];
                  const isMulti = urls.length > 1;
                  if (urls.length === 0) return null;
                  return (

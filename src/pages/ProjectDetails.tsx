@@ -255,8 +255,8 @@ export default function ProjectDetails() {
         if (!response.ok) throw new Error(data.error || "Re-analysis failed");
         
         const updatedDetails = data.analysis;
-        setProject({ ...project, details: updatedDetails });
-        
+        setProject((prev: any) => ({ ...prev, details: updatedDetails }));
+
         const docRef = doc(db, "saved_tenders", projectId);
         await updateDoc(docRef, { details: updatedDetails, lastReanalyzedAt: serverTimestamp() });
 
@@ -366,8 +366,8 @@ export default function ProjectDetails() {
           
           // Update project state
           const updatedDetails = data.analysis;
-          setProject({ ...project, details: updatedDetails });
-          
+          setProject((prev: any) => ({ ...prev, details: updatedDetails }));
+
           if (projectId) {
              const docRef = doc(db, "saved_tenders", projectId);
              await updateDoc(docRef, { details: updatedDetails, lastReanalyzedAt: serverTimestamp() });

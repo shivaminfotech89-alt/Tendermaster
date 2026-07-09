@@ -593,7 +593,7 @@ export default function ProjectDetails() {
       
       {/* Header */}
       <div>
-        <Link to="/dashboard" className="inline-flex items-center text-sm font-medium text-blue-600 hover:text-blue-800 mb-4">
+        <Link to="/dashboard" className="inline-flex items-center text-sm font-medium text-indigo-600 hover:text-indigo-800 mb-4">
           <ArrowLeft className="w-4 h-4 mr-1" /> Back to Dashboard
         </Link>
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
@@ -604,7 +604,7 @@ export default function ProjectDetails() {
                    type="text" 
                    value={projectName} 
                    onChange={(e) => setProjectName(e.target.value)}
-                   className="text-3xl font-bold tracking-tight text-slate-900 border-b-2 border-blue-500 outline-none w-full bg-transparent px-1"
+                   className="text-3xl font-bold tracking-tight text-slate-900 border-b-2 border-indigo-500 outline-none w-full bg-transparent px-1"
                    autoFocus
                    onKeyDown={(e) => e.key === 'Enter' && handleSaveName()}
                  />
@@ -614,7 +614,7 @@ export default function ProjectDetails() {
              ) : (
                <div className="flex items-center gap-3">
                  <h1 className="text-3xl font-bold tracking-tight text-slate-900 line-clamp-1">{projectName}</h1>
-                 <button onClick={() => setIsEditingName(true)} className="text-slate-400 hover:text-blue-600 transition-colors p-1 rounded-md hover:bg-slate-100"><Edit2 className="w-4 h-4" /></button>
+                 <button onClick={() => setIsEditingName(true)} className="text-slate-400 hover:text-indigo-600 transition-colors p-1 rounded-md hover:bg-slate-100"><Edit2 className="w-4 h-4" /></button>
                </div>
              )}
              <p className="text-slate-500 mt-1 flex items-center gap-2">
@@ -629,7 +629,7 @@ export default function ProjectDetails() {
              </div>
            </div>
            <div className="flex flex-wrap gap-3 mt-4 md:mt-0">
-             <button onClick={() => setShowReanalyzeModal(true)} disabled={reanalyzing} className="font-semibold px-4 py-2 rounded-lg text-sm border flex items-center gap-2 transition-colors shrink-0 print:hidden bg-blue-50 hover:bg-blue-100 text-blue-700 border-blue-200">
+             <button onClick={() => setShowReanalyzeModal(true)} disabled={reanalyzing} className="font-semibold px-4 py-2 rounded-lg text-sm border flex items-center gap-2 transition-colors shrink-0 print:hidden bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border-indigo-200">
                {reanalyzing ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
                {reanalyzing ? `Re-Analyzing... ${Math.floor(reanalyzeProgress)}%` : "Re-Analyze"}
              </button>
@@ -656,10 +656,10 @@ export default function ProjectDetails() {
 
       {/* Tabs */}
       <div className="flex overflow-x-auto border-b border-slate-200 mb-8 pb-px no-scrollbar">
-         <button onClick={() => setActiveTab('overview')} className={`px-6 py-3 font-semibold text-sm border-b-2 whitespace-nowrap transition-colors ${activeTab === 'overview' ? 'border-blue-600 text-blue-700' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>Tender Overview</button>
-         <button onClick={() => setActiveTab('docs')} className={`px-6 py-3 font-semibold text-sm border-b-2 whitespace-nowrap transition-colors ${activeTab === 'docs' ? 'border-blue-600 text-blue-700' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>Auto-Generate Documents</button>
-         <button onClick={() => setActiveTab('calculator')} className={`px-6 py-3 font-semibold text-sm border-b-2 whitespace-nowrap transition-colors ${activeTab === 'calculator' ? 'border-blue-600 text-blue-700' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>Bid Engine & Profit Calculator</button>
-         <button onClick={() => setActiveTab('chat')} className={`px-6 py-3 font-semibold text-sm border-b-2 whitespace-nowrap transition-colors ${activeTab === 'chat' ? 'border-blue-600 text-blue-700' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>Tender Chat AI</button>
+         <button onClick={() => setActiveTab('overview')} className={`px-6 py-3 font-semibold text-sm border-b-2 whitespace-nowrap transition-colors ${activeTab === 'overview' ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>Tender Overview</button>
+         <button onClick={() => setActiveTab('docs')} className={`px-6 py-3 font-semibold text-sm border-b-2 whitespace-nowrap transition-colors ${activeTab === 'docs' ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>Auto-Generate Documents</button>
+         <button onClick={() => setActiveTab('calculator')} className={`px-6 py-3 font-semibold text-sm border-b-2 whitespace-nowrap transition-colors ${activeTab === 'calculator' ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>Bid Engine & Profit Calculator</button>
+         <button onClick={() => setActiveTab('chat')} className={`px-6 py-3 font-semibold text-sm border-b-2 whitespace-nowrap transition-colors ${activeTab === 'chat' ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>Tender Chat AI</button>
       </div>
 
       <div className="flex flex-col gap-8">
@@ -711,8 +711,8 @@ export default function ProjectDetails() {
                {/* Uploaded Documents */}
                <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
                  <div className="p-5 border-b border-slate-100 flex justify-between items-center">
-                    <h3 className="font-semibold text-slate-800 flex items-center gap-2"><Upload className="w-5 h-5 text-blue-600" /> Project Documents & ZIPs</h3>
-                    <button disabled={reanalyzing} onClick={() => fileInputRef.current?.click()} className="text-blue-600 hover:bg-blue-50 p-2 rounded-lg transition-colors disabled:opacity-50">
+                    <h3 className="font-semibold text-slate-800 flex items-center gap-2"><Upload className="w-5 h-5 text-indigo-600" /> Project Documents & ZIPs</h3>
+                    <button disabled={reanalyzing} onClick={() => fileInputRef.current?.click()} className="text-indigo-600 hover:bg-indigo-50 p-2 rounded-lg transition-colors disabled:opacity-50">
                       {reanalyzing ? <Loader2 className="w-5 h-5 animate-spin" /> : <Plus className="w-5 h-5" />}
                     </button>
                     <input type="file" ref={fileInputRef} className="hidden" accept=".pdf,.doc,.docx,.zip,application/pdf,application/zip" onChange={handleFileUpload} />
@@ -774,7 +774,7 @@ export default function ProjectDetails() {
                 <select 
                   value={docType} 
                   onChange={e => setDocType(e.target.value)}
-                  className="w-full bg-white border border-indigo-200 text-indigo-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block p-2.5"
+                  className="w-full bg-white border border-indigo-200 text-indigo-900 text-sm rounded-lg focus:ring-indigo-500 focus:border-indigo-500 block p-2.5"
                 >
                   <optgroup label="Standard Documents">
                     <option>Cover Letter</option>
@@ -801,7 +801,7 @@ export default function ProjectDetails() {
                   placeholder="Optional: Enter specific details or numbers for this document..."
                   value={extraInstructions}
                   onChange={(e) => setExtraInstructions(e.target.value)}
-                  className="w-full bg-white border border-indigo-200 text-indigo-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block p-2.5 mt-3 mb-3"
+                  className="w-full bg-white border border-indigo-200 text-indigo-900 text-sm rounded-lg focus:ring-indigo-500 focus:border-indigo-500 block p-2.5 mt-3 mb-3"
                 />
                 <button 
                   onClick={generateDocument} 
@@ -987,9 +987,9 @@ export default function ProjectDetails() {
                      <p className="text-xs text-slate-500 mb-1">Estimated Value</p>
                      <p className="font-bold text-slate-800">{project.details?.bid_recommendation?.estimated_value || '₹ -'}</p>
                    </div>
-                   <div className="bg-blue-50 p-3 rounded-lg border border-blue-100">
-                     <p className="text-xs text-blue-600 font-semibold mb-1">Target Bid</p>
-                     <p className="font-black text-blue-700">{project.details?.bid_recommendation?.recommended || '₹ -'}</p>
+                   <div className="bg-indigo-50 p-3 rounded-lg border border-indigo-100">
+                     <p className="text-xs text-indigo-600 font-semibold mb-1">Target Bid</p>
+                     <p className="font-black text-indigo-700">{project.details?.bid_recommendation?.recommended || '₹ -'}</p>
                    </div>
                    <div className="bg-slate-50 p-3 rounded-lg border border-slate-100">
                      <p className="text-xs text-slate-500 mb-1">Safe Range</p>
@@ -1043,7 +1043,7 @@ export default function ProjectDetails() {
                    </h3>
                    <p className="text-sm text-slate-400 mt-1">Adjust AI estimates manually to calculate accurate profit margins.</p>
                 </div>
-                <button onClick={saveCalculations} disabled={savingCalc} className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-2 transition-colors">
+                <button onClick={saveCalculations} disabled={savingCalc} className="bg-gradient-to-br from-indigo-600 to-blue-600 hover:from-indigo-700 hover:to-blue-700 text-white px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-2 transition-colors shadow-sm">
                    {savingCalc ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
                    Save Calculation
                 </button>
@@ -1052,26 +1052,26 @@ export default function ProjectDetails() {
              <div className="p-6 space-y-8 bg-slate-50">
                 
                 {project.details?.bid_recommendation && (
-                  <div className="bg-blue-50 border border-blue-200 rounded-xl p-5 mb-4">
-                     <h4 className="font-bold text-blue-900 flex items-center gap-2 mb-3">
+                  <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-5 mb-4">
+                     <h4 className="font-bold text-indigo-900 flex items-center gap-2 mb-3">
                        <Target className="w-4 h-4" /> AI Bid Recommendation
                      </h4>
                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
-                        <div className="bg-white p-3 rounded border border-blue-100">
-                           <p className="text-[10px] uppercase font-bold text-blue-400">Aggressive Bid</p>
-                           <p className="font-mono font-bold text-blue-900">{project.details.bid_recommendation.aggressive}</p>
+                        <div className="bg-white p-3 rounded border border-indigo-100">
+                           <p className="text-[10px] uppercase font-bold text-indigo-400">Aggressive Bid</p>
+                           <p className="font-mono font-bold text-indigo-900">{project.details.bid_recommendation.aggressive}</p>
                         </div>
-                        <div className="bg-white p-3 rounded border border-blue-400 shadow-sm relative">
-                           <span className="absolute -top-2.5 left-1/2 -translate-x-1/2 bg-blue-600 text-white text-[9px] font-bold px-2 py-0.5 rounded-full uppercase">Recommended</span>
-                           <p className="text-[10px] uppercase font-bold text-blue-400">Sweet Spot</p>
-                           <p className="font-mono text-lg font-black text-blue-700">{project.details.bid_recommendation.recommended}</p>
+                        <div className="bg-white p-3 rounded border border-indigo-400 shadow-sm relative">
+                           <span className="absolute -top-2.5 left-1/2 -translate-x-1/2 bg-indigo-600 text-white text-[9px] font-bold px-2 py-0.5 rounded-full uppercase">Recommended</span>
+                           <p className="text-[10px] uppercase font-bold text-indigo-400">Sweet Spot</p>
+                           <p className="font-mono text-lg font-black text-indigo-700">{project.details.bid_recommendation.recommended}</p>
                         </div>
-                        <div className="bg-white p-3 rounded border border-blue-100">
-                           <p className="text-[10px] uppercase font-bold text-blue-400">Conservative Bid</p>
-                           <p className="font-mono font-bold text-blue-900">{project.details.bid_recommendation.conservative}</p>
+                        <div className="bg-white p-3 rounded border border-indigo-100">
+                           <p className="text-[10px] uppercase font-bold text-indigo-400">Conservative Bid</p>
+                           <p className="font-mono font-bold text-indigo-900">{project.details.bid_recommendation.conservative}</p>
                         </div>
                      </div>
-                     <div className="flex gap-4 text-xs text-blue-800 bg-white/50 p-2 rounded">
+                     <div className="flex gap-4 text-xs text-indigo-800 bg-white/50 p-2 rounded">
                         <p><strong>Margin:</strong> {project.details.bid_recommendation.margin_range}</p>
                         <p><strong>Risk:</strong> {project.details.bid_recommendation.risk_level}</p>
                      </div>
@@ -1137,7 +1137,7 @@ export default function ProjectDetails() {
                    <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
                       <div className="p-4 border-b border-slate-100 bg-slate-50 flex justify-between items-center">
                          <h4 className="font-bold text-slate-800 flex items-center gap-2"><Building className="w-4 h-4 text-slate-400" /> Materials</h4>
-                         <button onClick={() => setMaterials([...materials, { item: "New Material", cost_num: 0 }])} className="text-xs font-bold text-blue-600 hover:text-blue-800 flex items-center">
+                         <button onClick={() => setMaterials([...materials, { item: "New Material", cost_num: 0 }])} className="text-xs font-bold text-indigo-600 hover:text-indigo-800 flex items-center">
                            <Plus className="w-3 h-3 mr-1" /> Add
                          </button>
                       </div>
@@ -1163,7 +1163,7 @@ export default function ProjectDetails() {
                                     n[idx].cost_num = Number(e.target.value);
                                     setMaterials(n);
                                   }}
-                                  className="font-mono text-sm border focus:ring-blue-500 focus:border-blue-500 rounded px-2 py-1 w-full"
+                                  className="font-mono text-sm border focus:ring-indigo-500 focus:border-indigo-500 rounded px-2 py-1 w-full"
                                   placeholder="0"
                                 />
                               </div>
@@ -1179,7 +1179,7 @@ export default function ProjectDetails() {
                    <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
                       <div className="p-4 border-b border-slate-100 bg-slate-50 flex justify-between items-center">
                          <h4 className="font-bold text-slate-800 flex items-center gap-2"><Activity className="w-4 h-4 text-slate-400" /> Labour & Logistics</h4>
-                         <button onClick={() => setLabour([...labour, { role: "New Role", cost_num: 0 }])} className="text-xs font-bold text-blue-600 hover:text-blue-800 flex items-center">
+                         <button onClick={() => setLabour([...labour, { role: "New Role", cost_num: 0 }])} className="text-xs font-bold text-indigo-600 hover:text-indigo-800 flex items-center">
                            <Plus className="w-3 h-3 mr-1" /> Add
                          </button>
                       </div>
@@ -1205,7 +1205,7 @@ export default function ProjectDetails() {
                                     n[idx].cost_num = Number(e.target.value);
                                     setLabour(n);
                                   }}
-                                  className="font-mono text-sm border focus:ring-blue-500 focus:border-blue-500 rounded px-2 py-1 w-full"
+                                  className="font-mono text-sm border focus:ring-indigo-500 focus:border-indigo-500 rounded px-2 py-1 w-full"
                                   placeholder="0"
                                 />
                               </div>
@@ -1267,7 +1267,7 @@ export default function ProjectDetails() {
                <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
                   <div className="p-5 border-b border-slate-100">
                      <h3 className="font-bold text-slate-800 flex items-center gap-2">
-                       <ListTodo className="w-5 h-5 text-blue-600" /> Action Center
+                       <ListTodo className="w-5 h-5 text-indigo-600" /> Action Center
                      </h3>
                   </div>
                   <div className="p-5">
@@ -1320,7 +1320,7 @@ export default function ProjectDetails() {
                                  <p className={`text-sm font-medium cursor-pointer ${isChecked ? 'text-slate-500 line-through' : 'text-slate-700'}`} onClick={() => toggleCheckItem(docItem.document_name)}>
                                    {docItem.document_name}
                                  </p>
-                                 <p className={`text-xs ${isUploaded ? 'text-emerald-500' : (isManuallyChecked ? 'text-blue-500' : (docItem.is_mandatory ? 'text-rose-500 font-semibold' : 'text-slate-400'))}`}>
+                                 <p className={`text-xs ${isUploaded ? 'text-emerald-500' : (isManuallyChecked ? 'text-indigo-500' : (docItem.is_mandatory ? 'text-rose-500 font-semibold' : 'text-slate-400'))}`}>
                                     {isUploaded ? 'Uploaded & Verified' : (isManuallyChecked ? 'Marked complete' : (docItem.is_mandatory ? 'Missing - Mandatory' : 'Pending'))}
                                  </p>
                               </div>
@@ -1346,13 +1346,13 @@ export default function ProjectDetails() {
                              <li key={idx} className="flex flex-col gap-1">
                                <div className="flex justify-between items-start">
                                  <p className="text-sm font-medium text-slate-700">{annex.annexure_name}</p>
-                                 <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${annex.filling_complexity?.toLowerCase?.() === 'high' ? 'bg-amber-100 text-amber-800' : 'bg-blue-100 text-blue-800'}`}>
+                                 <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${annex.filling_complexity?.toLowerCase?.() === 'high' ? 'bg-amber-100 text-amber-800' : 'bg-indigo-100 text-indigo-800'}`}>
                                   {annex.filling_complexity || 'Medium'}
                                  </span>
                                </div>
                                <p className="text-xs text-slate-500">{annex.purpose}</p>
                                <button 
-                                 className="text-xs text-blue-600 font-medium text-left hover:underline w-max"
+                                 className="text-xs text-indigo-600 font-medium text-left hover:underline w-max"
                                  onClick={() => {
                                    setDocType(`Auto-Fill: ${annex.annexure_name}`);
                                    // We will just scroll to top smoothly
@@ -1428,21 +1428,21 @@ export default function ProjectDetails() {
         {/* Chatbot specific to this tender */}
         {activeTab === 'chat' && (
           <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden flex flex-col h-[500px] mt-8 mb-8">
-               <div className="p-4 border-b border-slate-100 bg-blue-600 text-white flex items-center justify-between">
+               <div className="p-4 border-b border-slate-100 bg-gradient-to-r from-indigo-700 to-blue-600 text-white flex items-center justify-between">
                   <div className="flex items-center gap-3">
                     <h3 className="font-bold flex items-center gap-2">
                       <MessageSquare className="w-5 h-5" />
                       Project AI Assistant
                     </h3>
-                    <span className="text-xs bg-blue-500 px-2 py-1 rounded font-medium shadow-sm">TenderMaster Chat</span>
+                    <span className="text-xs bg-white/20 px-2 py-1 rounded font-medium shadow-sm">TenderMaster Chat</span>
                   </div>
-                  <button 
+                  <button
                     onClick={() => {
                         if (messages.length > 0) {
                             setShowClearChatModal(true);
                         }
-                    }} 
-                    className="text-xs px-3 py-1.5 rounded transition-colors flex items-center gap-1 bg-blue-700 hover:bg-blue-800 text-blue-100"
+                    }}
+                    className="text-xs px-3 py-1.5 rounded transition-colors flex items-center gap-1 bg-white/15 hover:bg-white/25 text-white"
                   >
                     <Trash2 className="w-3 h-3" /> Clear Chat
                   </button>
@@ -1451,7 +1451,7 @@ export default function ProjectDetails() {
                <div className="flex-1 p-4 overflow-y-auto bg-slate-50 flex flex-col gap-4">
                  {messages.length === 0 ? (
                    <div className="h-full flex flex-col items-center justify-center text-slate-400 text-center">
-                      <MessageSquare className="w-12 h-12 mb-3 opacity-30 text-blue-500" />
+                      <MessageSquare className="w-12 h-12 mb-3 opacity-30 text-indigo-500" />
                       <p className="text-sm">Ask anything about this specific project.</p>
                       <div className="flex flex-wrap gap-2 justify-center mt-4 max-w-sm">
                         <button onClick={() => setChatInput("What is the exact EMD amount and deadline?")} className="text-xs bg-white border border-slate-200 text-slate-600 px-3 py-1.5 rounded-full hover:bg-slate-100">EMD & Deadlines?</button>
@@ -1461,7 +1461,7 @@ export default function ProjectDetails() {
                  ) : (
                    messages.map((msg, i) => (
                      <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                       <div className={`max-w-[80%] rounded-2xl p-4 text-sm ${msg.role === 'user' ? 'bg-blue-600 text-white rounded-br-sm' : 'bg-white border border-slate-200 text-slate-800 rounded-bl-sm shadow-sm'}`}>
+                       <div className={`max-w-[80%] rounded-2xl p-4 text-sm ${msg.role === 'user' ? 'bg-indigo-600 text-white rounded-br-sm' : 'bg-white border border-slate-200 text-slate-800 rounded-bl-sm shadow-sm'}`}>
                           <div className={msg.role === 'user' ? "prose prose-sm prose-invert max-w-none" : "prose prose-sm max-w-none prose-blue"}>
                              <Markdown remarkPlugins={[remarkGfm]}>{msg.text}</Markdown>
                           </div>
@@ -1485,14 +1485,14 @@ export default function ProjectDetails() {
                       value={chatInput}
                       onChange={e => setChatInput(e.target.value)}
                       onKeyDown={e => { if(e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSendMessage(); } }}
-                      className="flex-1 border border-slate-300 rounded-xl px-4 py-3 focus:ring-2 focus:ring-blue-500 outline-none text-sm resize-none"
+                      className="flex-1 border border-slate-300 rounded-xl px-4 py-3 focus:ring-2 focus:ring-indigo-500 outline-none text-sm resize-none"
                       placeholder="Message AI about this project..."
                       rows={2}
                     />
                     <button 
                       onClick={handleSendMessage}
                       disabled={!chatInput.trim() || chatLoading}
-                      className="bg-blue-600 hover:bg-blue-700 text-white w-11 h-11 rounded-xl flex items-center justify-center shrink-0 disabled:opacity-50 transition-colors shadow-sm"
+                      className="bg-indigo-600 hover:bg-indigo-700 text-white w-11 h-11 rounded-xl flex items-center justify-center shrink-0 disabled:opacity-50 transition-colors shadow-sm"
                     >
                       <Send className="w-5 h-5 -ml-0.5" />
                     </button>
@@ -1517,16 +1517,16 @@ export default function ProjectDetails() {
              
              <div className="flex-1 overflow-y-auto p-6">
                 {comparing ? (
-                  <div className="flex flex-col justify-center items-center h-64 text-blue-600">
+                  <div className="flex flex-col justify-center items-center h-64 text-indigo-600">
                      <Loader2 className="w-12 h-12 animate-spin mb-4" />
                      <p className="text-lg font-semibold animate-pulse">Running semantic comparison against original project baseline...</p>
                      <p className="text-sm text-slate-500 mt-2">Checking clauses, EMD, eligibility, and dates...</p>
                   </div>
                 ) : comparisonResult ? (
                   <div className="space-y-6">
-                     <div className="bg-blue-50 border border-blue-200 p-4 rounded-xl">
-                        <h3 className="font-bold text-blue-900 mb-2">Critical Changes Summary</h3>
-                        <p className="text-sm text-blue-800 leading-relaxed">{comparisonResult.critical_changes_summary}</p>
+                     <div className="bg-indigo-50 border border-indigo-200 p-4 rounded-xl">
+                        <h3 className="font-bold text-indigo-900 mb-2">Critical Changes Summary</h3>
+                        <p className="text-sm text-indigo-800 leading-relaxed">{comparisonResult.critical_changes_summary}</p>
                      </div>
                      
                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -1601,7 +1601,7 @@ export default function ProjectDetails() {
               </button>
               <button 
                 onClick={handleManualReanalyze}
-                className="px-4 py-2 font-medium bg-blue-600 text-white hover:bg-blue-700 rounded-lg transition-colors shadow-sm"
+                className="px-4 py-2 font-medium bg-gradient-to-br from-indigo-600 to-blue-600 text-white hover:from-indigo-700 hover:to-blue-700 rounded-lg transition-colors shadow-sm"
               >
                 Confirm Re-Analyze
               </button>

@@ -647,6 +647,42 @@ export default function ProjectDetails() {
            
            {activeTab === 'overview' && (
              <div className="space-y-8">
+               {/* Source Documents — original tender files stored in Firebase Storage */}
+               {(() => {
+                 const ref = project?.payloadRef;
+                 const urls: string[] = Array.isArray(ref)
+                   ? ref.filter((u: any) => typeof u === 'string' && u.startsWith('http'))
+                   : typeof ref === 'string' && ref.startsWith('http')
+                   ? [ref]
+                   : [];
+                 const isMulti = urls.length > 1;
+                 if (urls.length === 0) return null;
+                 return (
+                   <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+                     <div className="p-5 border-b border-slate-100">
+                       <h3 className="font-semibold text-slate-800 flex items-center gap-2">
+                         <FileText className="w-5 h-5 text-indigo-600" /> Source Documents
+                       </h3>
+                       <p className="text-xs text-slate-500 mt-1">Original tender files used for this analysis.</p>
+                     </div>
+                     <div className="p-5 flex flex-wrap gap-3">
+                       {urls.map((url, i) => (
+                         <a
+                           key={i}
+                           href={url}
+                           target="_blank"
+                           rel="noopener noreferrer"
+                           className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-lg text-sm font-semibold transition-colors"
+                         >
+                           <FileText className="w-4 h-4" />
+                           {isMulti ? `View Document ${i + 1}` : 'View Source'}
+                         </a>
+                       ))}
+                     </div>
+                   </div>
+                 );
+               })()}
+
                {/* Uploaded Documents */}
                <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
                  <div className="p-5 border-b border-slate-100 flex justify-between items-center">

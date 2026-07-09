@@ -5,6 +5,14 @@ import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 // Set worker path
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
+/** Counts pages in a PDF supplied as a base64 data URI (e.g. "data:application/pdf;base64,..."). */
+export async function countPdfPages(dataUri: string): Promise<number> {
+  const response = await fetch(dataUri);
+  const arrayBuffer = await response.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer) }).promise;
+  return pdf.numPages;
+}
+
 export const convertPdfToImage = async (file: File): Promise<string> => {
   const arrayBuffer = await file.arrayBuffer();
   const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;

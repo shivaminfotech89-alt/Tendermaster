@@ -11,6 +11,7 @@ import * as XLSX from "xlsx";
 import { toast } from "react-hot-toast";
 import { useTranslation } from "react-i18next";
 import { fetchWithAuth } from "../lib/api";
+import { countPdfPages } from "../lib/pdfToImage";
 
 const CollapsibleSection = ({ title, defaultOpen = true, children }: { title: string, defaultOpen?: boolean, children: React.ReactNode }) => {
   const [isOpen, setIsOpen] = useState(defaultOpen);
@@ -61,6 +62,7 @@ export default function TenderAnalyzer() {
   const [chatInput, setChatInput] = useState("");
   const [chatLoading, setChatLoading] = useState(false);
   const [confirmClearChat, setConfirmClearChat] = useState(false);
+  const [pageChecking, setPageChecking] = useState(false);
 
   const [materials, setMaterials] = useState<any[]>([]);
   const [labour, setLabour] = useState<any[]>([]);
@@ -224,6 +226,37 @@ export default function TenderAnalyzer() {
     }
     
     setError("");
+
+    // Page-count pre-check for PDF/ZIP uploads (URL inputs can't be counted client-side)
+    if (inputType !== 'url') {
+      setPageChecking(true);
+      try {
+        const dataUris: string[] = Array.isArray(payload) ? payload : [payload as string];
+        let totalPages = 0;
+        for (const uri of dataUris) {
+          if (!uri.startsWith('data:application/pdf')) continue;
+          try {
+            totalPages += await countPdfPages(uri);
+          } catch {
+            // unparseable PDF — let the server enforce the limit
+          }
+        }
+        if (totalPages > 1000) {
+          setError(
+            `These documents total ${totalPages} pages, over the 1000-page analysis limit. ` +
+            `Tip: analyze your main documents first (main tender + eligibility docs), then open the ` +
+            `saved project and use "Add document / re-analyze" to include the remaining files in ` +
+            `smaller batches, keeping each batch under 1000 pages.`
+          );
+          return;
+        }
+      } catch {
+        // counting failed entirely — proceed and let the server enforce the limit
+      } finally {
+        setPageChecking(false);
+      }
+    }
+
     setAnalyzing(true);
     setAnalysisResult(null);
 
@@ -486,7 +519,7 @@ export default function TenderAnalyzer() {
       </div>
 
       {!analysisResult && (
-        <div className={`bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden transition-opacity ${analyzing ? 'opacity-60 pointer-events-none' : ''}`}>
+        <div className={`bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden transition-opacity ${analyzing || pageChecking ? 'opacity-60 pointer-events-none' : ''}`}>
           <div className="p-0 border-b border-slate-100 flex items-center bg-slate-50 overflow-x-auto">
             <button
               onClick={() => setInputType('pdf')}
@@ -543,10 +576,10 @@ export default function TenderAnalyzer() {
                       </button>
                       <button
                         onClick={handleAnalyze}
-                        disabled={analyzing}
+                        disabled={analyzing || pageChecking}
                         className="bg-gradient-to-br from-indigo-700 to-blue-600 hover:from-indigo-800 hover:to-blue-700 text-white px-6 py-2.5 rounded-lg font-semibold transition-all shadow-sm disabled:opacity-50 flex items-center gap-2"
                       >
-                        {analyzing ? <><Loader2 className="w-4 h-4 animate-spin" /> Analyzing</> : 'Analyze Document'}
+                        {pageChecking ? <><Loader2 className="w-4 h-4 animate-spin" /> Checking...</> : analyzing ? <><Loader2 className="w-4 h-4 animate-spin" /> Analyzing</> : 'Analyze Document'}
                       </button>
                     </div>
                   </div>
@@ -583,10 +616,10 @@ export default function TenderAnalyzer() {
                        </button>
                        <button
                          onClick={handleAnalyze}
-                         disabled={analyzing}
+                         disabled={analyzing || pageChecking}
                          className="bg-gradient-to-br from-indigo-700 to-blue-600 hover:from-indigo-800 hover:to-blue-700 text-white px-6 py-2.5 rounded-lg font-semibold transition-all shadow-sm disabled:opacity-50 flex items-center gap-2"
                        >
-                         {analyzing ? <><Loader2 className="w-4 h-4 animate-spin" /> Analyzing</> : 'Analyze ZIP'}
+                         {pageChecking ? <><Loader2 className="w-4 h-4 animate-spin" /> Checking...</> : analyzing ? <><Loader2 className="w-4 h-4 animate-spin" /> Analyzing</> : 'Analyze ZIP'}
                        </button>
                      </div>
                    </div>

@@ -488,21 +488,21 @@ export default function TenderAnalyzer() {
       {!analysisResult && (
         <div className={`bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden transition-opacity ${analyzing ? 'opacity-60 pointer-events-none' : ''}`}>
           <div className="p-0 border-b border-slate-100 flex items-center bg-slate-50 overflow-x-auto">
-            <button 
+            <button
               onClick={() => setInputType('pdf')}
-              className={`flex-1 py-4 px-6 text-sm font-semibold border-b-2 flex justify-center items-center gap-2 whitespace-nowrap ${inputType === 'pdf' ? 'border-blue-600 text-blue-700 bg-white' : 'border-transparent text-slate-500 hover:text-slate-700'}`}
+              className={`flex-1 py-4 px-6 text-sm font-semibold border-b-2 flex justify-center items-center gap-2 whitespace-nowrap ${inputType === 'pdf' ? 'border-indigo-600 text-indigo-700 bg-white' : 'border-transparent text-slate-500 hover:text-slate-700'}`}
             >
               <File className="w-4 h-4" /> Attach PDF Files
             </button>
-            <button 
+            <button
               onClick={() => setInputType('zip')}
-              className={`flex-1 py-4 px-6 text-sm font-semibold border-b-2 flex justify-center items-center gap-2 whitespace-nowrap ${inputType === 'zip' ? 'border-blue-600 text-blue-700 bg-white' : 'border-transparent text-slate-500 hover:text-slate-700'}`}
+              className={`flex-1 py-4 px-6 text-sm font-semibold border-b-2 flex justify-center items-center gap-2 whitespace-nowrap ${inputType === 'zip' ? 'border-indigo-600 text-indigo-700 bg-white' : 'border-transparent text-slate-500 hover:text-slate-700'}`}
             >
               <Upload className="w-4 h-4" /> ZIP Folder (PDF, Excel, CSV)
             </button>
-            <button 
+            <button
               onClick={() => setInputType('url')}
-              className={`flex-1 py-4 px-6 text-sm font-semibold border-b-2 flex justify-center items-center gap-2 whitespace-nowrap ${inputType === 'url' ? 'border-blue-600 text-blue-700 bg-white' : 'border-transparent text-slate-500 hover:text-slate-700'}`}
+              className={`flex-1 py-4 px-6 text-sm font-semibold border-b-2 flex justify-center items-center gap-2 whitespace-nowrap ${inputType === 'url' ? 'border-indigo-600 text-indigo-700 bg-white' : 'border-transparent text-slate-500 hover:text-slate-700'}`}
             >
               <LinkIcon className="w-4 h-4" /> Web Link
             </button>
@@ -518,11 +518,11 @@ export default function TenderAnalyzer() {
             {inputType === 'pdf' && (
               <div className="space-y-4">
                 {!pdfFileName ? (
-                  <div 
+                  <div
                     onClick={() => !analyzing && fileInputRef.current?.click()}
-                    className={`border-2 border-dashed border-slate-300 rounded-xl p-8 md:p-12 text-center cursor-pointer hover:bg-slate-50 hover:border-blue-400 transition-all ${analyzing ? 'opacity-50' : ''}`}
+                    className={`border-2 border-dashed border-slate-300 rounded-xl p-8 md:p-12 text-center cursor-pointer hover:bg-indigo-50/40 hover:border-indigo-400 transition-all ${analyzing ? 'opacity-50' : ''}`}
                   >
-                    <File className="w-10 h-10 text-blue-500 mx-auto mb-4" />
+                    <File className="w-10 h-10 text-indigo-500 mx-auto mb-4" />
                     <p className="font-medium text-slate-800 text-lg mb-1">Upload PDF tender documents</p>
                     <p className="text-sm text-slate-500">Supported formats: .pdf</p>
                   </div>
@@ -541,10 +541,10 @@ export default function TenderAnalyzer() {
                       <button onClick={clearPdf} disabled={analyzing} className="text-slate-500 hover:text-red-500 p-2 disabled:opacity-50">
                         <Trash2 className="w-5 h-5" />
                       </button>
-                      <button 
-                        onClick={handleAnalyze} 
+                      <button
+                        onClick={handleAnalyze}
                         disabled={analyzing}
-                        className="bg-slate-900 hover:bg-slate-800 text-white px-6 py-2.5 rounded-lg font-semibold transition-colors disabled:opacity-50 flex items-center gap-2"
+                        className="bg-gradient-to-br from-indigo-700 to-blue-600 hover:from-indigo-800 hover:to-blue-700 text-white px-6 py-2.5 rounded-lg font-semibold transition-all shadow-sm disabled:opacity-50 flex items-center gap-2"
                       >
                         {analyzing ? <><Loader2 className="w-4 h-4 animate-spin" /> Analyzing</> : 'Analyze Document'}
                       </button>
@@ -558,9 +558,9 @@ export default function TenderAnalyzer() {
             {inputType === 'zip' && (
                <div className="space-y-4">
                  {!zipFileName ? (
-                   <div 
+                   <div
                      onClick={() => !analyzing && fileInputRef.current?.click()}
-                     className={`border-2 border-dashed border-slate-300 rounded-xl p-8 md:p-12 text-center cursor-pointer hover:bg-slate-50 hover:border-blue-400 transition-all ${analyzing ? 'opacity-50' : ''}`}
+                     className={`border-2 border-dashed border-slate-300 rounded-xl p-8 md:p-12 text-center cursor-pointer hover:bg-indigo-50/40 hover:border-indigo-400 transition-all ${analyzing ? 'opacity-50' : ''}`}
                    >
                      <Upload className="w-10 h-10 text-indigo-500 mx-auto mb-4" />
                      <p className="font-medium text-slate-800 text-lg mb-1">Upload ZIP containing tender documents</p>
@@ -581,10 +581,10 @@ export default function TenderAnalyzer() {
                        <button onClick={clearZip} disabled={analyzing} className="text-slate-500 hover:text-red-500 p-2 disabled:opacity-50">
                          <Trash2 className="w-5 h-5" />
                        </button>
-                       <button 
-                         onClick={handleAnalyze} 
+                       <button
+                         onClick={handleAnalyze}
                          disabled={analyzing}
-                         className="bg-slate-900 hover:bg-slate-800 text-white px-6 py-2.5 rounded-lg font-semibold transition-colors disabled:opacity-50 flex items-center gap-2"
+                         className="bg-gradient-to-br from-indigo-700 to-blue-600 hover:from-indigo-800 hover:to-blue-700 text-white px-6 py-2.5 rounded-lg font-semibold transition-all shadow-sm disabled:opacity-50 flex items-center gap-2"
                        >
                          {analyzing ? <><Loader2 className="w-4 h-4 animate-spin" /> Analyzing</> : 'Analyze ZIP'}
                        </button>
@@ -605,10 +605,10 @@ export default function TenderAnalyzer() {
                     placeholder="https://gem.gov.in/tender/..." 
                     className="flex-1 px-4 py-3 rounded-lg border border-slate-300 outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all"
                   />
-                  <button 
+                  <button
                     onClick={() => { if(tenderUrl) handleAnalyze(); }}
                     disabled={!tenderUrl || analyzing}
-                    className="bg-slate-900 hover:bg-slate-800 text-white px-6 py-3 rounded-lg font-semibold transition-colors disabled:opacity-50"
+                    className="bg-gradient-to-br from-indigo-700 to-blue-600 hover:from-indigo-800 hover:to-blue-700 text-white px-6 py-3 rounded-lg font-semibold transition-all shadow-sm disabled:opacity-50"
                   >
                     Analyze
                   </button>
@@ -621,7 +621,7 @@ export default function TenderAnalyzer() {
 
       {analysisResult && (
         <div className="space-y-6">
-          <div className="bg-white rounded-xl p-6 shadow-sm border border-slate-200 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 print:hidden">
+          <div className="bg-white rounded-xl p-6 shadow-sm border border-slate-200 border-l-4 border-l-indigo-600 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 print:hidden">
             <div>
                <h2 className="text-xl font-bold text-slate-900 flex items-center gap-2">
                  <Target className="w-5 h-5 text-emerald-600" />
@@ -644,7 +644,7 @@ export default function TenderAnalyzer() {
                    placeholder="Enter Workspace / Project Name..." 
                    className="flex-1 md:w-64 px-3 py-2 border border-slate-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500"
                  />
-                 <button onClick={handleSaveToPipeline} disabled={saving} className="text-white bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded-lg font-bold text-sm flex items-center justify-center gap-2 shrink-0 transition-colors">
+                 <button onClick={handleSaveToPipeline} disabled={saving} className="text-white bg-gradient-to-br from-indigo-600 to-blue-600 hover:from-indigo-700 hover:to-blue-700 px-4 py-2 rounded-lg font-bold text-sm flex items-center justify-center gap-2 shrink-0 transition-all shadow-sm">
                    {saving ? "Saving..." : "Save Project"}
                  </button>
                </div>
@@ -653,10 +653,10 @@ export default function TenderAnalyzer() {
 
           <div className="flex border-b border-slate-200 mb-6 bg-white rounded-xl shadow-sm overflow-x-auto print:hidden">
 
-                <button onClick={() => setActiveTab('overview')} className={`px-6 py-4 font-semibold text-sm border-b-2 whitespace-nowrap transition-colors ${activeTab === 'overview' ? 'border-blue-600 text-blue-700' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>Tender Overview</button>
-                <button onClick={() => setActiveTab('docs')} className={`px-6 py-4 font-semibold text-sm border-b-2 whitespace-nowrap transition-colors ${activeTab === 'docs' ? 'border-blue-600 text-blue-700' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>Auto-Generate Documents</button>
-                <button onClick={() => setActiveTab('calculator')} className={`px-6 py-4 font-semibold text-sm border-b-2 whitespace-nowrap transition-colors ${activeTab === 'calculator' ? 'border-blue-600 text-blue-700' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>Bid Engine & Profit Calculator</button>
-                <button onClick={() => setActiveTab('chat')} className={`px-6 py-4 font-semibold text-sm border-b-2 whitespace-nowrap transition-colors ${activeTab === 'chat' ? 'border-blue-600 text-blue-700' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>Tender Chat AI</button>
+                <button onClick={() => setActiveTab('overview')} className={`px-6 py-4 font-semibold text-sm border-b-2 whitespace-nowrap transition-colors ${activeTab === 'overview' ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>Tender Overview</button>
+                <button onClick={() => setActiveTab('docs')} className={`px-6 py-4 font-semibold text-sm border-b-2 whitespace-nowrap transition-colors ${activeTab === 'docs' ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>Auto-Generate Documents</button>
+                <button onClick={() => setActiveTab('calculator')} className={`px-6 py-4 font-semibold text-sm border-b-2 whitespace-nowrap transition-colors ${activeTab === 'calculator' ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>Bid Engine & Profit Calculator</button>
+                <button onClick={() => setActiveTab('chat')} className={`px-6 py-4 font-semibold text-sm border-b-2 whitespace-nowrap transition-colors ${activeTab === 'chat' ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>Tender Chat AI</button>
              </div>
 
             {activeTab === 'overview' && (
@@ -1209,15 +1209,15 @@ export default function TenderAnalyzer() {
              {activeTab === 'chat' && role === 'free' && <LockedOverlay />}
              {activeTab === 'chat' && role !== 'free' && (
              <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden flex flex-col" style={{ height: '500px' }}>
-                <div className="p-4 border-b border-slate-100 bg-blue-600 text-white flex items-center justify-between">
+                <div className="p-4 border-b border-indigo-800/30 bg-gradient-to-r from-indigo-700 to-blue-600 text-white flex items-center justify-between">
                    <div className="flex items-center gap-3">
                       <h3 className="font-bold flex items-center gap-2">
                         <MessageSquare className="w-5 h-5" />
                         Ask Questions About This Tender
                       </h3>
-                      <span className="text-xs bg-blue-500 px-2 py-1 rounded font-medium">TenderMaster AI</span>
+                      <span className="text-xs bg-white/20 px-2 py-1 rounded font-medium">TenderMaster AI</span>
                    </div>
-                   <button 
+                   <button
                      onClick={() => {
                          if (messages.length > 0) {
                              if (confirmClearChat) {
@@ -1228,8 +1228,8 @@ export default function TenderAnalyzer() {
                                  setTimeout(() => setConfirmClearChat(false), 3000);
                              }
                          }
-                     }} 
-                     className={`text-xs px-3 py-1.5 rounded transition-colors flex items-center gap-1 shrink-0 ${confirmClearChat ? 'bg-red-500 hover:bg-red-600 text-white font-bold' : 'bg-blue-700 hover:bg-blue-800 text-blue-100'}`}
+                     }}
+                     className={`text-xs px-3 py-1.5 rounded transition-colors flex items-center gap-1 shrink-0 ${confirmClearChat ? 'bg-red-500 hover:bg-red-600 text-white font-bold' : 'bg-white/15 hover:bg-white/25 text-white'}`}
                    >
                      <Trash2 className="w-3 h-3" /> {confirmClearChat ? 'Confirm Clear?' : 'Clear Chat'}
                    </button>
@@ -1276,10 +1276,10 @@ export default function TenderAnalyzer() {
                        placeholder="Message TenderMaster AI..."
                        rows={2}
                      />
-                     <button 
+                     <button
                        onClick={handleSendMessage}
                        disabled={!chatInput.trim() || chatLoading}
-                       className="bg-blue-600 hover:bg-blue-700 text-white w-11 h-11 rounded-xl flex items-center justify-center shrink-0 disabled:opacity-50 transition-colors"
+                       className="bg-indigo-600 hover:bg-indigo-700 text-white w-11 h-11 rounded-xl flex items-center justify-center shrink-0 disabled:opacity-50 transition-colors"
                      >
                        <Send className="w-5 h-5 -ml-0.5" />
                      </button>

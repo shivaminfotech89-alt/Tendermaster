@@ -728,66 +728,148 @@ export default function TenderAnalyzer() {
             </>
             )}
 
-            {/* Bid Recommendation / Risk Calculator */}
+            {/* Bid Engine & Profit Calculator */}
             {activeTab === 'calculator' && role === 'free' && <LockedOverlay />}
             {activeTab === 'calculator' && role !== 'free' && (
-              analysisResult.bid_recommendation ? (
-              <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden flex flex-col md:flex-row divide-y md:divide-y-0 md:divide-x divide-slate-100">
-                {/* Bid Recommendation */}
-                <div className="p-6 md:w-2/3">
-                  <h3 className="font-bold text-slate-800 flex items-center gap-2 mb-4">
-                    <Target className="w-5 h-5 text-indigo-600" /> AI Risk & Bid Calculator
-                  </h3>
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
-                    <div className="bg-slate-50 p-3 rounded-lg border border-slate-100">
-                      <p className="text-xs text-slate-500 mb-1">Estimated Value</p>
-                      <p className="font-bold text-slate-800">{analysisResult.bid_recommendation.estimated_value || '₹ -'}</p>
+              <div className="space-y-6">
+                {/* AI Bid Recommendation — shown only when the field is present */}
+                {analysisResult?.bid_recommendation ? (
+                <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden flex flex-col md:flex-row divide-y md:divide-y-0 md:divide-x divide-slate-100">
+                  <div className="p-6 md:w-2/3">
+                    <h3 className="font-bold text-slate-800 flex items-center gap-2 mb-4">
+                      <Target className="w-5 h-5 text-indigo-600" /> AI Risk & Bid Calculator
+                    </h3>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+                      <div className="bg-slate-50 p-3 rounded-lg border border-slate-100">
+                        <p className="text-xs text-slate-500 mb-1">Estimated Value</p>
+                        <p className="font-bold text-slate-800">{analysisResult.bid_recommendation?.estimated_value || '₹ -'}</p>
+                      </div>
+                      <div className="bg-blue-50 p-3 rounded-lg border border-blue-100">
+                        <p className="text-xs text-blue-600 font-semibold mb-1">Target Bid</p>
+                        <p className="font-black text-blue-700">{analysisResult.bid_recommendation?.recommended || '₹ -'}</p>
+                      </div>
+                      <div className="bg-slate-50 p-3 rounded-lg border border-slate-100">
+                        <p className="text-xs text-slate-500 mb-1">Safe Range</p>
+                        <p className="font-semibold text-slate-700 text-sm overflow-hidden text-ellipsis whitespace-nowrap" title={analysisResult.bid_recommendation?.safe_range}>{analysisResult.bid_recommendation?.safe_range || '₹ -'}</p>
+                      </div>
+                      <div className="bg-slate-50 p-3 rounded-lg border border-slate-100">
+                        <p className="text-xs text-slate-500 mb-1">Risk Level</p>
+                        <p className="font-bold text-slate-800">{analysisResult.bid_recommendation?.risk_level || '-'}</p>
+                      </div>
                     </div>
-                    <div className="bg-blue-50 p-3 rounded-lg border border-blue-100">
-                      <p className="text-xs text-blue-600 font-semibold mb-1">Target Bid</p>
-                      <p className="font-black text-blue-700">{analysisResult.bid_recommendation.recommended || '₹ -'}</p>
-                    </div>
-                    <div className="bg-slate-50 p-3 rounded-lg border border-slate-100">
-                      <p className="text-xs text-slate-500 mb-1">Safe Range</p>
-                      <p className="font-semibold text-slate-700 text-sm overflow-hidden text-ellipsis whitespace-nowrap" title={analysisResult.bid_recommendation.safe_range}>{analysisResult.bid_recommendation.safe_range || '₹ -'}</p>
-                    </div>
-                    <div className="bg-slate-50 p-3 rounded-lg border border-slate-100">
-                      <p className="text-xs text-slate-500 mb-1">Risk Level</p>
-                      <p className="font-bold text-slate-800">{analysisResult.bid_recommendation.risk_level || '-'}</p>
+                    <div className="bg-slate-50 p-4 rounded-lg text-sm text-slate-600 border border-slate-100">
+                      <span className="font-semibold text-slate-700">Rationale: </span>
+                      {analysisResult.bid_recommendation?.rationale || '-'}
                     </div>
                   </div>
-                  <div className="bg-slate-50 p-4 rounded-lg text-sm text-slate-600 border border-slate-100">
-                    <span className="font-semibold text-slate-700">Rationale: </span>
-                    {analysisResult.bid_recommendation.rationale || '-'}
+
+                  {analysisResult.winning_probability && (
+                    <div className="p-6 md:w-1/3 flex flex-col items-center justify-center bg-gradient-to-b from-white to-slate-50">
+                       <h3 className="text-sm font-bold text-slate-500 uppercase tracking-widest mb-4">Winning Probability</h3>
+                       <div className="relative flex items-center justify-center">
+                          <svg className="w-32 h-32 transform -rotate-90">
+                             <circle cx="64" cy="64" r="56" stroke="currentColor" strokeWidth="12" fill="transparent" className="text-slate-100" />
+                             <circle cx="64" cy="64" r="56" stroke="currentColor" strokeWidth="12" fill="transparent" strokeDasharray={56 * 2 * Math.PI} strokeDashoffset={(56 * 2 * Math.PI) - ((analysisResult.winning_probability.score || 0) / 100) * (56 * 2 * Math.PI)} className="text-emerald-500 transition-all duration-1000 ease-out" strokeLinecap="round" />
+                          </svg>
+                          <div className="absolute flex flex-col items-center">
+                             <span className="text-3xl font-black text-slate-800">{analysisResult.winning_probability.score || 0}%</span>
+                          </div>
+                       </div>
+                       <p className="mt-4 text-sm font-semibold text-emerald-700 bg-emerald-50 px-3 py-1 rounded-full border border-emerald-100">
+                         {analysisResult.winning_probability.recommended_action || "Participate"}
+                       </p>
+                    </div>
+                  )}
+                </div>
+                ) : (
+                <div className="flex items-start gap-3 bg-amber-50 border border-amber-200 rounded-xl p-4 text-sm text-amber-800">
+                  <AlertCircle className="w-5 h-5 shrink-0 mt-0.5 text-amber-500" />
+                  <span>AI bid recommendation isn't available for this analysis — you can still calculate manually below.</span>
+                </div>
+                )}
+
+                {/* Manual Profit Calculator — always shown for premium users */}
+                <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+                  <div className="bg-slate-900 p-5 flex justify-between items-center">
+                    <div>
+                      <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                        <Calculator className="w-5 h-5 text-emerald-400" /> Expense & Profit Calculator
+                      </h3>
+                      <p className="text-sm text-slate-400 mt-0.5">Adjust estimates to calculate your profit margin.</p>
+                    </div>
+                  </div>
+                  <div className="p-6 space-y-6 bg-slate-50">
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                      <div className="bg-white p-4 rounded-xl border border-slate-200">
+                        <p className="text-xs font-bold text-slate-500 uppercase">Bid Value / Revenue</p>
+                        <div className="flex items-center mt-2">
+                          <span className="text-slate-400 mr-1 text-lg font-bold">₹</span>
+                          <input
+                            type="number"
+                            value={revenue || ''}
+                            onChange={e => setRevenue(Number(e.target.value))}
+                            placeholder="Enter Bid Amount"
+                            className="bg-transparent border-0 font-bold text-2xl text-slate-900 w-full p-0 focus:ring-0 outline-none"
+                          />
+                        </div>
+                      </div>
+                      <div className="bg-white p-4 rounded-xl border border-slate-200">
+                        <p className="text-xs font-bold text-slate-500 uppercase">Total Expenses</p>
+                        <div className="mt-2 text-2xl font-bold text-rose-600">₹{totalExpense.toLocaleString()}</div>
+                      </div>
+                      <div className={`p-4 rounded-xl border ${estimatedProfit > 0 ? 'bg-emerald-50 border-emerald-200 text-emerald-900' : 'bg-rose-50 border-rose-200 text-rose-900'}`}>
+                        <p className="text-xs font-bold uppercase opacity-70">Projected Profit / Loss</p>
+                        <div className="mt-2 text-2xl font-bold">₹{estimatedProfit.toLocaleString()}</div>
+                        {revenue > 0 && (
+                          <p className="text-sm font-medium mt-1 opacity-80">{((estimatedProfit / revenue) * 100).toFixed(1)}% Margin</p>
+                        )}
+                      </div>
+                    </div>
+                    {analysisResult?.financial_estimate ? (
+                      <div className="grid grid-cols-1 md:grid-cols-2 divide-y md:divide-y-0 md:divide-x divide-slate-200 bg-white rounded-xl border border-slate-200">
+                        <div className="p-6">
+                          <h4 className="text-sm font-bold text-slate-800 uppercase tracking-widest mb-4 flex items-center gap-2"><Building className="w-4 h-4 text-slate-400" /> Material Costs</h4>
+                          {materials.length > 0 ? (
+                            <ul className="space-y-4">
+                              {materials.map((mc: any, i: number) => (
+                                <li key={i} className="flex justify-between items-start gap-4">
+                                  <div>
+                                    <p className="font-semibold text-slate-900">{mc.item}</p>
+                                    <p className="text-xs text-slate-500 mt-0.5">{mc.rationale}</p>
+                                  </div>
+                                  <span className="font-mono text-sm font-bold text-slate-700 bg-slate-50 px-2 py-1 rounded">{mc.estimated_cost}</span>
+                                </li>
+                              ))}
+                            </ul>
+                          ) : (
+                            <p className="text-sm text-slate-400">No material cost data available.</p>
+                          )}
+                        </div>
+                        <div className="p-6">
+                          <h4 className="text-sm font-bold text-slate-800 uppercase tracking-widest mb-4 flex items-center gap-2"><Activity className="w-4 h-4 text-slate-400" /> Labor Costs</h4>
+                          {labour.length > 0 ? (
+                            <ul className="space-y-4">
+                              {labour.map((lc: any, i: number) => (
+                                <li key={i} className="flex justify-between items-start gap-4">
+                                  <div>
+                                    <p className="font-semibold text-slate-900">{lc.role}</p>
+                                    <p className="text-xs text-slate-500 mt-0.5">{lc.rationale}</p>
+                                  </div>
+                                  <span className="font-mono text-sm font-bold text-slate-700 bg-slate-50 px-2 py-1 rounded">{lc.estimated_cost}</span>
+                                </li>
+                              ))}
+                            </ul>
+                          ) : (
+                            <p className="text-sm text-slate-400">No labor cost data available.</p>
+                          )}
+                        </div>
+                      </div>
+                    ) : (
+                      <p className="text-sm text-slate-400 text-center py-4">Cost breakdown isn't available for this analysis. Enter your bid value above to calculate profit manually.</p>
+                    )}
                   </div>
                 </div>
-
-                {/* Winning Probability */}
-                {analysisResult.winning_probability && (
-                  <div className="p-6 md:w-1/3 flex flex-col items-center justify-center bg-gradient-to-b from-white to-slate-50">
-                     <h3 className="text-sm font-bold text-slate-500 uppercase tracking-widest mb-4">Winning Probability</h3>
-                     <div className="relative flex items-center justify-center">
-                        <svg className="w-32 h-32 transform -rotate-90">
-                           <circle cx="64" cy="64" r="56" stroke="currentColor" strokeWidth="12" fill="transparent" className="text-slate-100" />
-                           <circle cx="64" cy="64" r="56" stroke="currentColor" strokeWidth="12" fill="transparent" strokeDasharray={56 * 2 * Math.PI} strokeDashoffset={(56 * 2 * Math.PI) - ((analysisResult.winning_probability.score || 0) / 100) * (56 * 2 * Math.PI)} className="text-emerald-500 transition-all duration-1000 ease-out" strokeLinecap="round" />
-                        </svg>
-                        <div className="absolute flex flex-col items-center">
-                           <span className="text-3xl font-black text-slate-800">{analysisResult.winning_probability.score || 0}%</span>
-                        </div>
-                     </div>
-                     <p className="mt-4 text-sm font-semibold text-emerald-700 bg-emerald-50 px-3 py-1 rounded-full border border-emerald-100">
-                       {analysisResult.winning_probability.recommended_action || "Participate"}
-                     </p>
-                  </div>
-                )}
               </div>
-              ) : (
-              <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-10 flex flex-col items-center justify-center text-center gap-3">
-                <Target className="w-10 h-10 text-slate-300" />
-                <p className="font-semibold text-slate-500">Bid calculator data unavailable for this analysis.</p>
-                <p className="text-sm text-slate-400">Save the project and re-analyse to regenerate the bid recommendation.</p>
-              </div>
-              )
             )}
 
             {activeTab === 'overview' && (

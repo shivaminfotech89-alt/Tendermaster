@@ -2,7 +2,7 @@ import { useEffect, useState, useRef } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { doc, getDoc, updateDoc, deleteDoc, addDoc, collection, query, where, getDocs, writeBatch, serverTimestamp } from "firebase/firestore";
 import { db } from "../lib/firebase";
-import { ArrowLeft, Calculator, Building, Activity, Upload, FileText, Download, Loader2, Save, Plus, Target, CheckCircle, ListTodo, Calendar, MessageSquare, Send, X, Trash2, RefreshCw, Edit2, Check, ChevronRight } from "lucide-react";
+import { ArrowLeft, AlertCircle, Calculator, Building, Activity, Upload, FileText, Download, Loader2, Save, Plus, Target, CheckCircle, ListTodo, Calendar, MessageSquare, Send, X, Trash2, RefreshCw, Edit2, Check, ChevronRight } from "lucide-react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import JSZip from "jszip";
@@ -914,7 +914,7 @@ export default function ProjectDetails() {
         {activeTab === 'calculator' && (
         <div className="lg:col-span-2 space-y-8">
           
-           {project.details?.bid_recommendation && (
+           {project.details?.bid_recommendation ? (
              <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden flex flex-col md:flex-row divide-y md:divide-y-0 md:divide-x divide-slate-100">
                {/* Bid Recommendation */}
                <div className="p-6 md:w-2/3">
@@ -924,24 +924,24 @@ export default function ProjectDetails() {
                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
                    <div className="bg-slate-50 p-3 rounded-lg border border-slate-100">
                      <p className="text-xs text-slate-500 mb-1">Estimated Value</p>
-                     <p className="font-bold text-slate-800">{project.details.bid_recommendation.estimated_value || '₹ -'}</p>
+                     <p className="font-bold text-slate-800">{project.details?.bid_recommendation?.estimated_value || '₹ -'}</p>
                    </div>
                    <div className="bg-blue-50 p-3 rounded-lg border border-blue-100">
                      <p className="text-xs text-blue-600 font-semibold mb-1">Target Bid</p>
-                     <p className="font-black text-blue-700">{project.details.bid_recommendation.recommended || '₹ -'}</p>
+                     <p className="font-black text-blue-700">{project.details?.bid_recommendation?.recommended || '₹ -'}</p>
                    </div>
                    <div className="bg-slate-50 p-3 rounded-lg border border-slate-100">
                      <p className="text-xs text-slate-500 mb-1">Safe Range</p>
-                     <p className="font-semibold text-slate-700 text-sm overflow-hidden text-ellipsis whitespace-nowrap" title={project.details.bid_recommendation.safe_range}>{project.details.bid_recommendation.safe_range || '₹ -'}</p>
+                     <p className="font-semibold text-slate-700 text-sm overflow-hidden text-ellipsis whitespace-nowrap" title={project.details?.bid_recommendation?.safe_range}>{project.details?.bid_recommendation?.safe_range || '₹ -'}</p>
                    </div>
                    <div className="bg-slate-50 p-3 rounded-lg border border-slate-100">
                      <p className="text-xs text-slate-500 mb-1">Expected Margin</p>
-                     <p className="font-bold text-slate-800">{project.details.bid_recommendation.margin_range || '-'}</p>
+                     <p className="font-bold text-slate-800">{project.details?.bid_recommendation?.margin_range || '-'}</p>
                    </div>
                  </div>
                  <div className="bg-slate-50 p-4 rounded-lg text-sm text-slate-600 border border-slate-100">
                    <span className="font-semibold text-slate-700">Rationale: </span>
-                   {project.details.bid_recommendation.rationale}
+                   {project.details?.bid_recommendation?.rationale}
                  </div>
                </div>
 
@@ -963,6 +963,11 @@ export default function ProjectDetails() {
                     </p>
                  </div>
                )}
+             </div>
+           ) : (
+             <div className="flex items-start gap-3 bg-amber-50 border border-amber-200 rounded-xl p-4 text-sm text-amber-800">
+               <AlertCircle className="w-5 h-5 shrink-0 mt-0.5 text-amber-500" />
+               <span>AI bid recommendation isn't available for this analysis — you can still calculate manually below.</span>
              </div>
            )}
 

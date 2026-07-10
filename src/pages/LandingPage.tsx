@@ -77,7 +77,7 @@ export default function LandingPage() {
       <header className="sticky top-0 bg-white/92 backdrop-blur-md z-20 border-b border-slate-100">
         <div className="max-w-6xl mx-auto px-6 lg:px-14 flex justify-between items-center h-16">
           <div className="flex items-center gap-2.5">
-            <img src="/tendermaster-logo-lockup.png" alt="TenderMaster AI" className="h-8" />
+            <img src="/tendermaster-logo-lockup.png" alt="TenderMaster AI" className="h-10" />
           </div>
 
           <nav className="hidden md:flex items-center gap-8 text-sm font-semibold text-slate-600">
@@ -331,7 +331,7 @@ export default function LandingPage() {
         <div className="max-w-5xl mx-auto flex flex-col md:flex-row justify-between items-start gap-8">
           <div className="max-w-xs">
             <div className="flex items-center gap-2 mb-3">
-              <img src="/tendermaster-logo-lockup.png" alt="TenderMaster AI" className="h-7 brightness-0 invert" />
+              <img src="/tendermaster-logo-lockup.png" alt="TenderMaster AI" className="h-9 brightness-0 invert" />
             </div>
             <p className="text-sm leading-relaxed">Helping Indian businesses bid smarter.</p>
           </div>

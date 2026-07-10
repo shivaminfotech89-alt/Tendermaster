@@ -56,7 +56,8 @@ export default function TenderAnalyzer() {
   const [hasSaved, setHasSaved] = useState(false);
   
   // Chat state
-  const [activeTab, setActiveTab] = useState<'overview'|'docs'|'calculator'|'chat'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview'|'docs'|'calculator'|'chat'|'notes'>('overview');
+  const [analysisRemarks, setAnalysisRemarks] = useState<any>(null);
   const [chatOpen, setChatOpen] = useState(false);
   const [messages, setMessages] = useState<{role: 'user' | 'model', text: string}[]>([]);
   const [chatInput, setChatInput] = useState("");
@@ -319,6 +320,7 @@ export default function TenderAnalyzer() {
       }
 
       setAnalysisResult(data.analysis);
+      setAnalysisRemarks(data.remarks || null);
       setPayloadContext(payload);
 
     } catch (err: any) {
@@ -338,6 +340,7 @@ export default function TenderAnalyzer() {
          tenderId: Date.now().toString(),
          details: analysisResult,
          payloadRef: inputType === 'url' ? tenderUrl : (analyzedPayload ? analyzedPayload : 'Text/PDF Document'),
+         ...(analysisRemarks ? { remarks: analysisRemarks } : {}),
          savedAt: new Date()
        });
 
@@ -690,6 +693,7 @@ export default function TenderAnalyzer() {
                 <button onClick={() => setActiveTab('docs')} className={`px-6 py-4 font-semibold text-sm border-b-2 whitespace-nowrap transition-colors ${activeTab === 'docs' ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>Auto-Generate Documents</button>
                 <button onClick={() => setActiveTab('calculator')} className={`px-6 py-4 font-semibold text-sm border-b-2 whitespace-nowrap transition-colors ${activeTab === 'calculator' ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>Bid Engine & Profit Calculator</button>
                 <button onClick={() => setActiveTab('chat')} className={`px-6 py-4 font-semibold text-sm border-b-2 whitespace-nowrap transition-colors ${activeTab === 'chat' ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>Tender Chat AI</button>
+                <button onClick={() => setActiveTab('notes')} className={`px-6 py-4 font-semibold text-sm border-b-2 whitespace-nowrap transition-colors ${activeTab === 'notes' ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>Analysis Notes</button>
              </div>
 
             {activeTab === 'overview' && (
@@ -1402,6 +1406,66 @@ export default function TenderAnalyzer() {
                 </div>
              </div>
              )}
+
+            {activeTab === 'notes' && (
+              <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6">
+                <h2 className="text-lg font-bold text-slate-800 mb-4">Analysis Notes</h2>
+                {!analysisRemarks ? (
+                  <div className="text-slate-500 text-sm py-8 text-center">
+                    No analysis notes available. Notes are generated when files are uploaded via ZIP or multiple PDFs.
+                  </div>
+                ) : (
+                  <div className="space-y-5">
+                    <div className="grid grid-cols-3 gap-4">
+                      <div className="bg-slate-50 rounded-lg p-4 text-center">
+                        <div className="text-2xl font-bold text-slate-800">{analysisRemarks.totalFilesProvided}</div>
+                        <div className="text-xs text-slate-500 mt-1">Files Provided</div>
+                      </div>
+                      <div className="bg-indigo-50 rounded-lg p-4 text-center">
+                        <div className="text-2xl font-bold text-indigo-700">{analysisRemarks.filesAnalyzed}</div>
+                        <div className="text-xs text-slate-500 mt-1">Files Analyzed</div>
+                      </div>
+                      <div className={`rounded-lg p-4 text-center ${analysisRemarks.filesSkipped?.length > 0 ? 'bg-amber-50' : 'bg-slate-50'}`}>
+                        <div className={`text-2xl font-bold ${analysisRemarks.filesSkipped?.length > 0 ? 'text-amber-600' : 'text-slate-800'}`}>{analysisRemarks.filesSkipped?.length ?? 0}</div>
+                        <div className="text-xs text-slate-500 mt-1">Files Skipped</div>
+                      </div>
+                    </div>
+
+                    {analysisRemarks.filesSkipped?.length > 0 && (
+                      <div>
+                        <h3 className="text-sm font-semibold text-slate-700 mb-2">Skipped Files</h3>
+                        <ul className="space-y-1">
+                          {analysisRemarks.filesSkipped.map((s: any, idx: number) => (
+                            <li key={idx} className="flex items-start gap-2 text-sm text-amber-700 bg-amber-50 rounded-lg px-3 py-2">
+                              <span className="font-medium shrink-0">File {s.index + 1}:</span>
+                              <span>{s.reason}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+
+                    {analysisRemarks.notes?.length > 0 && (
+                      <div>
+                        <h3 className="text-sm font-semibold text-slate-700 mb-2">Notes</h3>
+                        <ul className="space-y-1">
+                          {analysisRemarks.notes.map((note: string, idx: number) => (
+                            <li key={idx} className="flex items-start gap-2 text-sm text-slate-600 bg-slate-50 rounded-lg px-3 py-2">
+                              <span className="text-indigo-400 mt-0.5">•</span>
+                              <span>{note}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+
+                    {analysisRemarks.filesSkipped?.length === 0 && analysisRemarks.notes?.length === 0 && (
+                      <p className="text-sm text-slate-500">All files were analyzed successfully with no issues detected.</p>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
         </div>
       )}
     </div>

@@ -787,6 +787,7 @@ app.post("/api/analyze-tender", verifyFirebaseToken, async (req: AuthenticatedRe
 
     const aiClient = getAI();
     let docContents: any[];
+    let remarks: any = null;
 
     const extraContextStr = req.body.extraContext
       ? `\n\n--- EXTRA CONTEXT / RE-ANALYSIS UPDATE ---\n${req.body.extraContext}\n`
@@ -827,28 +828,45 @@ app.post("/api/analyze-tender", verifyFirebaseToken, async (req: AuthenticatedRe
       ];
     } else if (tenderType === "storage_urls") {
       // Phase 3: every URL goes through safeFetch before touching the network
+      const MAX_FILES = 10;
+      const allUrls: string[] = Array.isArray(actualContent) ? actualContent : [];
+      const totalFilesProvided = allUrls.length;
+      const filesSkipped: { index: number; reason: string }[] = [];
+      let filesAnalyzed = 0;
+
       docContents = [
         `--- USER PROFILE ---\n${userProfile}${extraContextStr}\n\n--- TENDER DOCUMENTS (Fetched from Storage) ---\n`,
       ];
-      if (Array.isArray(actualContent)) {
-        for (const url of actualContent) {
-          try {
-            const fetched = await safeFetch(url);
-            if (!fetched.ok) continue;
-            const contentType = fetched.headers.get("content-type") || "application/pdf";
-            const buffer = await fetched.arrayBuffer();
-            if (contentType.includes("text/plain")) {
-              const text = Buffer.from(buffer).toString("utf-8");
-              docContents.push(`\n--- DOCUMENT CONTENT ---\n${text}\n`);
-            } else {
-              const base64 = Buffer.from(buffer).toString("base64");
-              docContents.push({ inlineData: { mimeType: contentType, data: base64 } });
-            }
-          } catch (err) {
-            console.error("Failed to fetch storage URL", url, err);
+
+      for (let i = 0; i < allUrls.length; i++) {
+        if (i >= MAX_FILES) {
+          filesSkipped.push({ index: i, reason: "Exceeded 10-file limit — file not analyzed" });
+          continue;
+        }
+        const url = allUrls[i];
+        try {
+          const fetched = await safeFetch(url);
+          if (!fetched.ok) {
+            filesSkipped.push({ index: i, reason: `Fetch failed (HTTP ${fetched.status})` });
+            continue;
           }
+          const contentType = fetched.headers.get("content-type") || "application/pdf";
+          const buffer = await fetched.arrayBuffer();
+          if (contentType.includes("text/plain")) {
+            const text = Buffer.from(buffer).toString("utf-8");
+            docContents.push(`\n--- DOCUMENT CONTENT ---\n${text}\n`);
+          } else {
+            const base64 = Buffer.from(buffer).toString("base64");
+            docContents.push({ inlineData: { mimeType: contentType, data: base64 } });
+          }
+          filesAnalyzed++;
+        } catch (err) {
+          console.error("Failed to fetch storage URL", url, err);
+          filesSkipped.push({ index: i, reason: "Network error fetching file" });
         }
       }
+
+      remarks = { totalFilesProvided, filesAnalyzed, filesSkipped, notes: [] };
     } else if (tenderType === "url") {
       // Phase 3: safeFetch handles SSRF check + fetch atomically
       try {
@@ -1125,7 +1143,17 @@ MODE 1: CONTRACT PROFILE ANALYSIS & MATCHING
     });
 
     const parsedData = robustJsonParse(response.text);
-    res.json({ analysis: parsedData });
+
+    if (remarks) {
+      if (!parsedData?.bid_recommendation) {
+        remarks.notes.push("Bid recommendation could not be determined — tender document may be incomplete or ambiguous.");
+      }
+      if (!parsedData?.timeline_and_milestones?.submission_deadline) {
+        remarks.notes.push("Submission deadline was not found in the document — verify manually before bidding.");
+      }
+    }
+
+    res.json({ analysis: parsedData, remarks });
   } catch (err: any) {
     console.error("Analyze Tender Error:", err);
     res.status(400).json({ error: err.message });

@@ -12,6 +12,18 @@ import { useAuth } from "../auth/AuthProvider";
 import { useAnalyzerStore } from "../context/AnalyzerContext";
 import { fetchWithAuth } from "../lib/api";
 
+function friendlyAnalysisError(raw: string): string {
+  if (/exceeds the maximum number of tokens|1048576/i.test(raw))
+    return "Your documents are too large to analyze together. Please analyze fewer or smaller documents at a time.";
+  if (/exceeds the supported page limit/i.test(raw))
+    return "Your documents have too many pages to analyze at once. Please analyze the key documents separately.";
+  if (/RESOURCE_EXHAUSTED|credits|quota/i.test(raw))
+    return "Analysis is temporarily unavailable. Please try again in a few minutes.";
+  if (/too long|timed? ?out/i.test(raw))
+    return "The analysis took too long. Please try with fewer or smaller documents.";
+  return "Analysis couldn't be completed. Please try again or with smaller documents.";
+}
+
 function fmtDate(ts: any): string {
   if (!ts) return "";
   const d = ts?.toDate ? ts.toDate() : new Date(ts);
@@ -188,7 +200,7 @@ export default function ProjectDetails() {
       toast.success("Calculations saved and Financial AI Risk re-analyzed!");
     } catch (e: any) {
       console.error(e);
-      toast.error("Saved calculations but AI Risk Re-analysis failed: " + e.message);
+      toast.error("Saved calculations but AI re-analysis failed: " + friendlyAnalysisError(e.message));
     } finally {
       setSavingCalc(false);
       setReanalyzing(false);
@@ -263,7 +275,15 @@ export default function ProjectDetails() {
         toast.success("Project thoroughly re-analyzed!");
     } catch (e: any) {
         console.error(e);
-        toast.error("Action Failed: " + e.message);
+        const friendly = friendlyAnalysisError(e.message);
+        toast.error(friendly);
+        try {
+          const docRef = doc(db, "saved_tenders", projectId);
+          const currentRemarks = project?.remarks || { totalFilesProvided: 0, filesAnalyzed: 0, filesSkipped: [], notes: [] };
+          const updatedRemarks = { ...currentRemarks, notes: [...(currentRemarks.notes || []), `Re-analysis failed: ${friendly} The original analysis remains unchanged.`] };
+          await updateDoc(docRef, { remarks: updatedRemarks });
+          setProject((prev: any) => prev ? { ...prev, remarks: updatedRemarks } : prev);
+        } catch { /* note save failure is non-critical */ }
     } finally {
         setReanalyzing(false);
     }
@@ -294,16 +314,19 @@ export default function ProjectDetails() {
           
           let tenderTypeToSend = "pdf";
           let contentToSend: string | string[] = "";
+          let uploadedEntryNames: string[] = [];
           
           if (type === "ZIP File") {
              const zip = new JSZip();
              const contents = await zip.loadAsync(file);
              const pdfBase64Array: string[] = [];
-             
+             const zipEntryNames: string[] = [];
+
              for (const [filename, zipEntry] of Object.entries(contents.files)) {
                 if (!zipEntry.dir && filename.toLowerCase().endsWith('.pdf')) {
                    const base64Data = await zipEntry.async("base64");
                    pdfBase64Array.push(`data:application/pdf;base64,${base64Data}`);
+                   zipEntryNames.push(filename.split('/').pop() || filename);
                 }
              }
              if (pdfBase64Array.length === 0) {
@@ -313,6 +336,7 @@ export default function ProjectDetails() {
              }
              tenderTypeToSend = "zip";
              contentToSend = pdfBase64Array;
+             uploadedEntryNames = zipEntryNames;
           } else {
              contentToSend = await new Promise<string>((resolve) => {
                  const reader = new FileReader();
@@ -323,20 +347,29 @@ export default function ProjectDetails() {
 
           // Upload files to Firebase Storage so they appear in Source Documents
           const newSourceUrls: string[] = [];
+          const newSourceNames: string[] = [];
           try {
             const { ref: sRef, uploadString: uploadStr, getDownloadURL } = await import("firebase/storage");
             const { storage } = await import("../lib/firebase");
             const dataUris = Array.isArray(contentToSend) ? contentToSend as string[] : [contentToSend as string];
             for (let idx = 0; idx < dataUris.length; idx++) {
+              const entryName = uploadedEntryNames.length === dataUris.length
+                ? uploadedEntryNames[idx]
+                : (dataUris.length === 1 ? file.name : `${file.name} — part ${idx + 1}`);
               const fileRef = sRef(storage, `users/${user?.uid}/tenders/${Date.now()}_${idx}_${file.name}`);
               await uploadStr(fileRef, dataUris[idx], 'data_url');
               newSourceUrls.push(await getDownloadURL(fileRef));
+              newSourceNames.push(entryName);
             }
             if (newSourceUrls.length > 0 && projectId) {
-              await updateDoc(doc(db, "saved_tenders", projectId), { sourceDocuments: arrayUnion(...newSourceUrls) });
-              setProject(prev => prev ? {
+              await updateDoc(doc(db, "saved_tenders", projectId), {
+                sourceDocuments: arrayUnion(...newSourceUrls),
+                sourceDocumentNames: arrayUnion(...newSourceNames),
+              });
+              setProject((prev: any) => prev ? {
                 ...prev,
-                sourceDocuments: [...((prev.sourceDocuments as string[]) || []), ...newSourceUrls]
+                sourceDocuments: [...((prev.sourceDocuments as string[]) || []), ...newSourceUrls],
+                sourceDocumentNames: [...((prev.sourceDocumentNames as string[]) || []), ...newSourceNames],
               } : prev);
             }
           } catch (uploadErr) {
@@ -375,7 +408,16 @@ export default function ProjectDetails() {
           toast.success("Project completely re-analyzed with new document!");
       } catch (err: any) {
           console.error("Reanalysis Error:", err);
-          toast.error("Re-analysis failed: " + err.message);
+          const friendly = friendlyAnalysisError(err.message);
+          toast.error(friendly);
+          try {
+            const docRef = doc(db, "saved_tenders", projectId);
+            const currentRemarks = project?.remarks || { totalFilesProvided: 0, filesAnalyzed: 0, filesSkipped: [], notes: [] };
+            const noteText = `Re-analysis failed after uploading "${file.name}": ${friendly} The file appears in Source Documents but was not included in the analysis.`;
+            const updatedRemarks = { ...currentRemarks, notes: [...(currentRemarks.notes || []), noteText] };
+            await updateDoc(docRef, { remarks: updatedRemarks });
+            setProject((prev: any) => prev ? { ...prev, remarks: updatedRemarks } : prev);
+          } catch { /* note save failure is non-critical */ }
       } finally {
           setReanalyzing(false);
       }
@@ -678,10 +720,21 @@ export default function ProjectDetails() {
                    : typeof ref === 'string' && ref.startsWith('http')
                    ? [ref]
                    : [];
+                 const payloadNames: string[] = (project?.payloadRefNames as string[]) || [];
+
                  const sourceDocUrls: string[] = ((project?.sourceDocuments as string[]) || [])
                    .filter((u: any) => typeof u === 'string' && u.startsWith('http'));
-                 const urls: string[] = [...payloadUrls, ...sourceDocUrls.filter(u => !payloadUrls.includes(u))];
-                 const isMulti = urls.length > 1;
+                 const sourceDocNames: string[] = (project?.sourceDocumentNames as string[]) || [];
+
+                 const deduped = sourceDocUrls.filter(u => !payloadUrls.includes(u));
+                 const dedupedNames: string[] = deduped.map((_, i) => sourceDocNames[sourceDocUrls.indexOf(deduped[i])] || `Document ${payloadUrls.length + i + 1}`);
+
+                 const urls: string[] = [...payloadUrls, ...deduped];
+                 const names: string[] = [
+                   ...payloadUrls.map((_, i) => payloadNames[i] || (urls.length === 1 ? 'Source Document' : `Document ${i + 1}`)),
+                   ...dedupedNames,
+                 ];
+
                  if (urls.length === 0) return null;
                  return (
                    <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
@@ -701,7 +754,7 @@ export default function ProjectDetails() {
                            className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-lg text-sm font-semibold transition-colors"
                          >
                            <FileText className="w-4 h-4" />
-                           {isMulti ? `View Document ${i + 1}` : 'View Source'}
+                           {names[i]}
                          </a>
                        ))}
                      </div>

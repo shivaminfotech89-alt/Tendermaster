@@ -35,6 +35,18 @@ const CollapsibleSection = ({ title, defaultOpen = true, children }: { title: st
   );
 };
 
+function friendlyAnalysisError(raw: string): string {
+  if (/exceeds the maximum number of tokens|1048576/i.test(raw))
+    return "Your documents are too large to analyze together. Please analyze fewer or smaller documents at a time.";
+  if (/exceeds the supported page limit/i.test(raw))
+    return "Your documents have too many pages to analyze at once. Please analyze the key documents separately.";
+  if (/RESOURCE_EXHAUSTED|credits|quota/i.test(raw))
+    return "Analysis is temporarily unavailable. Please try again in a few minutes.";
+  if (/too long|timed? ?out/i.test(raw))
+    return "The analysis took too long. Please try with fewer or smaller documents.";
+  return "Analysis couldn't be completed. Please try again or with smaller documents.";
+}
+
 export default function TenderAnalyzer() {
   const { user, role } = useAuth();
   const { t, i18n } = useTranslation();
@@ -45,8 +57,10 @@ export default function TenderAnalyzer() {
   const [tenderUrl, setTenderUrl] = useState("");
   const [tenderPdfBase64, setTenderPdfBase64] = useState<string | string[]>("");
   const [pdfFileName, setPdfFileName] = useState("");
+  const [pdfFileNames, setPdfFileNames] = useState<string[]>([]);
   const [zipFilesData, setZipFilesData] = useState<string[]>([]);
   const [zipFileName, setZipFileName] = useState("");
+  const [zipFileNames, setZipFileNames] = useState<string[]>([]);
   
   const [error, setError] = useState("");
   const [projectName, setProjectName] = useState("");
@@ -58,6 +72,7 @@ export default function TenderAnalyzer() {
   // Chat state
   const [activeTab, setActiveTab] = useState<'overview'|'docs'|'calculator'|'chat'|'notes'>('overview');
   const [analysisRemarks, setAnalysisRemarks] = useState<any>(null);
+  const [analyzedPayloadNames, setAnalyzedPayloadNames] = useState<string[]>([]);
   const [chatOpen, setChatOpen] = useState(false);
   const [messages, setMessages] = useState<{role: 'user' | 'model', text: string}[]>([]);
   const [chatInput, setChatInput] = useState("");
@@ -131,7 +146,8 @@ export default function TenderAnalyzer() {
     }
     
     setPdfFileName(files.length === 1 ? files[0].name : `${files.length} PDFs selected`);
-    
+    setPdfFileNames(files.map(f => f.name));
+
     for (const file of files) {
        const base64 = await new Promise<string>((resolve) => {
          const reader = new FileReader();
@@ -157,14 +173,16 @@ export default function TenderAnalyzer() {
       const zip = new JSZip();
       const contents = await zip.loadAsync(file);
       const fileDataArray: string[] = [];
-      
+      const fileNameArray: string[] = [];
+
       for (const [filename, zipEntry] of Object.entries(contents.files)) {
         if (zipEntry.dir) continue;
-        
+
         const lowerFilename = filename.toLowerCase();
         if (lowerFilename.endsWith('.pdf')) {
           const base64Data = await zipEntry.async("base64");
           fileDataArray.push(`data:application/pdf;base64,${base64Data}`);
+          fileNameArray.push(filename.split('/').pop() || filename);
         } else if (lowerFilename.endsWith('.xlsx') || lowerFilename.endsWith('.xls') || lowerFilename.endsWith('.csv')) {
           try {
             const arrayBuffer = await zipEntry.async("arraybuffer");
@@ -181,19 +199,21 @@ export default function TenderAnalyzer() {
             const utf8Bytes = new TextEncoder().encode(allText);
             const base64Text = btoa(String.fromCharCode(...utf8Bytes));
             fileDataArray.push(`data:text/plain;base64,${base64Text}`);
+            fileNameArray.push(filename.split('/').pop() || filename);
           } catch (err) {
             console.error(`Failed to parse spreadsheet ${filename}:`, err);
           }
         }
       }
-      
+
       if (fileDataArray.length === 0) {
         setError("No supported documents (PDF, Excel, CSV) found in the ZIP folder.");
         setZipFileName("");
         return;
       }
-      
+
       setZipFilesData(fileDataArray);
+      setZipFileNames(fileNameArray);
     } catch (err) {
       setError("Failed to extract ZIP file.");
       console.error(err);
@@ -280,7 +300,8 @@ export default function TenderAnalyzer() {
       if (inputType === 'pdf' || inputType === 'zip') {
         const dataUris = Array.isArray(payload) ? payload : [payload];
         const uploadedUrls = [];
-        
+        const nameSource = inputType === 'pdf' ? pdfFileNames : zipFileNames;
+
         for (let i = 0; i < dataUris.length; i++) {
           const dataUri = dataUris[i];
           const storageRef = ref(storage, `users/${user?.uid || 'anon'}/tenders/${Date.now()}_${i}`);
@@ -288,7 +309,8 @@ export default function TenderAnalyzer() {
           const url = await getDownloadURL(storageRef);
           uploadedUrls.push(url);
         }
-        
+
+        setAnalyzedPayloadNames(nameSource.length === dataUris.length ? nameSource : dataUris.map((_, i) => `Document ${i + 1}`));
         processedPayload = uploadedUrls;
         finalTenderType = 'storage_urls';
       }
@@ -324,7 +346,7 @@ export default function TenderAnalyzer() {
       setPayloadContext(payload);
 
     } catch (err: any) {
-      setError(err.message);
+      setError(friendlyAnalysisError(err.message));
     } finally {
       setAnalyzing(false);
     }
@@ -340,6 +362,7 @@ export default function TenderAnalyzer() {
          tenderId: Date.now().toString(),
          details: analysisResult,
          payloadRef: inputType === 'url' ? tenderUrl : (analyzedPayload ? analyzedPayload : 'Text/PDF Document'),
+         ...(analyzedPayloadNames.length > 0 ? { payloadRefNames: analyzedPayloadNames } : {}),
          ...(analysisRemarks ? { remarks: analysisRemarks } : {}),
          savedAt: new Date()
        });

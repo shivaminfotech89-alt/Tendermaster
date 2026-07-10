@@ -76,7 +76,7 @@ export default function Layout() {
       {/* Sidebar — desktop only */}
       <aside className="w-64 bg-white border-r border-slate-200 flex flex-col shrink-0 hidden md:flex">
         <div className="h-16 flex items-center px-6 border-b border-slate-100 flex-shrink-0">
-          <img src="/tendermaster-logo-lockup.png" alt="TenderMaster AI" className="h-8" />
+          <img src="/tendermaster-logo-lockup.png" alt="TenderMaster AI" className="h-10" />
         </div>
 
         <nav className="flex-1 overflow-y-auto py-4 px-3 space-y-1">
@@ -136,7 +136,7 @@ export default function Layout() {
         {/* Mobile header */}
         <header className="md:hidden h-14 bg-white border-b border-slate-200 flex items-center justify-between px-4 shrink-0">
           <div className="flex items-center">
-            <img src="/tendermaster-logo-lockup.png" alt="TenderMaster AI" className="h-7" />
+            <img src="/tendermaster-logo-lockup.png" alt="TenderMaster AI" className="h-9" />
           </div>
           <div className="flex items-center gap-2">
             {role !== "premium" && (

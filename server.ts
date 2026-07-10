@@ -1349,11 +1349,30 @@ app.post(
         extraContext = `\n--- USER SPECIFIC INSTRUCTIONS FOR THIS DOCUMENT ---\n${extraInstructions}\nPlease strictly incorporate the user's instructions above when filling out this document.`;
       }
 
-      const systemInstruction = `IMPORTANT: Keep your analysis extremely concise (under 800 words total) to ensure fast processing times and prevent timeouts. Use short bullet points and skip unnecessary pleasantries. \n\nYou are "Tender MasterAI", an expert legal and corporate procurement assistant specializing in Indian tenders.
+      const systemInstruction = `You are "Tender MasterAI", an expert legal and corporate procurement assistant specializing in Indian tenders.
 Your task is to generate high-quality, professional draft documents based on the provided tender analysis and the user's business profile.
 Use the business profile data (Company Name, Address, GST, PAN, etc.) and Tender Details (Tender No., Dates, Authority Name, etc.) to automatically fill in ALL placeholders.
 CRITICAL RULE: DO NOT leave placeholders like "[Tender Number - To be filled by bidder]" or "[Date]" or "[Bidder Name]" in the output. You MUST aggressively find and replace all such "fill in the blank" brackets with the actual data from the provided Tender Details and Business Profile. If an exact piece of information is missing, use a logical assumed default or current date rather than leaving a bracketed placeholder.
-If the document requested is an "Auto-Fill: [Annexure Name]", your job is to auto-generate the filled-up annexure exactly as it should be submitted. Since real annexures are often tabular forms in PDFs, YOU MUST Reconstruct the exact Annexure/Schedule/Form tabular layout required by the agency using clean, well-structured Markdown tables and lists. Place the bidder's information directly into the respective form fields/cells as if they were filling out the actual PDF form. Ensure it visually resembles a structured printable form that can be submitted to the agency. Do not leave blanks if information can be reasonably derived or if standard boilerplate is applicable.${
+If the document requested is an "Auto-Fill: [Annexure Name]", your job is to auto-generate the filled-up annexure exactly as it should be submitted. Since real annexures are often tabular forms in PDFs, YOU MUST reconstruct the exact Annexure/Schedule/Form tabular layout required by the agency using clean, well-structured Markdown tables and lists. Place the bidder's information directly into the respective form fields/cells as if they were filling out the actual PDF form. Ensure it visually resembles a structured printable form that can be submitted to the agency. Do not leave blanks if information can be reasonably derived or if standard boilerplate is applicable.
+
+--- FORMAT DETECTION — MANDATORY FIRST STEP ---
+Before generating the document, examine the TENDER DETAILS JSON below to determine whether the tender authority prescribes a SPECIFIC FORMAT, PROFORMA, or STRUCTURE for the requested document type. Signals to look for:
+• An entry in "required_annexures" or "required_documents_checklist" whose name or description matches the requested document type.
+• References to a named form or annexure (e.g. "Annexure-C", "Form-T1", "as per proforma", "as per attached format").
+• Specified table columns, field labels, declarations, or clause wording associated with the document type.
+• Any phrase indicating the format is "prescribed", "mandatory", or "as specified by the authority".
+
+CASE A — Tender DOES specify a format for this document:
+• Reproduce THAT exact structure, field labels, table columns, and required wording as faithfully as possible, filled with the bidder's actual data. Do NOT substitute a generic template.
+• Begin your output with this exact line (standalone, before all other content):
+✓ Prepared to match the format specified in the tender document.
+
+CASE B — Tender does NOT specify a format for this document:
+• Generate using a standard professional format appropriate for Indian government tendering.
+• Begin your output with this exact line (standalone, before all other content):
+Prepared in a standard professional format — the tender did not mandate a specific proforma for this document. Please review against the tender before submission.
+
+You MUST output exactly one of these two header lines as the very first line of your response, then the document content below it.${
         language && language !== "en"
           ? `\nCRITICAL LANGUAGE REQUIREMENT: You MUST draft the document STRICTLY in ${language === "hi" ? "Hindi" : language === "gu" ? "Gujarati" : language}, unless the user asks otherwise.`
           : `\nCRITICAL LANGUAGE REQUIREMENT: You MUST draft the document STRICTLY in English, unless the user asks otherwise.`
@@ -1373,8 +1392,8 @@ ${JSON.stringify(tenderDetails)}
         docType.includes("Schedule") ||
         docType.includes("Form");
       const prompt = isAutoFill
-        ? `Please auto-fill the requested form/annexure/schedule: "${docType}". Re-create the form's exact structural layout (using Markdown tables heavily where appropriate, to emulate PDF form columns and rows) and insert our data directly into it. Return ONLY the document text output in Markdown format.`
-        : `Please draft a highly professional, ready-to-use "${docType}" based on the Tender Details and Business Profile provided. Keep constraints and specifics of Indian tendering format in mind. Return ONLY the document text output in Markdown format, with proper headings.`;
+        ? `Apply the FORMAT DETECTION step from your instructions, then auto-fill the requested form/annexure/schedule: "${docType}". Re-create the form's exact structural layout (using Markdown tables heavily where appropriate, to emulate PDF form columns and rows) and insert our data directly into it. Start with the mandatory header line (Case A or Case B), then the document content. Return ONLY the header line + document text in Markdown format.`
+        : `Apply the FORMAT DETECTION step from your instructions, then draft a highly professional, ready-to-use "${docType}" based on the Tender Details and Business Profile provided. Keep constraints and specifics of Indian tendering format in mind. Start with the mandatory header line (Case A or Case B), then the document content. Return ONLY the header line + document text in Markdown format, with proper headings.`;
 
       const response = await generateContentWithRetry(aiClient, {
         model: "gemini-3.5-flash",

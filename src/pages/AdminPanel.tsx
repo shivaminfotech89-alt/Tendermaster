@@ -1,7 +1,7 @@
-import { ShieldCheck, Users, Settings, Activity, Plus, Key, Gift, Bell } from "lucide-react";
+import { ShieldCheck, Users, Settings, Activity, Plus, Key, Gift, Bell, FileText } from "lucide-react";
 import { useState, useEffect } from "react";
 import { db } from "../lib/firebase";
-import { collection, doc, setDoc, query, getDocs, updateDoc } from "firebase/firestore";
+import { collection, doc, setDoc, query, getDocs, updateDoc, getCountFromServer } from "firebase/firestore";
 import { toast } from "react-hot-toast";
 import { fetchWithAuth } from "../lib/api";
 
@@ -148,6 +148,20 @@ export default function AdminPanel() {
     }
   };
 
+  const [totalProjects, setTotalProjects] = useState<number | null>(null);
+  useEffect(() => {
+    getCountFromServer(collection(db, "saved_tenders"))
+      .then(snap => setTotalProjects(snap.data().count))
+      .catch(() => {});
+  }, []);
+
+  const activeSubscriptions = users.filter(u => {
+    const isPremium = u.role === 'premium' || u.role === 'superadmin';
+    const expiry = u.subscriptionExpiry?.toDate ? u.subscriptionExpiry.toDate() : null;
+    const notExpired = expiry ? expiry > new Date() : u.role === 'superadmin';
+    return isPremium && notExpired;
+  }).length;
+
   return (
     <div className="p-6 md:p-8 max-w-7xl mx-auto pb-24">
       <div className="mb-6 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
@@ -186,11 +200,11 @@ export default function AdminPanel() {
           <div className="bg-slate-900 text-white p-6 rounded-xl shadow-sm border border-slate-800">
              <div className="flex justify-between items-start mb-4">
                 <div className="w-10 h-10 bg-slate-800 rounded-lg flex items-center justify-center">
-                   <Activity className="w-5 h-5 text-emerald-400" />
+                   <FileText className="w-5 h-5 text-emerald-400" />
                 </div>
              </div>
-             <p className="text-sm font-medium text-slate-400 uppercase tracking-widest">API Calls (Last 24h)</p>
-             <h3 className="text-3xl font-black mt-1">8,492</h3>
+             <p className="text-sm font-medium text-slate-400 uppercase tracking-widest">Total Analyses</p>
+             <h3 className="text-3xl font-black mt-1">{totalProjects === null ? '…' : totalProjects}</h3>
           </div>
 
           <div className="bg-slate-900 text-white p-6 rounded-xl shadow-sm border border-slate-800">
@@ -200,7 +214,7 @@ export default function AdminPanel() {
                 </div>
              </div>
              <p className="text-sm font-medium text-slate-400 uppercase tracking-widest">Active Subscriptions</p>
-             <h3 className="text-3xl font-black mt-1">328</h3>
+             <h3 className="text-3xl font-black mt-1">{usersLoading ? '…' : activeSubscriptions}</h3>
           </div>
         </div>
       )}

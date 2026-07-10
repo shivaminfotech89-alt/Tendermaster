@@ -12,6 +12,12 @@ import { useAuth } from "../auth/AuthProvider";
 import { useAnalyzerStore } from "../context/AnalyzerContext";
 import { fetchWithAuth } from "../lib/api";
 
+function formatFileSize(bytes: number): string {
+  if (bytes >= 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+  return Math.round(bytes / 1024) + ' KB';
+}
+const LARGE_FILE_BYTES = 20 * 1024 * 1024;
+
 function friendlyAnalysisError(raw: string): string {
   if (/exceeds the maximum number of tokens|1048576/i.test(raw))
     return "Your documents are too large to analyze together. Please analyze fewer or smaller documents at a time.";
@@ -59,7 +65,7 @@ export default function ProjectDetails() {
   // Checked items for action center
   const [checkedItems, setCheckedItems] = useState<string[]>([]);
   // Uploaded docs
-  const [uploadedFiles, setUploadedFiles] = useState<{name: string, size: string, type: string}[]>([]);
+  const [uploadedFiles, setUploadedFiles] = useState<{name: string, size: string, type: string, bytes?: number}[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Chatbot state
@@ -299,7 +305,7 @@ export default function ProjectDetails() {
       else if (file.name.toLowerCase().includes('zip') || file.type === "application/zip" || file.type === "application/x-zip-compressed") type = "ZIP File";
       else if (file.name.toLowerCase().includes('pdf') || file.type === "application/pdf") type = "Tender Document";
       
-      const newFiles = [...uploadedFiles, { name: file.name, size: (file.size / 1024).toFixed(2) + " KB", type }];
+      const newFiles = [...uploadedFiles, { name: file.name, size: formatFileSize(file.size), type, bytes: file.size }];
       setUploadedFiles(newFiles);
       
       if (projectId) {
@@ -787,6 +793,9 @@ export default function ProjectDetails() {
                                     <div className="truncate">
                                        <p className="text-sm font-medium text-slate-700 truncate">{f.name}</p>
                                        <p className="text-xs text-slate-400">{f.size} • {f.type}</p>
+                                       {f.bytes != null && f.bytes > LARGE_FILE_BYTES && (
+                                         <p className="text-xs text-amber-600 mt-0.5">Large file — may take longer or exceed analysis limits.</p>
+                                       )}
                                     </div>
                                  </div>
                                  <button onClick={() => {

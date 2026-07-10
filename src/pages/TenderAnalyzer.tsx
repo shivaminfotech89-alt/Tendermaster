@@ -35,6 +35,12 @@ const CollapsibleSection = ({ title, defaultOpen = true, children }: { title: st
   );
 };
 
+function formatFileSize(bytes: number): string {
+  if (bytes >= 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+  return Math.round(bytes / 1024) + ' KB';
+}
+const LARGE_FILE_BYTES = 20 * 1024 * 1024;
+
 function friendlyAnalysisError(raw: string): string {
   if (/exceeds the maximum number of tokens|1048576/i.test(raw))
     return "Your documents are too large to analyze together. Please analyze fewer or smaller documents at a time.";
@@ -58,9 +64,11 @@ export default function TenderAnalyzer() {
   const [tenderPdfBase64, setTenderPdfBase64] = useState<string | string[]>("");
   const [pdfFileName, setPdfFileName] = useState("");
   const [pdfFileNames, setPdfFileNames] = useState<string[]>([]);
+  const [pdfFileSize, setPdfFileSize] = useState(0);
   const [zipFilesData, setZipFilesData] = useState<string[]>([]);
   const [zipFileName, setZipFileName] = useState("");
   const [zipFileNames, setZipFileNames] = useState<string[]>([]);
+  const [zipFileSize, setZipFileSize] = useState(0);
   
   const [error, setError] = useState("");
   const [projectName, setProjectName] = useState("");
@@ -147,6 +155,7 @@ export default function TenderAnalyzer() {
     
     setPdfFileName(files.length === 1 ? files[0].name : `${files.length} PDFs selected`);
     setPdfFileNames(files.map(f => f.name));
+    setPdfFileSize(files.reduce((acc, f) => acc + f.size, 0));
 
     for (const file of files) {
        const base64 = await new Promise<string>((resolve) => {
@@ -169,6 +178,7 @@ export default function TenderAnalyzer() {
     }
     
     setZipFileName(file.name);
+    setZipFileSize(file.size);
     try {
       const zip = new JSZip();
       const contents = await zip.loadAsync(file);
@@ -222,12 +232,16 @@ export default function TenderAnalyzer() {
 
   const clearPdf = () => {
     setPdfFileName("");
+    setPdfFileNames([]);
+    setPdfFileSize(0);
     setTenderPdfBase64("");
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
   const clearZip = () => {
     setZipFileName("");
+    setZipFileNames([]);
+    setZipFileSize(0);
     setZipFilesData([]);
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
@@ -593,7 +607,10 @@ export default function TenderAnalyzer() {
                        </div>
                        <div>
                          <p className="font-semibold text-slate-800">{pdfFileName}</p>
-                         <p className="text-sm text-slate-500">Ready for analysis</p>
+                         <p className="text-sm text-slate-500">{formatFileSize(pdfFileSize)}</p>
+                         {pdfFileSize > LARGE_FILE_BYTES && (
+                           <p className="text-xs text-amber-600 mt-0.5">Large file — may take longer or exceed analysis limits.</p>
+                         )}
                        </div>
                     </div>
                     <div className="flex items-center gap-3">
@@ -633,7 +650,10 @@ export default function TenderAnalyzer() {
                         </div>
                         <div>
                           <p className="font-semibold text-slate-800">{zipFileName}</p>
-                          <p className="text-sm text-slate-500">{zipFilesData.length} documents ready</p>
+                          <p className="text-sm text-slate-500">{zipFilesData.length} documents · {formatFileSize(zipFileSize)}</p>
+                          {zipFileSize > LARGE_FILE_BYTES && (
+                            <p className="text-xs text-amber-600 mt-0.5">Large file — may take longer or exceed analysis limits.</p>
+                          )}
                         </div>
                      </div>
                      <div className="flex items-center gap-3">

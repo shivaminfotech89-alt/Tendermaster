@@ -75,10 +75,7 @@ export default function Login() {
     <div className="min-h-screen flex items-center justify-center bg-slate-50 p-4 relative">
       <div className="max-w-md w-full bg-white rounded-2xl shadow-xl border border-slate-100 overflow-hidden">
         <div className="p-8 pb-6 border-b border-slate-100 bg-slate-50 text-center">
-          <div className="w-16 h-16 bg-blue-600 rounded-2xl flex items-center justify-center font-black text-white text-3xl mx-auto shadow-md mb-4">
-            T
-          </div>
-          <h1 className="text-2xl font-black text-slate-900 tracking-tight">TenderMaster <span className="text-blue-600">AI</span></h1>
+          <img src="/tendermaster-logo-lockup.png" alt="TenderMaster AI" className="h-10 mx-auto mb-4" />
           <p className="text-slate-500 mt-2 text-sm font-medium">{isLogin ? t("login_title") : t("signup_title")}</p>
         </div>
         

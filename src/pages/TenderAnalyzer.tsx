@@ -413,41 +413,6 @@ export default function TenderAnalyzer() {
     }
   };
 
-  const [isExportingPDF, setIsExportingPDF] = useState(false);
-
-  const handleDownloadPDF = async () => {
-    try {
-      setIsExportingPDF(true);
-      if (!(window as any).html2pdf) {
-        await new Promise((resolve, reject) => {
-          const script = document.createElement('script');
-          script.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js';
-          script.onload = resolve;
-          script.onerror = reject;
-          document.head.appendChild(script);
-        });
-      }
-      
-      const element = document.getElementById('analyzer-report-container');
-      
-      const opt = {
-        margin:       0.3,
-        filename:     `${projectName.replace(/[^a-z0-9]/gi, '_').toLowerCase() || 'analysis'}_report.pdf`,
-        image:        { type: 'jpeg' as const, quality: 0.98 },
-        html2canvas:  { scale: 2, useCORS: true, windowWidth: 1024 },
-        jsPDF:        { unit: 'in', format: 'a4', orientation: 'portrait' as const }
-      };
-      
-      await (window as any).html2pdf().set(opt).from(element).save();
-    } catch (e) {
-      console.error(e);
-      toast.error("Failed to generate PDF. Falling back to print.");
-      window.print();
-    } finally {
-      setIsExportingPDF(false);
-    }
-  };
-
   const generateDocument = async () => {
     if (!analysisResult) return;
     if (exactFormMode && !exactFormFile) {

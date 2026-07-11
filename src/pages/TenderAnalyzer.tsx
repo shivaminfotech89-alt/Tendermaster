@@ -39,6 +39,15 @@ function formatFileSize(bytes: number): string {
   if (bytes >= 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
   return Math.round(bytes / 1024) + ' KB';
 }
+
+function sanitizeDocOutput(raw: string): string {
+  return raw
+    .replace(/<br\s*\/?>/gi, '  \n')           // <br> → Markdown line break
+    .replace(/<[^>]*data:[^>]*\/>[^<]*/gi, '') // self-closing tags with data: URIs
+    .replace(/<[^>]*data:[^>]*>[\s\S]*?<\/[^>]+>/gi, '') // block tags wrapping data: URIs
+    .replace(/<[^>]+>/g, '')                   // any remaining HTML tags
+    .trim();
+}
 const LARGE_FILE_BYTES = 20 * 1024 * 1024;
 
 function friendlyAnalysisError(raw: string): string {
@@ -479,7 +488,7 @@ export default function TenderAnalyzer() {
          throw new Error(`The document is too large or the analysis took too long for Vercel limits (60s). Please try a smaller document or check back later.`);
       }
       if (!res.ok) throw new Error(data.error || "Failed to generate document");
-      setGeneratedDoc(data.document);
+      setGeneratedDoc(sanitizeDocOutput(data.document));
     } catch (e: any) {
       toast.error("Failed to generate: " + e.message);
     } finally {

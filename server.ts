@@ -1422,7 +1422,7 @@ STRICT RULES — follow every one without exception:
 3. Do NOT reorder any field or section — preserve the form's sequence exactly as shown.
 4. Fill ONLY the blank/empty response fields with the bidder's actual data from the Business Profile and Tender Details below. Where required data is genuinely unavailable, insert [FILL MANUALLY] — never leave a field silently blank.
 5. Reproduce the form's layout as faithfully as possible using Markdown tables. Multi-column forms become multi-column Markdown tables.
-6. Output ONLY the completed form — no preamble, no commentary, no header lines.${
+6. Output ONLY the completed form in clean Markdown — no preamble, no commentary, no header lines. Do NOT output any HTML tags whatsoever (including <div>, <img>, <br>, <table>, <span>, <p>, or any other tag). Use Markdown tables for tabular layouts. For line breaks within a table cell use a literal backslash-n sequence written as two spaces followed by a newline, not a <br> tag. Do NOT embed base64 image data, data: URIs, or any binary content — if the form contains a logo or image, skip it entirely and leave a placeholder text [LOGO] instead.${
   language && language !== "en"
     ? `\nCRITICAL LANGUAGE REQUIREMENT: Fill in bidder data in ${language === "hi" ? "Hindi" : language === "gu" ? "Gujarati" : language}, but keep all printed form labels exactly as they appear in the uploaded image.`
     : ""

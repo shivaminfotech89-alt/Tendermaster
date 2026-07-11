@@ -776,6 +776,107 @@ Provide ONLY the enhanced text, nothing else.`;
   }
 });
 
+// ---------------------------------------------------------------------------
+// Extract profile data from uploaded certificate (GST cert, PAN, Udyam, CoI…)
+// ---------------------------------------------------------------------------
+app.post(
+  "/api/extract-profile-data",
+  verifyFirebaseToken,
+  requireActiveEntitlement,
+  async (req: AuthenticatedRequest, res) => {
+    try {
+      const { fileBase64, fileMimeType } = req.body;
+      if (!fileBase64 || !fileMimeType) {
+        return res.status(400).json({ error: "fileBase64 and fileMimeType are required" });
+      }
+
+      const aiClient = getAI();
+
+      const systemInstruction =
+        `You are a certificate data extraction assistant for Indian business documents. ` +
+        `The user has uploaded an official certificate or registration document. ` +
+        `Extract ONLY data that is clearly and unambiguously visible in the document — ` +
+        `do NOT guess, infer, or hallucinate any value. ` +
+        `Omit any field you cannot read with full confidence. ` +
+        `Return a JSON object containing only the fields you found; leave out fields that are absent or unclear.`;
+
+      const extractionPrompt =
+        `Extract structured data from this document. ` +
+        `Return ONLY a JSON object — no explanation, no commentary. ` +
+        `Include only the keys listed below for which you can clearly read a value:\n\n` +
+        `companyName, gstNumber, panNumber, tanNumber, ` +
+        `udyamNumber, msmeStatus (one of: Micro / Small / Medium), ` +
+        `cinLlpin, dateOfIncorporation (YYYY-MM-DD format), ` +
+        `registeredOfficeAddress, worksAddress, ` +
+        `phone, mobile, fax, email, website, ` +
+        `esicNumber, epfNumber, professionalTaxNumber, ` +
+        `bankName, bankAccountNumber, bankIfsc, ` +
+        `authorizedSignatoryName, authorizedSignatoryDesignation, authorizedSignatoryDin\n\n` +
+        `Return {} if nothing is readable.`;
+
+      const response = await generateContentWithRetry(aiClient, {
+        model: "gemini-3.5-flash",
+        contents: [
+          {
+            role: "user",
+            parts: [
+              { inlineData: { mimeType: fileMimeType as string, data: fileBase64 as string } },
+              { text: extractionPrompt },
+            ],
+          },
+        ],
+        config: {
+          systemInstruction,
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: "object",
+            properties: {
+              companyName:                  { type: "string", nullable: true },
+              gstNumber:                    { type: "string", nullable: true },
+              panNumber:                    { type: "string", nullable: true },
+              tanNumber:                    { type: "string", nullable: true },
+              udyamNumber:                  { type: "string", nullable: true },
+              msmeStatus:                   { type: "string", nullable: true },
+              cinLlpin:                     { type: "string", nullable: true },
+              dateOfIncorporation:          { type: "string", nullable: true },
+              registeredOfficeAddress:      { type: "string", nullable: true },
+              worksAddress:                 { type: "string", nullable: true },
+              phone:                        { type: "string", nullable: true },
+              mobile:                       { type: "string", nullable: true },
+              fax:                          { type: "string", nullable: true },
+              email:                        { type: "string", nullable: true },
+              website:                      { type: "string", nullable: true },
+              esicNumber:                   { type: "string", nullable: true },
+              epfNumber:                    { type: "string", nullable: true },
+              professionalTaxNumber:        { type: "string", nullable: true },
+              bankName:                     { type: "string", nullable: true },
+              bankAccountNumber:            { type: "string", nullable: true },
+              bankIfsc:                     { type: "string", nullable: true },
+              authorizedSignatoryName:      { type: "string", nullable: true },
+              authorizedSignatoryDesignation: { type: "string", nullable: true },
+              authorizedSignatoryDin:       { type: "string", nullable: true },
+            },
+          },
+        },
+      });
+
+      const raw = robustJsonParse(response.text) || {};
+      // Strip null / empty values so the client only sees fields that were found
+      const extracted: Record<string, string> = {};
+      for (const [k, v] of Object.entries(raw)) {
+        if (v && typeof v === "string" && v.trim() !== "") {
+          extracted[k] = v.trim();
+        }
+      }
+      res.json({ extracted });
+    } catch (err: any) {
+      console.error("Extract Profile Data Error:", err);
+      // Return empty extraction rather than an error — the UI handles the "nothing found" case
+      res.json({ extracted: {} });
+    }
+  }
+);
+
 app.post("/api/analyze-tender", verifyFirebaseToken, async (req: AuthenticatedRequest, res) => {
   try {
     const { tenderDocument, tenderType = "text", tenderContent, userProfile, language } = req.body;

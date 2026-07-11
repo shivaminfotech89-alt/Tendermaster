@@ -1422,7 +1422,16 @@ STRICT RULES — follow every one without exception:
 3. Do NOT reorder any field or section — preserve the form's sequence exactly as shown.
 4. Fill ONLY the blank/empty response fields with the bidder's actual data from the Business Profile and Tender Details below. Where required data is genuinely unavailable, insert [FILL MANUALLY] — never leave a field silently blank.
 5. Reproduce the form's layout as faithfully as possible using Markdown tables. Multi-column forms become multi-column Markdown tables.
-6. Output ONLY the completed form in clean Markdown — no preamble, no commentary, no header lines. Do NOT output any HTML tags whatsoever (including <div>, <img>, <br>, <table>, <span>, <p>, or any other tag). Use Markdown tables for tabular layouts. For line breaks within a table cell use a literal backslash-n sequence written as two spaces followed by a newline, not a <br> tag. Do NOT embed base64 image data, data: URIs, or any binary content — if the form contains a logo or image, skip it entirely and leave a placeholder text [LOGO] instead.${
+6. Output ONLY the completed form in clean Markdown — no preamble, no commentary, no header lines. Do NOT output any HTML tags whatsoever (including <div>, <img>, <br>, <table>, <span>, <p>, or any other tag). Use Markdown tables for tabular layouts. For line breaks within a table cell use two trailing spaces before a newline, not a <br> tag. Do NOT embed base64 image data, data: URIs, or any binary content — omit logos and images entirely.
+7. HEADER/FOOTER DE-DUPLICATION: Multi-page forms repeat the organization name, CIN, address, and tagline at the top of every page, and contact/website details at the bottom of every page. These are print repetitions — NOT separate form fields. Structure your output as follows:
+   • Output the letterhead/header block ONCE at the very top (organization name, CIN/registration, address, tagline if present).
+   • Output the form's actual content (fields, tables, declarations, clauses) as one clean continuous sequence — merge all pages as if it were a single document.
+   • Output the contact/footer block ONCE at the very bottom (phone, email, website, etc.).
+   • Do NOT repeat the header, letterhead, tagline, or footer anywhere in the body of the document.
+8. ARTIFACT REMOVAL: The following are print/pagination artifacts — remove them completely, do not reproduce them anywhere in your output:
+   • Page number markers in any form: "- 10 -", "- 11 -", "Page 2 of 5", "2/5", etc.
+   • Repeated website URLs, telephone lines, or taglines such as "ASSURING THE BEST SERVICES..." or "YOUR SATISFACTION IS OUR MOTTO" when they appear mid-document as page-footer repetitions.
+   • Any text that is clearly a running page header or footer repeating on each physical page rather than being part of the actual form content.${
   language && language !== "en"
     ? `\nCRITICAL LANGUAGE REQUIREMENT: Fill in bidder data in ${language === "hi" ? "Hindi" : language === "gu" ? "Gujarati" : language}, but keep all printed form labels exactly as they appear in the uploaded image.`
     : ""

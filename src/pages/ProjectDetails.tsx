@@ -73,6 +73,7 @@ export default function ProjectDetails() {
   const [extraInstructions, setExtraInstructions] = useState("");
   const [exactFormMode, setExactFormMode] = useState(false);
   const [exactFormFile, setExactFormFile] = useState<File | null>(null);
+  const [formUploading, setFormUploading] = useState(false);
   
   // Checked items for action center
   const [checkedItems, setCheckedItems] = useState<string[]>([]);
@@ -499,19 +500,17 @@ export default function ProjectDetails() {
     setGeneratedDoc("Generating...");
     setIsEditingDoc(false);
     try {
-      let exactFormBase64: string | undefined;
+      let exactFormUrl: string | undefined;
       let exactFormMimeType: string | undefined;
       if (exactFormMode && exactFormFile) {
-        exactFormBase64 = await new Promise<string>((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onload = () => {
-            const result = reader.result as string;
-            resolve(result.split(",")[1]);
-          };
-          reader.onerror = () => reject(new Error("Failed to read file"));
-          reader.readAsDataURL(exactFormFile);
-        });
+        setFormUploading(true);
+        const { ref, uploadBytes, getDownloadURL } = await import("firebase/storage");
+        const { storage } = await import("../lib/firebase");
+        const storageRef = ref(storage, `users/${user?.uid}/form-uploads/${Date.now()}-${exactFormFile.name}`);
+        await uploadBytes(storageRef, exactFormFile);
+        exactFormUrl = await getDownloadURL(storageRef);
         exactFormMimeType = exactFormFile.type || "application/pdf";
+        setFormUploading(false);
       }
       const res = await fetchWithAuth("/api/generate-doc", {
          method: "POST",
@@ -527,7 +526,7 @@ export default function ProjectDetails() {
               labour
             },
             language: i18n.language,
-            ...(exactFormBase64 ? { exactFormBase64, exactFormMimeType } : {}),
+            ...(exactFormUrl ? { exactFormUrl, exactFormMimeType } : {}),
          })
       });
       const resText = await res.text();
@@ -543,6 +542,7 @@ export default function ProjectDetails() {
       toast.error("Failed to generate: " + e.message);
     } finally {
       setGeneratingDoc(false);
+      setFormUploading(false);
     }
   };
 
@@ -953,11 +953,11 @@ export default function ProjectDetails() {
                 />
                 <button
                   onClick={generateDocument}
-                  disabled={generatingDoc}
+                  disabled={generatingDoc || formUploading}
                   className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-medium rounded-lg text-sm px-5 py-2.5 text-center flex items-center justify-center gap-2"
                 >
-                  {generatingDoc ? <Loader2 className="w-4 h-4 animate-spin" /> : <Target className="w-4 h-4" />}
-                  {generatingDoc ? "Drafting..." : "Generate Draft"}
+                  {(generatingDoc || formUploading) ? <Loader2 className="w-4 h-4 animate-spin" /> : <Target className="w-4 h-4" />}
+                  {formUploading ? "Uploading form…" : generatingDoc ? "Drafting..." : "Generate Draft"}
                 </button>
 
                 {generatedDoc && (

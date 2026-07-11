@@ -1448,12 +1448,12 @@ app.post(
   async (req: AuthenticatedRequest, res) => {
     try {
       const { docType, tenderDetails, userProfile, financialData, extraInstructions, language,
-              exactFormBase64, exactFormMimeType } =
+              exactFormBase64, exactFormMimeType, exactFormUrl } =
         req.body;
       if (!tenderDetails) {
         return res.status(400).json({ error: "tenderDetails is required" });
       }
-      if (!exactFormBase64 && !docType) {
+      if (!exactFormBase64 && !exactFormUrl && !docType) {
         return res.status(400).json({ error: "docType is required when not using exact form mode" });
       }
 
@@ -1510,7 +1510,7 @@ ${JSON.stringify(tenderDetails)}
 
       let response: any;
 
-      if (exactFormBase64 && exactFormMimeType) {
+      if ((exactFormBase64 && exactFormMimeType) || exactFormUrl) {
         // ── Exact-form mode: user uploaded the blank form; reproduce it verbatim ──
         const exactFormSystemInstruction = `You are "Tender MasterAI". The user has uploaded the EXACT blank form/annexure they must submit to the tender authority.
 
@@ -1547,8 +1547,25 @@ ${userProfile ? JSON.stringify(userProfile) : "Not provided."}
 --- TENDER DETAILS ---
 ${JSON.stringify(tenderDetails)}${financialContext}${extraContext}`;
 
+        // Resolve base64 + mimeType from URL (Storage-first path) or direct upload (fallback)
+        let resolvedBase64 = exactFormBase64 as string;
+        let resolvedMimeType = (exactFormMimeType || "application/pdf") as string;
+        if (exactFormUrl) {
+          let urlResp: Response;
+          try {
+            urlResp = await safeFetch(exactFormUrl as string);
+          } catch (e) {
+            return res.status(400).json({ error: "Could not fetch form file: " + (e as Error).message });
+          }
+          if (!urlResp.ok) {
+            return res.status(400).json({ error: `Failed to fetch form file: HTTP ${urlResp.status}` });
+          }
+          const buf = await urlResp.arrayBuffer();
+          resolvedBase64 = Buffer.from(buf).toString("base64");
+          resolvedMimeType = urlResp.headers.get("content-type") || resolvedMimeType;
+        }
         const formPart = {
-          inlineData: { mimeType: exactFormMimeType as string, data: exactFormBase64 as string },
+          inlineData: { mimeType: resolvedMimeType, data: resolvedBase64 },
         };
         const textPart = {
           text: "Reproduce and fill the exact blank form shown in the uploaded file. Follow all rules in your instructions strictly. Return ONLY the completed form in Markdown format.",

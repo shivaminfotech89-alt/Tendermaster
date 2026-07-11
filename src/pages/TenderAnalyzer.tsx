@@ -1158,9 +1158,34 @@ export default function TenderAnalyzer() {
              )}
 
              </CollapsibleSection>
+
+             {analysisResult?.compliance_matrix && analysisResult.compliance_matrix.length > 0 && (
+               <CollapsibleSection title="Part 5: Compliance Matrix">
+                 <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden mt-2">
+                   <div className="divide-y divide-slate-100">
+                     {analysisResult.compliance_matrix.map((item: any, i: number) => (
+                       <div key={i} className="flex items-start gap-4 px-5 py-4">
+                         <span className={`shrink-0 mt-0.5 px-2.5 py-0.5 rounded-full text-xs font-bold uppercase tracking-wider ${
+                           item.status === 'MET'
+                             ? 'bg-emerald-100 text-emerald-700'
+                             : 'bg-red-100 text-red-700'
+                         }`}>
+                           {item.status}
+                         </span>
+                         <div className="flex-1 min-w-0">
+                           <p className="text-sm font-semibold text-slate-800">{item.requirement}</p>
+                           {item.notes && <p className="text-xs text-slate-500 mt-0.5">{item.notes}</p>}
+                         </div>
+                       </div>
+                     ))}
+                   </div>
+                 </div>
+               </CollapsibleSection>
+             )}
+
              </>
              )}
-             
+
              </>
              )}
 

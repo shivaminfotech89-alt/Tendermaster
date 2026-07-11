@@ -1434,6 +1434,35 @@ export default function ProjectDetails() {
 
             </div>
 
+            {/* Compliance Matrix */}
+            {project?.details?.compliance_matrix && project.details.compliance_matrix.length > 0 && (
+              <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+                <div className="p-5 border-b border-slate-100">
+                  <h3 className="font-semibold text-slate-800 flex items-center gap-2">
+                    <CheckCircle className="w-5 h-5 text-indigo-600" /> Compliance Matrix
+                  </h3>
+                  <p className="text-xs text-slate-500 mt-1">Key eligibility and technical requirements checked against your profile.</p>
+                </div>
+                <div className="divide-y divide-slate-100">
+                  {project.details.compliance_matrix.map((item: any, i: number) => (
+                    <div key={i} className="flex items-start gap-4 px-5 py-4">
+                      <span className={`shrink-0 mt-0.5 px-2.5 py-0.5 rounded-full text-xs font-bold uppercase tracking-wider ${
+                        item.status === 'MET'
+                          ? 'bg-emerald-100 text-emerald-700'
+                          : 'bg-red-100 text-red-700'
+                      }`}>
+                        {item.status}
+                      </span>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-semibold text-slate-800">{item.requirement}</p>
+                        {item.notes && <p className="text-xs text-slate-500 mt-0.5">{item.notes}</p>}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {/* Strategy and Procedures */}
             {project.details?.application_roadmap && (
               <div className="flex flex-col gap-8 mt-8">

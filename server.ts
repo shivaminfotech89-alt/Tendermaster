@@ -1126,6 +1126,19 @@ MODE 1: CONTRACT PROFILE ANALYSIS & MATCHING
               },
               required: ["score", "recommended_action"],
             },
+            compliance_matrix: {
+              type: "array",
+              description: "List of key eligibility and technical requirements from the tender, each flagged as MET or NOT MET based on the bidder profile.",
+              items: {
+                type: "object",
+                properties: {
+                  requirement: { type: "string" },
+                  status: { type: "string", enum: ["MET", "NOT MET"] },
+                  notes: { type: "string" },
+                },
+                required: ["requirement", "status", "notes"],
+              },
+            },
           },
           required: [
             "compatibility",
@@ -1137,6 +1150,7 @@ MODE 1: CONTRACT PROFILE ANALYSIS & MATCHING
             "financial_estimate",
             "bid_recommendation",
             "winning_probability",
+            "compliance_matrix",
           ],
         },
       },

@@ -749,12 +749,13 @@ export default function TenderAnalyzer() {
               </button>
               <h2 className="text-xl font-bold text-blue-900 mb-2 pr-8">TL;DR / Quick Summary</h2>
               <p className="text-blue-800 leading-relaxed font-medium">
-                 {analysisResult.tender_simplified.scope_of_work}
+                 {analysisResult?.tender_simplified?.scope_of_work}
               </p>
             </div>
             )}
 
             {/* Part 1: Match with Profile */}
+            {analysisResult?.compatibility && (
             <CollapsibleSection title="Part 1: Match With Profile & Assessment">
               <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden flex flex-col md:flex-row mt-2">
                <div className={`p-8 md:w-1/3 flex flex-col items-center justify-center border-b md:border-b-0 md:border-r ${getMatchColor(analysisResult.compatibility.score)}`}>
@@ -772,6 +773,7 @@ export default function TenderAnalyzer() {
                </div>
             </div>
             </CollapsibleSection>
+            )}
             </>
             )}
 
@@ -921,6 +923,7 @@ export default function TenderAnalyzer() {
 
             {activeTab === 'overview' && (
               <>
+              {analysisResult?.tender_simplified && (
               <CollapsibleSection title="Part 2: Tender Information & Scope">
               {/* Simplified Scope */}
               <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6 mt-2">
@@ -931,8 +934,9 @@ export default function TenderAnalyzer() {
                  <p className="text-slate-700 text-sm leading-relaxed mb-6">
                    {analysisResult.tender_simplified.scope_of_work}
                  </p>
-                 
+
                  <div className="grid grid-cols-1 gap-4">
+                   {analysisResult.tender_simplified.pros?.length > 0 && (
                    <div className="bg-emerald-50 rounded-lg p-4 border border-emerald-100">
                      <h4 className="text-xs font-bold text-emerald-800 uppercase tracking-widest mb-3">Green Flags</h4>
                      <ul className="space-y-2">
@@ -944,6 +948,8 @@ export default function TenderAnalyzer() {
                        ))}
                      </ul>
                    </div>
+                   )}
+                   {analysisResult.tender_simplified.cons_and_risks?.length > 0 && (
                    <div className="bg-red-50 rounded-lg p-4 border border-red-100">
                      <h4 className="text-xs font-bold text-red-800 uppercase tracking-widest mb-3">Red Flags & Risks</h4>
                      <ul className="space-y-2">
@@ -955,9 +961,11 @@ export default function TenderAnalyzer() {
                        ))}
                      </ul>
                    </div>
+                   )}
                  </div>
               </div>
 </CollapsibleSection>
+              )}
 
               {/* Part 3: Timeline & Steps */}
               {role === 'free' ? <LockedOverlay /> : (
@@ -972,19 +980,19 @@ export default function TenderAnalyzer() {
                   <div className="space-y-4">
                     <div className="flex justify-between items-center py-2 border-b border-slate-100">
                       <span className="text-sm font-semibold text-slate-500">Pre-Bid Meeting</span>
-                      <span className="text-sm font-bold text-slate-900">{analysisResult.timeline_and_milestones.pre_bid_meeting}</span>
+                      <span className="text-sm font-bold text-slate-900">{analysisResult?.timeline_and_milestones?.pre_bid_meeting}</span>
                     </div>
                     <div className="flex justify-between items-center py-2 border-b border-slate-100">
                       <span className="text-sm font-semibold text-slate-500">Clarification Closes</span>
-                      <span className="text-sm font-bold text-slate-900">{analysisResult.timeline_and_milestones.clarification_deadline}</span>
+                      <span className="text-sm font-bold text-slate-900">{analysisResult?.timeline_and_milestones?.clarification_deadline}</span>
                     </div>
                     <div className="flex justify-between items-center py-2 border-b border-slate-100">
                       <span className="text-sm font-semibold text-slate-500">Submission Deadline</span>
-                      <span className="text-sm font-bold text-slate-900 text-red-600">{analysisResult.timeline_and_milestones.submission_deadline}</span>
+                      <span className="text-sm font-bold text-slate-900 text-red-600">{analysisResult?.timeline_and_milestones?.submission_deadline}</span>
                     </div>
                     <div className="flex justify-between items-center py-2">
                       <span className="text-sm font-semibold text-slate-500">Contract Duration</span>
-                      <span className="text-sm font-bold text-slate-900">{analysisResult.timeline_and_milestones.execution_duration}</span>
+                      <span className="text-sm font-bold text-slate-900">{analysisResult?.timeline_and_milestones?.execution_duration}</span>
                     </div>
                   </div>
                 </div>
@@ -996,7 +1004,7 @@ export default function TenderAnalyzer() {
                      Execution Strategy
                   </h3>
                   <div className="space-y-3">
-                    {analysisResult.application_roadmap.winning_strategy_tips?.map((tip: string, i: number) => (
+                    {analysisResult?.application_roadmap?.winning_strategy_tips?.map((tip: string, i: number) => (
                       <div key={i} className="flex gap-3 text-sm text-slate-300">
                          <ChevronRight className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
                          <span>{tip}</span>
@@ -1011,11 +1019,11 @@ export default function TenderAnalyzer() {
                       Application Procedure & Road Map
                    </h3>
                    <div className="text-sm font-semibold text-indigo-700 bg-indigo-100 px-3 py-1.5 rounded inline-block mb-4">
-                     Portal: {analysisResult.application_roadmap.portal_source}
+                     Portal: {analysisResult?.application_roadmap?.portal_source}
                    </div>
                    
                    <div className="space-y-4">
-                     {analysisResult.application_roadmap.detailed_procedure_steps && analysisResult.application_roadmap.detailed_procedure_steps.length > 0 ? (
+                     {analysisResult?.application_roadmap?.detailed_procedure_steps && analysisResult.application_roadmap.detailed_procedure_steps.length > 0 ? (
                        <div className="space-y-3">
                          {analysisResult.application_roadmap.detailed_procedure_steps.map((step: string, i: number) => (
                            <div key={i} className="flex gap-3 items-start">
@@ -1026,7 +1034,7 @@ export default function TenderAnalyzer() {
                        </div>
                      ) : (
                        <ul className="space-y-2">
-                         {analysisResult.application_roadmap.next_immediate_steps?.map((step: string, i: number) => (
+                         {analysisResult?.application_roadmap?.next_immediate_steps?.map((step: string, i: number) => (
                            <li key={i} className="flex gap-3 text-sm text-slate-700">
                              <ChevronRight className="w-4 h-4 text-indigo-400 shrink-0 mt-0.5" />
                              <span>{step}</span>
@@ -1108,7 +1116,7 @@ export default function TenderAnalyzer() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
-                      {analysisResult.required_documents_checklist.map((doc: any, i: number) => (
+                      {analysisResult?.required_documents_checklist?.map((doc: any, i: number) => (
                         <tr key={i} className="hover:bg-slate-50/50 transition-colors">
                           <td className="p-4 pl-6 font-medium text-slate-900 w-1/3">{doc.document_name}</td>
                           <td className="p-4 w-1/6">

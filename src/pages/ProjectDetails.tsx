@@ -1290,6 +1290,63 @@ export default function ProjectDetails() {
 {/* Smart Timeline & Action Center */}
         {activeTab === 'overview' && (
           <div className="space-y-8">
+            {/* Match Score + AI Strategic Assessment */}
+            {project?.details?.compatibility && (
+              <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden flex flex-col md:flex-row">
+                <div className={`p-8 md:w-1/3 flex flex-col items-center justify-center border-b md:border-b-0 md:border-r ${
+                  (project.details.compatibility.score ?? 0) >= 80
+                    ? 'text-emerald-600 bg-emerald-50 border-emerald-200'
+                    : (project.details.compatibility.score ?? 0) >= 50
+                      ? 'text-amber-600 bg-amber-50 border-amber-200'
+                      : 'text-red-600 bg-red-50 border-red-200'
+                }`}>
+                  <div className="text-center">
+                    <span className="text-sm font-bold uppercase tracking-widest opacity-80 mb-2 block">Match Score</span>
+                    <span className="text-7xl font-black">{project.details.compatibility.score}</span>
+                    <span className="text-2xl font-bold opacity-50">/100</span>
+                  </div>
+                </div>
+                <div className="p-8 md:w-2/3 flex flex-col justify-center">
+                  <h3 className="text-lg font-bold text-slate-900 mb-2">AI Strategic Assessment</h3>
+                  <p className="text-slate-600 leading-relaxed text-sm md:text-base">
+                    {project.details.compatibility.rationale}
+                  </p>
+                </div>
+              </div>
+            )}
+            {/* Green Flags & Red Flags */}
+            {project?.details?.tender_simplified && (project.details.tender_simplified.pros?.length > 0 || project.details.tender_simplified.cons_and_risks?.length > 0) && (
+              <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6">
+                <div className="grid grid-cols-1 gap-4">
+                  {project.details.tender_simplified.pros?.length > 0 && (
+                  <div className="bg-emerald-50 rounded-lg p-4 border border-emerald-100">
+                    <h4 className="text-xs font-bold text-emerald-800 uppercase tracking-widest mb-3">Green Flags</h4>
+                    <ul className="space-y-2">
+                      {project.details.tender_simplified.pros.map((p: string, i: number) => (
+                        <li key={i} className="flex gap-2 text-sm text-emerald-900">
+                          <CheckCircle className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+                          {p}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                  )}
+                  {project.details.tender_simplified.cons_and_risks?.length > 0 && (
+                  <div className="bg-red-50 rounded-lg p-4 border border-red-100">
+                    <h4 className="text-xs font-bold text-red-800 uppercase tracking-widest mb-3">Red Flags & Risks</h4>
+                    <ul className="space-y-2">
+                      {project.details.tender_simplified.cons_and_risks.map((p: string, i: number) => (
+                        <li key={i} className="flex gap-2 text-sm text-red-900">
+                          <AlertCircle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
+                          {p}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                  )}
+                </div>
+              </div>
+            )}
             <div className="flex flex-col gap-8 mt-8">
                
                {/* Smart Timeline */}

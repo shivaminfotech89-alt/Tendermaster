@@ -1377,7 +1377,10 @@ Before generating the document, examine the TENDER DETAILS JSON below to determi
 • Any phrase indicating the format is "prescribed", "mandatory", or "as specified by the authority".
 
 CASE A — Tender DOES specify a format for this document:
-• Reproduce THAT exact structure, field labels, table columns, and required wording as faithfully as possible, filled with the bidder's actual data. Do NOT substitute a generic template.
+• Reproduce THAT exact structure VERBATIM: every field label, row heading, table column, section title, and prescribed clause wording must match the tender's original as closely as the extracted content permits. Where clause wording appears in the tender, copy it exactly — do NOT paraphrase or rewrite it in your own words.
+• Do NOT add sections, blocks, or declarations that are not in the original. For example: do not invent stamp-certificate blocks, notary sections, witness fields, or authority attestation panels unless the tender explicitly includes them.
+• Do NOT reorder the fields or sections — preserve the tender's sequence exactly.
+• Fill the bidder's actual data into the correct cells/fields. Do not leave blanks or bracketed placeholders if the information is available.
 • Begin your output with this exact line (standalone, before all other content):
 ✓ Prepared to match the format specified in the tender document.
 
@@ -1415,7 +1418,10 @@ ${JSON.stringify(tenderDetails)}
         config: { systemInstruction },
       });
 
-      res.json({ document: response.text || "Empty response from AI." });
+      const disclaimer =
+        `⚠ AI-generated draft — verify against the exact format in the original tender before submission. ` +
+        `Some fields, clauses, or formatting may need manual alignment with the tender's prescribed annexure.\n\n---\n\n`;
+      res.json({ document: disclaimer + (response.text || "Empty response from AI.") });
     } catch (err: any) {
       // Phase 4: log to console only — never write stack traces to disk
       console.error("Generate Doc Error:", err);

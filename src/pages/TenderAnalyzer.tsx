@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import { useAuth } from "../auth/AuthProvider";
 import { useAnalyzerStore } from "../context/AnalyzerContext";
-import { Upload, X, Loader2, Sparkles, AlertCircle, FileText, CheckCircle2, ChevronRight, Activity, CalendarDays, Link as LinkIcon, File, MessageSquare, Send, Calculator, Building, Target, Download, Edit2, Trash2, Plus, Minus , ArrowLeft } from "lucide-react";
+import { Upload, X, Loader2, Sparkles, AlertCircle, FileText, CheckCircle2, ChevronRight, Activity, CalendarDays, Link as LinkIcon, File, MessageSquare, Send, Calculator, Building, Target, Download, Edit2, Trash2, Plus, Minus, ArrowLeft, Info } from "lucide-react";
 import { doc, setDoc, collection, addDoc, getDocs, query } from "firebase/firestore";
 import { db } from "../lib/firebase";
 import Markdown from "react-markdown";
@@ -46,6 +46,7 @@ function sanitizeDocOutput(raw: string): string {
     .replace(/<[^>]*data:[^>]*\/>[^<]*/gi, '') // self-closing tags with data: URIs
     .replace(/<[^>]*data:[^>]*>[\s\S]*?<\/[^>]+>/gi, '') // block tags wrapping data: URIs
     .replace(/<[^>]+>/g, '')                   // any remaining HTML tags
+    .replace(/\[(?:FILL\s*MANUALLY?|NOT\s*APPLICABLE|INSERT\s*HERE|FILL|N\/?A|TBD|TO\s*BE\s*FILLED?)\]/gi, '__________')
     .trim();
 }
 const LARGE_FILE_BYTES = 20 * 1024 * 1024;
@@ -1467,9 +1468,13 @@ export default function TenderAnalyzer() {
                              </button>
                           </div>
                         </div>
-                        <div className="flex items-start gap-2 px-3 py-2.5 mb-3 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-800">
+                        <div className="flex items-start gap-2 px-3 py-2.5 mb-2 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-800">
                           <AlertCircle className="w-4 h-4 shrink-0 mt-0.5 text-amber-500" />
                           <span>AI-generated draft — verify against the exact format in the original tender before submission. Some fields, clauses, or formatting may need manual alignment with the tender's prescribed annexure.</span>
+                        </div>
+                        <div className="flex items-start gap-2 px-3 py-2.5 mb-3 bg-blue-50 border border-blue-200 rounded-lg text-xs text-blue-800">
+                          <Info className="w-4 h-4 shrink-0 mt-0.5 text-blue-500" />
+                          <span>Fields have been filled automatically from your Business Profile and tender details. Blank underlines (<span className="font-mono">__________</span>) indicate information not found in your profile — fill these in manually before submission, and verify all details against the original tender.</span>
                         </div>
                         <div id="generated-doc-content-analyzer" className="bg-white p-4 rounded-lg border border-indigo-100 text-sm h-64 overflow-y-auto font-mono text-indigo-950 prose prose-sm prose-indigo max-w-none">
                            {isEditingDoc ? (

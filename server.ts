@@ -1418,10 +1418,7 @@ ${JSON.stringify(tenderDetails)}
         config: { systemInstruction },
       });
 
-      const disclaimer =
-        `⚠ AI-generated draft — verify against the exact format in the original tender before submission. ` +
-        `Some fields, clauses, or formatting may need manual alignment with the tender's prescribed annexure.\n\n---\n\n`;
-      res.json({ document: disclaimer + (response.text || "Empty response from AI.") });
+      res.json({ document: response.text || "Empty response from AI." });
     } catch (err: any) {
       // Phase 4: log to console only — never write stack traces to disk
       console.error("Generate Doc Error:", err);

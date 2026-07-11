@@ -1383,6 +1383,10 @@ export default function TenderAnalyzer() {
                              </button>
                           </div>
                         </div>
+                        <div className="flex items-start gap-2 px-3 py-2.5 mb-3 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-800">
+                          <AlertCircle className="w-4 h-4 shrink-0 mt-0.5 text-amber-500" />
+                          <span>AI-generated draft — verify against the exact format in the original tender before submission. Some fields, clauses, or formatting may need manual alignment with the tender's prescribed annexure.</span>
+                        </div>
                         <div id="generated-doc-content-analyzer" className="bg-white p-4 rounded-lg border border-indigo-100 text-sm h-64 overflow-y-auto font-mono text-indigo-950 prose prose-sm prose-indigo max-w-none">
                            {isEditingDoc ? (
                              <textarea

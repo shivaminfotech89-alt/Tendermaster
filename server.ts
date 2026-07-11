@@ -1687,9 +1687,43 @@ app.post(
   requireActiveEntitlement,
   async (req: AuthenticatedRequest, res) => {
     try {
-      const { html, filename } = req.body as { html?: string; filename?: string };
+      const {
+        html,
+        filename,
+        useUserLetterhead,
+        letterheadImageBase64,
+        letterheadHeaderHtml,
+        letterheadFooterHtml,
+      } = req.body as {
+        html?: string;
+        filename?: string;
+        useUserLetterhead?: boolean;
+        letterheadImageBase64?: string;
+        letterheadHeaderHtml?: string;
+        letterheadFooterHtml?: string;
+      };
       if (!html || typeof html !== "string") {
         return res.status(400).json({ error: "html is required" });
+      }
+
+      // Path B: HTML header/footer — inject before Puppeteer renders (no image available)
+      const hasImage = useUserLetterhead && letterheadImageBase64;
+      const hasHtml =
+        useUserLetterhead && !hasImage && (letterheadHeaderHtml || letterheadFooterHtml);
+      let renderHtml = html;
+      if (hasHtml) {
+        if (letterheadHeaderHtml) {
+          renderHtml = renderHtml.replace(
+            "</body>",
+            `<div style="position:fixed;top:0;left:0;right:0;height:44mm;overflow:hidden;box-sizing:border-box;">${letterheadHeaderHtml}</div></body>`
+          );
+        }
+        if (letterheadFooterHtml) {
+          renderHtml = renderHtml.replace(
+            "</body>",
+            `<div style="position:fixed;bottom:0;left:0;right:0;height:22mm;overflow:hidden;box-sizing:border-box;">${letterheadFooterHtml}</div></body>`
+          );
+        }
       }
 
       const chromium = (await import("@sparticuz/chromium-min")).default;
@@ -1706,7 +1740,7 @@ app.post(
 
       const page = await browser.newPage();
       // networkidle0 ensures fonts/resources in srcdoc are fully settled
-      await page.setContent(html, { waitUntil: "networkidle0" });
+      await page.setContent(renderHtml, { waitUntil: "networkidle0" });
       const pdfBuffer = await page.pdf({
         format: "A4",
         printBackground: true,
@@ -1714,6 +1748,42 @@ app.post(
         margin: { top: "0", right: "0", bottom: "0", left: "0" },
       });
       await browser.close();
+
+      // Path A: image overlay — embed PNG/JPEG onto every page's 44mm top zone via pdf-lib
+      let finalPdfBytes: Uint8Array = pdfBuffer;
+      if (hasImage) {
+        try {
+          const { PDFDocument } = await import("pdf-lib");
+          let imgStr = letterheadImageBase64 as string;
+          let isJpeg = false;
+          if (imgStr.startsWith("data:")) {
+            const [header, data] = imgStr.split(",");
+            isJpeg = header.includes("jpeg") || header.includes("jpg");
+            imgStr = data;
+          }
+          const imgBytes = Buffer.from(imgStr, "base64");
+          const docPdf = await PDFDocument.load(pdfBuffer);
+          const lhImage = isJpeg
+            ? await docPdf.embedJpg(imgBytes)
+            : await docPdf.embedPng(imgBytes);
+          const { width: imgW, height: imgH } = lhImage;
+          // A4 in points; 44mm zone at top (bottom-left origin)
+          const A4_W = 595.28;
+          const A4_H = 841.89;
+          const ZONE_H = 44 * (72 / 25.4); // 124.72 pt
+          const scale = Math.min(A4_W / imgW, ZONE_H / imgH);
+          const drawW = imgW * scale;
+          const drawH = imgH * scale;
+          const x = (A4_W - drawW) / 2;
+          const y = A4_H - ZONE_H + (ZONE_H - drawH) / 2; // center in zone, bottom-left origin
+          for (const pg of docPdf.getPages()) {
+            pg.drawImage(lhImage, { x, y, width: drawW, height: drawH });
+          }
+          finalPdfBytes = await docPdf.save();
+        } catch (overlayErr) {
+          console.error("Letterhead overlay error, returning plain PDF:", overlayErr);
+        }
+      }
 
       const safeName =
         (filename || "document")
@@ -1723,7 +1793,7 @@ app.post(
 
       res.setHeader("Content-Type", "application/pdf");
       res.setHeader("Content-Disposition", `attachment; filename="${safeName}.pdf"`);
-      res.send(Buffer.from(pdfBuffer));
+      res.send(Buffer.from(finalPdfBytes));
     } catch (err: any) {
       console.error("Generate PDF Error:", err);
       res.status(500).json({ error: err.message || "PDF generation failed" });

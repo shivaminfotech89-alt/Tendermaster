@@ -513,7 +513,14 @@ export default function TenderAnalyzer() {
       const res = await fetchWithAuth("/api/generate-pdf", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ html: generatedDoc, filename: docType }),
+        body: JSON.stringify({
+          html: generatedDoc,
+          filename: docType,
+          useUserLetterhead: useLetterhead,
+          letterheadImageBase64: useLetterhead ? (businessProfile?.letterheadBackgroundImage ?? "") : "",
+          letterheadHeaderHtml: useLetterhead ? (businessProfile?.letterheadHeader ?? "") : "",
+          letterheadFooterHtml: useLetterhead ? (businessProfile?.letterheadFooter ?? "") : "",
+        }),
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({ error: "PDF generation failed" }));
@@ -1370,12 +1377,10 @@ export default function TenderAnalyzer() {
                         <div className="flex justify-between items-center mb-2">
                           <span className="text-xs font-bold text-indigo-900 uppercase">Generated Output</span>
                           <div className="flex items-center gap-3">
-                           {!generatedDocIsHtml && (
-                             <label className="flex items-center gap-1.5 text-xs font-medium text-slate-700 cursor-pointer">
-                               <input type="checkbox" checked={useLetterhead} onChange={(e) => setUseLetterhead(e.target.checked)} className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500" />
-                               Use Letterhead
-                             </label>
-                           )}
+                           <label className="flex items-center gap-1.5 text-xs font-medium text-slate-700 cursor-pointer">
+                             <input type="checkbox" checked={useLetterhead} onChange={(e) => setUseLetterhead(e.target.checked)} className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500" />
+                             Use Letterhead
+                           </label>
                            {generatedDocIsHtml ? (
                              <button onClick={() => {
                                const pw = window.open('', '', 'width=900,height=1100');

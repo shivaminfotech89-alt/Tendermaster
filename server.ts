@@ -319,6 +319,80 @@ async function safeFetch(urlString: string, options: RequestInit = {}): Promise<
 }
 
 // ---------------------------------------------------------------------------
+// HTML document shell builder (Mode A PDF output)
+// ---------------------------------------------------------------------------
+function buildDocHtml(fragment: string, docType: string): string {
+  const safeTitle = docType.replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>${safeTitle}</title>
+<style>
+  @page {
+    size: A4 portrait;
+    margin-top: 44mm;
+    margin-right: 20mm;
+    margin-bottom: 22mm;
+    margin-left: 20mm;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: 'Times New Roman', Times, serif;
+    font-size: 11pt;
+    line-height: 1.6;
+    color: #111827;
+    margin: 0;
+    padding: 0;
+    background: #ffffff;
+  }
+  .letterhead-guide {
+    height: 44mm;
+    border: 2px dashed #9ca3af;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #6b7280;
+    font-size: 9pt;
+    font-family: Arial, sans-serif;
+    margin-bottom: 14pt;
+    letter-spacing: 0.03em;
+    background: #f9fafb;
+  }
+  @media print { .letterhead-guide { display: none; } }
+  .case-note {
+    font-family: Arial, sans-serif;
+    font-size: 9pt;
+    color: #6b7280;
+    font-style: italic;
+    border-left: 3px solid #d1d5db;
+    padding: 3pt 8pt;
+    margin: 0 0 14pt;
+    background: #f9fafb;
+  }
+  h1 { font-size: 15pt; font-weight: bold; text-align: center; margin: 0 0 10pt; }
+  h2 { font-size: 12pt; font-weight: bold; margin: 14pt 0 5pt; }
+  h3 { font-size: 11pt; font-weight: bold; margin: 10pt 0 4pt; text-decoration: underline; }
+  p { margin: 0 0 7pt; }
+  ul, ol { margin: 0 0 7pt; padding-left: 18pt; }
+  li { margin-bottom: 2pt; }
+  table { width: 100%; border-collapse: collapse; margin: 8pt 0 14pt; page-break-inside: auto; font-size: 10pt; }
+  tr { page-break-inside: avoid; }
+  th, td { border: 1px solid #374151; padding: 5pt 8pt; text-align: left; vertical-align: top; word-break: break-word; }
+  th { background-color: #f3f4f6; font-weight: bold; }
+  strong { font-weight: bold; }
+  em { font-style: italic; }
+</style>
+</head>
+<body>
+  <div class="letterhead-guide">&#x2190; Letterhead reserved — 40 mm (Stage 2) &#x2192;</div>
+  <div class="doc-body">${fragment}</div>
+</body>
+</html>`;
+}
+
+// ---------------------------------------------------------------------------
 // Razorpay helpers
 // ---------------------------------------------------------------------------
 let razorpayInstance: Razorpay | null = null;
@@ -1472,7 +1546,7 @@ app.post(
 Your task is to generate high-quality, professional draft documents based on the provided tender analysis and the user's business profile.
 Use the business profile data (Company Name, Address, GST, PAN, etc.) and Tender Details (Tender No., Dates, Authority Name, etc.) to automatically fill in ALL placeholders.
 CRITICAL RULE: DO NOT leave placeholders like "[Tender Number - To be filled by bidder]" or "[Date]" or "[Bidder Name]" in the output. You MUST aggressively find and replace all such "fill in the blank" brackets with the actual data from the provided Tender Details and Business Profile. If an exact piece of information is missing, use a logical assumed default or current date rather than leaving a bracketed placeholder.
-If the document requested is an "Auto-Fill: [Annexure Name]", your job is to auto-generate the filled-up annexure exactly as it should be submitted. Since real annexures are often tabular forms in PDFs, YOU MUST reconstruct the exact Annexure/Schedule/Form tabular layout required by the agency using clean, well-structured Markdown tables and lists. Place the bidder's information directly into the respective form fields/cells as if they were filling out the actual PDF form. Ensure it visually resembles a structured printable form that can be submitted to the agency. Do not leave blanks if information can be reasonably derived or if standard boilerplate is applicable.
+If the document requested is an "Auto-Fill: [Annexure Name]", your job is to auto-generate the filled-up annexure exactly as it should be submitted. Since real annexures are often tabular forms in PDFs, YOU MUST reconstruct the exact Annexure/Schedule/Form tabular layout required by the agency using semantic HTML tables (&lt;table&gt;/&lt;tr&gt;/&lt;th&gt;/&lt;td&gt;) and lists (&lt;ul&gt;/&lt;ol&gt;). Place the bidder's information directly into the respective form fields/cells. Ensure it accurately represents the structured form that can be submitted to the agency. Do not leave blanks if information can be reasonably derived or if standard boilerplate is applicable.
 
 --- FORMAT DETECTION — MANDATORY FIRST STEP ---
 Before generating the document, examine the TENDER DETAILS JSON below to determine whether the tender authority prescribes a SPECIFIC FORMAT, PROFORMA, or STRUCTURE for the requested document type. Signals to look for:
@@ -1486,15 +1560,15 @@ CASE A — Tender DOES specify a format for this document:
 • Do NOT add sections, blocks, or declarations that are not in the original. For example: do not invent stamp-certificate blocks, notary sections, witness fields, or authority attestation panels unless the tender explicitly includes them.
 • Do NOT reorder the fields or sections — preserve the tender's sequence exactly.
 • Fill the bidder's actual data into the correct cells/fields. Do not leave blanks or bracketed placeholders if the information is available.
-• Begin your output with this exact line (standalone, before all other content):
-✓ Prepared to match the format specified in the tender document.
+• Begin your HTML output with this exact element:
+<p class="case-note">✓ Prepared to match the format specified in the tender document.</p>
 
 CASE B — Tender does NOT specify a format for this document:
 • Generate using a standard professional format appropriate for Indian government tendering.
-• Begin your output with this exact line (standalone, before all other content):
-Prepared in a standard professional format — the tender did not mandate a specific proforma for this document. Please review against the tender before submission.
+• Begin your HTML output with this exact element:
+<p class="case-note">Prepared in a standard professional format — the tender did not mandate a specific proforma for this document. Please review against the tender before submission.</p>
 
-You MUST output exactly one of these two header lines as the very first line of your response, then the document content below it.${
+You MUST output exactly one of these two &lt;p class="case-note"&gt; elements as the very first element of your HTML fragment, then the document HTML content below it.${
         language && language !== "en"
           ? `\nCRITICAL LANGUAGE REQUIREMENT: You MUST draft the document STRICTLY in ${language === "hi" ? "Hindi" : language === "gu" ? "Gujarati" : language}, unless the user asks otherwise.`
           : `\nCRITICAL LANGUAGE REQUIREMENT: You MUST draft the document STRICTLY in English, unless the user asks otherwise.`
@@ -1576,6 +1650,7 @@ ${JSON.stringify(tenderDetails)}${financialContext}${extraContext}`;
           contents: [{ role: "user", parts: [formPart, textPart] }],
           config: { systemInstruction: exactFormSystemInstruction },
         });
+        return res.json({ document: response.text || "Empty response from AI.", format: "markdown" });
       } else {
         // ── Standard mode: generate from tender data analysis ──
         const isAutoFill =
@@ -1584,8 +1659,8 @@ ${JSON.stringify(tenderDetails)}${financialContext}${extraContext}`;
           docType.includes("Schedule") ||
           docType.includes("Form");
         const prompt = isAutoFill
-          ? `Apply the FORMAT DETECTION step from your instructions, then auto-fill the requested form/annexure/schedule: "${docType}". Re-create the form's exact structural layout (using Markdown tables heavily where appropriate, to emulate PDF form columns and rows) and insert our data directly into it. Start with the mandatory header line (Case A or Case B), then the document content. Return ONLY the header line + document text in Markdown format.`
-          : `Apply the FORMAT DETECTION step from your instructions, then draft a highly professional, ready-to-use "${docType}" based on the Tender Details and Business Profile provided. Keep constraints and specifics of Indian tendering format in mind. Start with the mandatory header line (Case A or Case B), then the document content. Return ONLY the header line + document text in Markdown format, with proper headings.`;
+          ? `Apply the FORMAT DETECTION step from your instructions, then auto-fill the requested form/annexure/schedule: "${docType}". Re-create the form's exact structural layout using HTML tables (<table>/<thead>/<tbody>/<tr>/<th>/<td>) to faithfully emulate the form's columns and rows, and insert the bidder's data directly. Start with the mandatory <p class="case-note"> element (Case A or Case B), then the form HTML. Return ONLY a clean HTML fragment — no <html>/<head>/<body>/<style>/<script> wrapper, no inline CSS, no Markdown, no base64, no images.`
+          : `Apply the FORMAT DETECTION step from your instructions, then draft a highly professional, ready-to-use "${docType}" based on the Tender Details and Business Profile provided. Keep constraints and specifics of Indian tendering format in mind. Start with the mandatory <p class="case-note"> element (Case A or Case B), then the document body. Return ONLY a clean HTML fragment — no <html>/<head>/<body>/<style>/<script> wrapper, no inline CSS, no Markdown, no base64, no images. Use semantic HTML: <h1>/<h2>/<h3> for headings, <p> for paragraphs, <ul>/<ol>/<li> for lists, <table>/<thead>/<tbody>/<tr>/<th>/<td> for tables, <strong>/<em> for emphasis.`;
 
         response = await generateContentWithRetry(aiClient, {
           model: "gemini-3.5-flash",
@@ -1594,11 +1669,64 @@ ${JSON.stringify(tenderDetails)}${financialContext}${extraContext}`;
         });
       }
 
-      res.json({ document: response.text || "Empty response from AI." });
+      const fragment = response.text || "<p>Empty response from AI.</p>";
+      res.json({ document: buildDocHtml(fragment, docType as string), format: "html" });
     } catch (err: any) {
-      // Phase 4: log to console only — never write stack traces to disk
       console.error("Generate Doc Error:", err);
       res.status(400).json({ error: err.message });
+    }
+  }
+);
+
+// ---------------------------------------------------------------------------
+// PDF generation endpoint (Puppeteer + @sparticuz/chromium-min)
+// ---------------------------------------------------------------------------
+app.post(
+  "/api/generate-pdf",
+  verifyFirebaseToken,
+  requireActiveEntitlement,
+  async (req: AuthenticatedRequest, res) => {
+    try {
+      const { html, filename } = req.body as { html?: string; filename?: string };
+      if (!html || typeof html !== "string") {
+        return res.status(400).json({ error: "html is required" });
+      }
+
+      const chromium = (await import("@sparticuz/chromium-min")).default;
+      const puppeteer = (await import("puppeteer-core")).default;
+
+      const browser = await puppeteer.launch({
+        args: chromium.args,
+        defaultViewport: null,
+        executablePath: await chromium.executablePath(
+          "https://github.com/Sparticuz/chromium/releases/download/v131.0.1/chromium-v131.0.1-pack.tar"
+        ),
+        headless: "shell" as const,
+      });
+
+      const page = await browser.newPage();
+      // networkidle0 ensures fonts/resources in srcdoc are fully settled
+      await page.setContent(html, { waitUntil: "networkidle0" });
+      const pdfBuffer = await page.pdf({
+        format: "A4",
+        printBackground: true,
+        // Margins intentionally 0 — @page CSS in the HTML shell controls all margins
+        margin: { top: "0", right: "0", bottom: "0", left: "0" },
+      });
+      await browser.close();
+
+      const safeName =
+        (filename || "document")
+          .replace(/[^a-zA-Z0-9_\- ]/g, "")
+          .replace(/\s+/g, "_")
+          .slice(0, 80) || "document";
+
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader("Content-Disposition", `attachment; filename="${safeName}.pdf"`);
+      res.send(Buffer.from(pdfBuffer));
+    } catch (err: any) {
+      console.error("Generate PDF Error:", err);
+      res.status(500).json({ error: err.message || "PDF generation failed" });
     }
   }
 );

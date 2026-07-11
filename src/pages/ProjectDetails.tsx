@@ -74,6 +74,8 @@ export default function ProjectDetails() {
   const [exactFormMode, setExactFormMode] = useState(false);
   const [exactFormFile, setExactFormFile] = useState<File | null>(null);
   const [formUploading, setFormUploading] = useState(false);
+  const [generatedDocIsHtml, setGeneratedDocIsHtml] = useState(false);
+  const [downloadingPdf, setDownloadingPdf] = useState(false);
   
   // Checked items for action center
   const [checkedItems, setCheckedItems] = useState<string[]>([]);
@@ -498,6 +500,7 @@ export default function ProjectDetails() {
     }
     setGeneratingDoc(true);
     setGeneratedDoc("Generating...");
+    setGeneratedDocIsHtml(false);
     setIsEditingDoc(false);
     try {
       let exactFormUrl: string | undefined;
@@ -537,12 +540,45 @@ export default function ProjectDetails() {
          throw new Error(`The document is too large or the analysis took too long for Vercel limits (60s). Please try a smaller document or check back later.`);
       }
       if (!res.ok) throw new Error(data.error || "Failed to generate document");
-      setGeneratedDoc(sanitizeDocOutput(data.document));
+      if (data.format === "html") {
+        setGeneratedDocIsHtml(true);
+        setGeneratedDoc(data.document);
+      } else {
+        setGeneratedDocIsHtml(false);
+        setGeneratedDoc(sanitizeDocOutput(data.document));
+      }
     } catch (e: any) {
       toast.error("Failed to generate: " + e.message);
     } finally {
       setGeneratingDoc(false);
       setFormUploading(false);
+    }
+  };
+
+  const downloadPdf = async () => {
+    if (!generatedDoc || !generatedDocIsHtml) return;
+    setDownloadingPdf(true);
+    try {
+      const res = await fetchWithAuth("/api/generate-pdf", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ html: generatedDoc, filename: docType }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: "PDF generation failed" }));
+        throw new Error(err.error || "PDF generation failed");
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = docType.replace(/\s+/g, "_") + ".pdf";
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e: any) {
+      toast.error("PDF generation failed: " + e.message);
+    } finally {
+      setDownloadingPdf(false);
     }
   };
 
@@ -966,137 +1002,75 @@ export default function ProjectDetails() {
                         <span className="text-xs font-bold text-indigo-900 uppercase">Generated Output</span>
                         
                         <div className="flex items-center gap-3">
-                           <label className="flex items-center gap-1.5 text-xs font-medium text-slate-700 cursor-pointer">
-                              <input 
-                                type="checkbox" 
-                                checked={useLetterhead} 
-                                onChange={(e) => setUseLetterhead(e.target.checked)} 
-                                className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
-                              />
-                              Use Letterhead
-                           </label>
-                           <button onClick={() => {
-                             const printWindow = window.open('', '', 'width=800,height=900');
-                             if (!printWindow) return;
-                             const content = document.getElementById('generated-doc-content')?.innerHTML || '';
-                             
-                             let headerHtml = '';
-                             let footerHtml = '';
-                             let bgImageHtml = '';
-                             let pageMargin = '20mm'; // Standard A4 margin
-                             let bodyPadding = '0';
-                             
-                             if (useLetterhead && businessProfile) {
-                                if (businessProfile.letterheadBackgroundImage) {
-                                   bgImageHtml = `<img src="${businessProfile.letterheadBackgroundImage}" style="position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; z-index: -1; pointer-events: none; object-fit: cover; margin: 0; padding: 0;" />`;
-                                   // Full bleed for letterhead image
-                                   pageMargin = '0';
-                                   bodyPadding = '0 20mm'; // Add side margins via body padding
-                                   
-                                   // A4 height is 297mm. Add top/bottom space for the graphics.
-                                   headerHtml = `<div style="height: 45mm; width: 100%;"></div>`;
-                                   footerHtml = `<div style="height: 45mm; width: 100%;"></div>`;
-                                } else {
-                                   headerHtml = businessProfile.letterheadHeader || `<div style="text-align:center; padding-bottom: 5mm; border-bottom: 2px solid #000; margin-bottom: 5mm;"><h2>${businessProfile.companyName || 'Company Name'}</h2><p>${businessProfile.contactDetails || ''}</p></div>`;
-                                   footerHtml = businessProfile.letterheadFooter || `<div style="text-align:center; padding-top: 5mm; border-top: 1px solid #000; margin-top: 5mm; font-size: 12px;"><p>${businessProfile.website || ''}</p></div>`;
-                                }
-                             }
-                             
-                             printWindow.document.write(`
-                               <html>
-                                 <head>
-                                   <title>Print Document - ${docType}</title>
-                                   <style>
-                                     @page { size: A4; margin: ${pageMargin}; }
-                                     body { 
-                                       font-family: system-ui, -apple-system, sans-serif; 
-                                       color: #111827; 
-                                       margin: 0;
-                                       padding: ${bodyPadding};
-                                       box-sizing: border-box;
-                                     }
-                                     .content { font-size: 11pt; line-height: 1.6; }
-                                     
-                                     /* Layout tables (header/footer) */
-                                     table.layout-table { width: 100%; border-collapse: collapse; border: none; margin: 0; padding: 0; table-layout: fixed; }
-                                     table.layout-table > thead { display: table-header-group; }
-                                     table.layout-table > tfoot { display: table-footer-group; }
-                                     table.layout-table > tbody > tr > td { border: none; padding: 0; }
-                                     table.layout-table > thead > tr > td { border: none; padding: 0; }
-                                     table.layout-table > tfoot > tr > td { border: none; padding: 0; }
-                                     
-                                     /* Content tables inside the document */
-                                     table:not(.layout-table) { width: 100%; border-collapse: collapse; margin-top: 10px; margin-bottom: 20px; page-break-inside: auto; }
-                                     table:not(.layout-table) tr { page-break-inside: avoid; page-break-after: auto; }
-                                     table:not(.layout-table) th, table:not(.layout-table) td { border: 1px solid #d1d5db; padding: 8px 12px; text-align: left; overflow-wrap: break-word; word-wrap: break-word; }
-                                     table:not(.layout-table) th { background-color: #f3f4f6; }
-                                     
-                                     h1, h2, h3, h4, h5 { margin-top: 15px; margin-bottom: 10px; page-break-after: avoid; }
-                                     p { margin-bottom: 10px; }
-                                     ul, ol { margin-bottom: 10px; padding-left: 20px; }
-                                     
-                                     @media print {
-                                        body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-                                      }
-                                   </style>
-                                 </head>
-                                 <body>
-                                   ${bgImageHtml}
-                                   <table class="layout-table">
-                                     <thead>
-                                       <tr>
-                                         <td>
-                                           ${headerHtml}
-                                         </td>
-                                       </tr>
-                                     </thead>
-                                     <tbody>
-                                       <tr>
-                                         <td>
-                                           <div class="content">
-                                             ${content}
-                                           </div>
-                                         </td>
-                                       </tr>
-                                     </tbody>
-                                     <tfoot>
-                                       <tr>
-                                         <td>
-                                           ${footerHtml}
-                                         </td>
-                                       </tr>
-                                     </tfoot>
-                                   </table>
-                                 </body>
-                               </html>
-                             `);
-                             printWindow.document.close();
-                             printWindow.focus();
-                             setTimeout(() => {
-                               printWindow.print();
-                               printWindow.close();
-                             }, 250);
-                           }} className="text-xs flex items-center gap-1 text-slate-600 hover:text-slate-800 font-medium">
-                              <FileText className="w-3 h-3" /> Print
-                           </button>
-                           <button onClick={() => {
-                             const blob = new Blob([generatedDoc], {type: "text/plain"});
-                             const url = URL.createObjectURL(blob);
-                             const a = document.createElement("a");
-                             a.href = url;
-                             a.download = docType.replace(/\s+/g, "_") + ".txt";
-                             a.click();
-                           }} className="text-xs flex items-center gap-1 text-indigo-600 hover:text-indigo-800 font-medium">
-                              <Download className="w-3 h-3" /> Download
-                           </button>
-                           <button onClick={() => {
-                              navigator.clipboard.writeText(generatedDoc);
-                              toast.success("Copied to clipboard!");
-                           }} className="text-xs flex items-center gap-1 text-indigo-600 hover:text-indigo-800 font-medium">
-                              <FileText className="w-3 h-3" /> Copy
-                           </button>
+                           {!generatedDocIsHtml && (
+                             <label className="flex items-center gap-1.5 text-xs font-medium text-slate-700 cursor-pointer">
+                               <input type="checkbox" checked={useLetterhead} onChange={(e) => setUseLetterhead(e.target.checked)} className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500" />
+                               Use Letterhead
+                             </label>
+                           )}
+                           {generatedDocIsHtml ? (
+                             <button onClick={() => {
+                               const pw = window.open('', '', 'width=900,height=1100');
+                               if (!pw) return;
+                               pw.document.write(generatedDoc);
+                               pw.document.close();
+                               pw.focus();
+                               setTimeout(() => { pw.print(); pw.close(); }, 500);
+                             }} className="text-xs flex items-center gap-1 text-slate-600 hover:text-slate-800 font-medium">
+                               <FileText className="w-3 h-3" /> Print
+                             </button>
+                           ) : (
+                             <button onClick={() => {
+                               const printWindow = window.open('', '', 'width=800,height=900');
+                               if (!printWindow) return;
+                               const content = document.getElementById('generated-doc-content')?.innerHTML || '';
+                               let headerHtml = ''; let footerHtml = ''; let bgImageHtml = '';
+                               let pageMargin = '20mm'; let bodyPadding = '0';
+                               if (useLetterhead && businessProfile) {
+                                 if (businessProfile.letterheadBackgroundImage) {
+                                   bgImageHtml = `<img src="${businessProfile.letterheadBackgroundImage}" style="position:fixed;top:0;left:0;width:100vw;height:100vh;z-index:-1;pointer-events:none;object-fit:cover;" />`;
+                                   pageMargin = '0'; bodyPadding = '0 20mm';
+                                   headerHtml = `<div style="height:45mm;width:100%;"></div>`;
+                                   footerHtml = `<div style="height:45mm;width:100%;"></div>`;
+                                 } else {
+                                   headerHtml = businessProfile.letterheadHeader || `<div style="text-align:center;padding-bottom:5mm;border-bottom:2px solid #000;margin-bottom:5mm;"><h2>${businessProfile.companyName || 'Company Name'}</h2><p>${businessProfile.contactDetails || ''}</p></div>`;
+                                   footerHtml = businessProfile.letterheadFooter || `<div style="text-align:center;padding-top:5mm;border-top:1px solid #000;margin-top:5mm;font-size:12px;"><p>${businessProfile.website || ''}</p></div>`;
+                                 }
+                               }
+                               printWindow.document.write(`<html><head><title>Print - ${docType}</title><style>@page{size:A4;margin:${pageMargin}}body{font-family:system-ui,sans-serif;color:#111827;margin:0;padding:${bodyPadding};box-sizing:border-box}.content{font-size:11pt;line-height:1.6}table.layout-table{width:100%;border-collapse:collapse;border:none;margin:0;padding:0;table-layout:fixed}table.layout-table>thead{display:table-header-group}table.layout-table>tfoot{display:table-footer-group}table.layout-table td{border:none;padding:0}table:not(.layout-table){width:100%;border-collapse:collapse;margin:10px 0 20px;page-break-inside:auto}table:not(.layout-table) tr{page-break-inside:avoid}table:not(.layout-table) th,table:not(.layout-table) td{border:1px solid #d1d5db;padding:8px 12px;text-align:left;overflow-wrap:break-word}table:not(.layout-table) th{background:#f3f4f6}h1,h2,h3,h4,h5{margin-top:15px;margin-bottom:10px;page-break-after:avoid}p{margin-bottom:10px}ul,ol{margin-bottom:10px;padding-left:20px}@media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}</style></head><body>${bgImageHtml}<table class="layout-table"><thead><tr><td>${headerHtml}</td></tr></thead><tbody><tr><td><div class="content">${content}</div></td></tr></tbody><tfoot><tr><td>${footerHtml}</td></tr></tfoot></table></body></html>`);
+                               printWindow.document.close();
+                               printWindow.focus();
+                               setTimeout(() => { printWindow.print(); printWindow.close(); }, 250);
+                             }} className="text-xs flex items-center gap-1 text-slate-600 hover:text-slate-800 font-medium">
+                               <FileText className="w-3 h-3" /> Print
+                             </button>
+                           )}
+                           {generatedDocIsHtml ? (
+                             <button onClick={downloadPdf} disabled={downloadingPdf}
+                               className="text-xs flex items-center gap-1 text-indigo-600 hover:text-indigo-800 font-medium transition-colors disabled:opacity-50">
+                               {downloadingPdf ? <Loader2 className="w-3 h-3 animate-spin" /> : <Download className="w-3 h-3" />}
+                               {downloadingPdf ? "Generating…" : "Download PDF"}
+                             </button>
+                           ) : (
+                             <button onClick={() => {
+                               const blob = new Blob([generatedDoc], {type: "text/plain"});
+                               const url = URL.createObjectURL(blob);
+                               const a = document.createElement("a");
+                               a.href = url;
+                               a.download = docType.replace(/\s+/g, "_") + ".txt";
+                               a.click();
+                             }} className="text-xs flex items-center gap-1 text-indigo-600 hover:text-indigo-800 font-medium">
+                               <Download className="w-3 h-3" /> Download
+                             </button>
+                           )}
+                           {!generatedDocIsHtml && (
+                             <button onClick={() => { navigator.clipboard.writeText(generatedDoc); toast.success("Copied to clipboard!"); }}
+                               className="text-xs flex items-center gap-1 text-indigo-600 hover:text-indigo-800 font-medium">
+                               <FileText className="w-3 h-3" /> Copy
+                             </button>
+                           )}
                            <button onClick={() => setIsEditingDoc(!isEditingDoc)} className="text-xs flex items-center gap-1 text-indigo-600 hover:text-indigo-800 font-medium">
-                              <Edit2 className="w-3 h-3" /> {isEditingDoc ? "Preview" : "Edit"}
+                             <Edit2 className="w-3 h-3" /> {isEditingDoc ? "Preview" : generatedDocIsHtml ? "Edit HTML" : "Edit"}
                            </button>
                         </div>
                       </div>
@@ -1108,17 +1082,36 @@ export default function ProjectDetails() {
                         <Info className="w-4 h-4 shrink-0 mt-0.5 text-blue-500" />
                         <span>Fields have been filled automatically from your Business Profile and tender details. Blank underlines (<span className="font-mono">__________</span>) indicate information not found in your profile — fill these in manually before submission, and verify all details against the original tender.</span>
                       </div>
-                      <div id="generated-doc-content" className="bg-white p-4 rounded-lg border border-indigo-100 text-sm h-64 overflow-y-auto font-mono text-indigo-950 prose prose-sm prose-indigo max-w-none">
-                         {isEditingDoc ? (
-                           <textarea
-                             value={generatedDoc}
-                             onChange={(e) => setGeneratedDoc(e.target.value)}
-                             className="w-full h-[200px] p-2 border-none focus:ring-0 resize-none font-mono text-xs bg-indigo-50/50"
-                           />
-                         ) : (
-                           <Markdown remarkPlugins={[remarkGfm]}>{generatedDoc || "No document generated yet."}</Markdown>
-                         )}
-                      </div>
+                      {generatedDocIsHtml ? (
+                        isEditingDoc ? (
+                          <textarea
+                            value={generatedDoc}
+                            onChange={(e) => setGeneratedDoc(e.target.value)}
+                            className="w-full bg-slate-950 text-green-300 p-3 rounded-lg border border-indigo-200 font-mono text-xs resize-none focus:ring-2 focus:ring-indigo-300"
+                            style={{ height: '520px' }}
+                          />
+                        ) : (
+                          <iframe
+                            sandbox=""
+                            srcDoc={generatedDoc}
+                            className="w-full rounded-lg border border-indigo-200 bg-white"
+                            style={{ height: '520px' }}
+                            title="Generated Document Preview"
+                          />
+                        )
+                      ) : (
+                        <div id="generated-doc-content" className="bg-white p-4 rounded-lg border border-indigo-100 text-sm h-64 overflow-y-auto font-mono text-indigo-950 prose prose-sm prose-indigo max-w-none">
+                          {isEditingDoc ? (
+                            <textarea
+                              value={generatedDoc}
+                              onChange={(e) => setGeneratedDoc(e.target.value)}
+                              className="w-full h-[200px] p-2 border-none focus:ring-0 resize-none font-mono text-xs bg-indigo-50/50"
+                            />
+                          ) : (
+                            <Markdown remarkPlugins={[remarkGfm]}>{generatedDoc || "No document generated yet."}</Markdown>
+                          )}
+                        </div>
+                      )}
                    </div>
                 )}
              </div>

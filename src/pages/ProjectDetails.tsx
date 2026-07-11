@@ -61,6 +61,8 @@ export default function ProjectDetails() {
   const [docType, setDocType] = useState("Covering Letter");
   const [useLetterhead, setUseLetterhead] = useState(false);
   const [extraInstructions, setExtraInstructions] = useState("");
+  const [exactFormMode, setExactFormMode] = useState(false);
+  const [exactFormFile, setExactFormFile] = useState<File | null>(null);
   
   // Checked items for action center
   const [checkedItems, setCheckedItems] = useState<string[]>([]);
@@ -479,15 +481,33 @@ export default function ProjectDetails() {
 
   const generateDocument = async () => {
     if (!project) return;
+    if (exactFormMode && !exactFormFile) {
+      toast.error("Please upload the blank form you want filled.");
+      return;
+    }
     setGeneratingDoc(true);
     setGeneratedDoc("Generating...");
     setIsEditingDoc(false);
     try {
+      let exactFormBase64: string | undefined;
+      let exactFormMimeType: string | undefined;
+      if (exactFormMode && exactFormFile) {
+        exactFormBase64 = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => {
+            const result = reader.result as string;
+            resolve(result.split(",")[1]);
+          };
+          reader.onerror = () => reject(new Error("Failed to read file"));
+          reader.readAsDataURL(exactFormFile);
+        });
+        exactFormMimeType = exactFormFile.type || "application/pdf";
+      }
       const res = await fetchWithAuth("/api/generate-doc", {
          method: "POST",
          headers: { "Content-Type": "application/json" },
          body: JSON.stringify({
-            docType,
+            docType: exactFormMode ? "Exact Form Fill" : docType,
             tenderDetails: project.details,
             userProfile: businessProfile,
             extraInstructions,
@@ -496,7 +516,8 @@ export default function ProjectDetails() {
               materials,
               labour
             },
-            language: i18n.language
+            language: i18n.language,
+            ...(exactFormBase64 ? { exactFormBase64, exactFormMimeType } : {}),
          })
       });
       const resText = await res.text();
@@ -509,7 +530,7 @@ export default function ProjectDetails() {
       if (!res.ok) throw new Error(data.error || "Failed to generate document");
       setGeneratedDoc(data.document);
     } catch (e: any) {
-      alert("Failed to generate: " + e.message);
+      toast.error("Failed to generate: " + e.message);
     } finally {
       setGeneratingDoc(false);
     }
@@ -834,8 +855,25 @@ export default function ProjectDetails() {
                 <p className="text-xs text-indigo-700/70 mt-1">Generate tender submission documents tailored to this project.</p>
              </div>
              <div className="p-5 space-y-4">
-                <select 
-                  value={docType} 
+                {/* Mode toggle */}
+                <div className="flex rounded-lg border border-indigo-200 overflow-hidden text-sm font-medium">
+                  <button
+                    onClick={() => { setExactFormMode(false); setExactFormFile(null); }}
+                    className={`flex-1 py-2 transition-colors ${!exactFormMode ? 'bg-indigo-600 text-white' : 'bg-white text-indigo-700 hover:bg-indigo-50'}`}
+                  >
+                    Generate from tender data
+                  </button>
+                  <button
+                    onClick={() => setExactFormMode(true)}
+                    className={`flex-1 py-2 transition-colors ${exactFormMode ? 'bg-indigo-600 text-white' : 'bg-white text-indigo-700 hover:bg-indigo-50'}`}
+                  >
+                    Fill an uploaded form
+                  </button>
+                </div>
+
+                {!exactFormMode ? (
+                <select
+                  value={docType}
                   onChange={e => setDocType(e.target.value)}
                   className="w-full bg-white border border-indigo-200 text-indigo-900 text-sm rounded-lg focus:ring-indigo-500 focus:border-indigo-500 block p-2.5"
                 >
@@ -859,15 +897,52 @@ export default function ProjectDetails() {
                     </optgroup>
                   )}
                 </select>
+                ) : (
+                <div>
+                  <p className="text-xs text-indigo-700/80 mb-2">Upload the blank form/annexure page from your tender (PDF or image). The AI will reproduce its exact structure and fill your details in.</p>
+                  {!exactFormFile ? (
+                    <label className="flex flex-col items-center justify-center w-full h-24 border-2 border-dashed border-indigo-300 rounded-lg cursor-pointer bg-white hover:bg-indigo-50 transition-colors">
+                      <div className="flex flex-col items-center justify-center gap-1">
+                        <Upload className="w-5 h-5 text-indigo-400" />
+                        <span className="text-xs text-indigo-600 font-medium">Click to upload blank form</span>
+                        <span className="text-[10px] text-slate-400">PDF or image • max 20 MB</span>
+                      </div>
+                      <input
+                        type="file"
+                        accept=".pdf,image/*"
+                        className="hidden"
+                        onChange={(e) => {
+                          const f = e.target.files?.[0] || null;
+                          if (f && f.size > LARGE_FILE_BYTES) {
+                            toast.error("File is over 20 MB — please use a smaller file or a single page.");
+                            return;
+                          }
+                          setExactFormFile(f);
+                        }}
+                      />
+                    </label>
+                  ) : (
+                    <div className="flex items-center gap-3 bg-white border border-indigo-200 rounded-lg px-3 py-2.5">
+                      <FileText className="w-4 h-4 text-indigo-500 shrink-0" />
+                      <span className="text-xs text-indigo-900 font-medium truncate flex-1">{exactFormFile.name}</span>
+                      <span className="text-[10px] text-slate-400 shrink-0">{formatFileSize(exactFormFile.size)}</span>
+                      <button onClick={() => setExactFormFile(null)} className="text-slate-400 hover:text-red-500 shrink-0 transition-colors">
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
+                  )}
+                </div>
+                )}
+
                 <input
                   type="text"
-                  placeholder="Optional: Enter specific details or numbers for this document..."
+                  placeholder="Optional: Enter specific details or instructions for this document..."
                   value={extraInstructions}
                   onChange={(e) => setExtraInstructions(e.target.value)}
-                  className="w-full bg-white border border-indigo-200 text-indigo-900 text-sm rounded-lg focus:ring-indigo-500 focus:border-indigo-500 block p-2.5 mt-3 mb-3"
+                  className="w-full bg-white border border-indigo-200 text-indigo-900 text-sm rounded-lg focus:ring-indigo-500 focus:border-indigo-500 block p-2.5"
                 />
-                <button 
-                  onClick={generateDocument} 
+                <button
+                  onClick={generateDocument}
                   disabled={generatingDoc}
                   className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-medium rounded-lg text-sm px-5 py-2.5 text-center flex items-center justify-center gap-2"
                 >

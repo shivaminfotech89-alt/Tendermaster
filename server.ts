@@ -1346,10 +1346,14 @@ app.post(
   requireActiveEntitlement,
   async (req: AuthenticatedRequest, res) => {
     try {
-      const { docType, tenderDetails, userProfile, financialData, extraInstructions, language } =
+      const { docType, tenderDetails, userProfile, financialData, extraInstructions, language,
+              exactFormBase64, exactFormMimeType } =
         req.body;
-      if (!docType || !tenderDetails) {
-        return res.status(400).json({ error: "docType and tenderDetails are required" });
+      if (!tenderDetails) {
+        return res.status(400).json({ error: "tenderDetails is required" });
+      }
+      if (!exactFormBase64 && !docType) {
+        return res.status(400).json({ error: "docType is required when not using exact form mode" });
       }
 
       const aiClient = getAI();
@@ -1403,20 +1407,62 @@ ${userProfile ? JSON.stringify(userProfile) : "Not provided."}
 ${JSON.stringify(tenderDetails)}
 `;
 
-      const isAutoFill =
-        docType.includes("Auto-Fill") ||
-        docType.includes("Annexure") ||
-        docType.includes("Schedule") ||
-        docType.includes("Form");
-      const prompt = isAutoFill
-        ? `Apply the FORMAT DETECTION step from your instructions, then auto-fill the requested form/annexure/schedule: "${docType}". Re-create the form's exact structural layout (using Markdown tables heavily where appropriate, to emulate PDF form columns and rows) and insert our data directly into it. Start with the mandatory header line (Case A or Case B), then the document content. Return ONLY the header line + document text in Markdown format.`
-        : `Apply the FORMAT DETECTION step from your instructions, then draft a highly professional, ready-to-use "${docType}" based on the Tender Details and Business Profile provided. Keep constraints and specifics of Indian tendering format in mind. Start with the mandatory header line (Case A or Case B), then the document content. Return ONLY the header line + document text in Markdown format, with proper headings.`;
+      let response: any;
 
-      const response = await generateContentWithRetry(aiClient, {
-        model: "gemini-3.5-flash",
-        contents: [{ role: "user", parts: [{ text: prompt || " " }] }],
-        config: { systemInstruction },
-      });
+      if (exactFormBase64 && exactFormMimeType) {
+        // ── Exact-form mode: user uploaded the blank form; reproduce it verbatim ──
+        const exactFormSystemInstruction = `You are "Tender MasterAI". The user has uploaded the EXACT blank form/annexure they must submit to the tender authority.
+
+YOUR TASK:
+Reproduce the uploaded form in its entirety and fill in the blank fields using the bidder's Business Profile and Tender Details provided below.
+
+STRICT RULES — follow every one without exception:
+1. Copy every field label, row heading, column header, table structure, section title, and prescribed clause wording VERBATIM from the uploaded form — character for character where visible. Do NOT paraphrase, simplify, or rephrase any printed text.
+2. Do NOT add any section, block, row, field, or declaration that is not present in the uploaded form (e.g. do not invent stamp-certificate panels, notary blocks, witness fields, or authority attestations unless they appear in the uploaded image).
+3. Do NOT reorder any field or section — preserve the form's sequence exactly as shown.
+4. Fill ONLY the blank/empty response fields with the bidder's actual data from the Business Profile and Tender Details below. Where required data is genuinely unavailable, insert [FILL MANUALLY] — never leave a field silently blank.
+5. Reproduce the form's layout as faithfully as possible using Markdown tables. Multi-column forms become multi-column Markdown tables.
+6. Output ONLY the completed form — no preamble, no commentary, no header lines.${
+  language && language !== "en"
+    ? `\nCRITICAL LANGUAGE REQUIREMENT: Fill in bidder data in ${language === "hi" ? "Hindi" : language === "gu" ? "Gujarati" : language}, but keep all printed form labels exactly as they appear in the uploaded image.`
+    : ""
+}
+
+--- BUSINESS PROFILE ---
+${userProfile ? JSON.stringify(userProfile) : "Not provided."}
+
+--- TENDER DETAILS ---
+${JSON.stringify(tenderDetails)}${financialContext}${extraContext}`;
+
+        const formPart = {
+          inlineData: { mimeType: exactFormMimeType as string, data: exactFormBase64 as string },
+        };
+        const textPart = {
+          text: "Reproduce and fill the exact blank form shown in the uploaded file. Follow all rules in your instructions strictly. Return ONLY the completed form in Markdown format.",
+        };
+
+        response = await generateContentWithRetry(aiClient, {
+          model: "gemini-3.5-flash",
+          contents: [{ role: "user", parts: [formPart, textPart] }],
+          config: { systemInstruction: exactFormSystemInstruction },
+        });
+      } else {
+        // ── Standard mode: generate from tender data analysis ──
+        const isAutoFill =
+          docType.includes("Auto-Fill") ||
+          docType.includes("Annexure") ||
+          docType.includes("Schedule") ||
+          docType.includes("Form");
+        const prompt = isAutoFill
+          ? `Apply the FORMAT DETECTION step from your instructions, then auto-fill the requested form/annexure/schedule: "${docType}". Re-create the form's exact structural layout (using Markdown tables heavily where appropriate, to emulate PDF form columns and rows) and insert our data directly into it. Start with the mandatory header line (Case A or Case B), then the document content. Return ONLY the header line + document text in Markdown format.`
+          : `Apply the FORMAT DETECTION step from your instructions, then draft a highly professional, ready-to-use "${docType}" based on the Tender Details and Business Profile provided. Keep constraints and specifics of Indian tendering format in mind. Start with the mandatory header line (Case A or Case B), then the document content. Return ONLY the header line + document text in Markdown format, with proper headings.`;
+
+        response = await generateContentWithRetry(aiClient, {
+          model: "gemini-3.5-flash",
+          contents: [{ role: "user", parts: [{ text: prompt || " " }] }],
+          config: { systemInstruction },
+        });
+      }
 
       res.json({ document: response.text || "Empty response from AI." });
     } catch (err: any) {

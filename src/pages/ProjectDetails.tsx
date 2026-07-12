@@ -2,7 +2,7 @@ import { useEffect, useState, useRef } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { doc, getDoc, updateDoc, deleteDoc, addDoc, collection, query, where, getDocs, writeBatch, serverTimestamp, arrayUnion } from "firebase/firestore";
 import { db } from "../lib/firebase";
-import { ArrowLeft, AlertCircle, Calculator, Building, Activity, Upload, FileText, Download, Loader2, Save, Plus, Target, CheckCircle, ListTodo, Calendar, MessageSquare, Send, X, Trash2, RefreshCw, Edit2, Check, ChevronRight, Info } from "lucide-react";
+import { ArrowLeft, AlertCircle, Calculator, Building, Activity, Upload, FileText, Download, Loader2, Save, Plus, Target, CheckCircle, ListTodo, Calendar, MessageSquare, Send, X, Trash2, RefreshCw, Edit2, Check, ChevronRight, Info, IndianRupee, Wallet, Receipt, CreditCard, RotateCcw, BadgeCheck, Clock } from "lucide-react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import JSZip from "jszip";
@@ -45,6 +45,46 @@ function fmtDate(ts: any): string {
   const d = ts?.toDate ? ts.toDate() : new Date(ts);
   return d.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
 }
+
+type PaymentType = 'EMD' | 'Tender Fee' | 'Processing Fee' | 'Document Fee' | 'Other';
+type PaymentMode = 'DD' | 'Bank Guarantee' | 'Online' | 'Cash';
+type EmdStatus = 'Paid' | 'Pending Refund' | 'Refunded';
+
+interface TenderPayment {
+  id: string;
+  userId: string;
+  projectId: string;
+  type: PaymentType;
+  amount: number;
+  datePaid: string;
+  paymentMode: PaymentMode;
+  referenceNumber: string;
+  notes: string;
+  receiptUrl?: string;
+  emdStatus?: EmdStatus;
+  emdRefundDate?: string;
+  createdAt: any;
+}
+
+interface PaymentFormState {
+  type: PaymentType;
+  amount: string;
+  datePaid: string;
+  paymentMode: PaymentMode;
+  referenceNumber: string;
+  notes: string;
+  receiptUrl: string;
+}
+
+const defaultPaymentForm: PaymentFormState = {
+  type: 'EMD',
+  amount: '',
+  datePaid: new Date().toISOString().split('T')[0],
+  paymentMode: 'Online',
+  referenceNumber: '',
+  notes: '',
+  receiptUrl: '',
+};
 
 export default function ProjectDetails() {
   const { projectId } = useParams();
@@ -96,7 +136,19 @@ export default function ProjectDetails() {
   const [comparisonResult, setComparisonResult] = useState<any>(null);
   const [showCompareModal, setShowCompareModal] = useState(false);
   
-  const [activeTab, setActiveTab] = useState<'overview'|'docs'|'calculator'|'chat'|'notes'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview'|'docs'|'calculator'|'account'|'chat'|'notes'>('overview');
+
+  // Account tab — payments
+  const [payments, setPayments] = useState<TenderPayment[]>([]);
+  const [paymentsLoading, setPaymentsLoading] = useState(false);
+  const [showAddPayment, setShowAddPayment] = useState(false);
+  const [editingPayment, setEditingPayment] = useState<TenderPayment | null>(null);
+  const [paymentForm, setPaymentForm] = useState<PaymentFormState>(defaultPaymentForm);
+  const [savingPayment, setSavingPayment] = useState(false);
+  const [receiptUploading, setReceiptUploading] = useState(false);
+  const [extractingReceipt, setExtractingReceipt] = useState(false);
+  const [deletingPaymentId, setDeletingPaymentId] = useState<string | null>(null);
+  const receiptInputRef = useRef<HTMLInputElement>(null);
   
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [showReanalyzeModal, setShowReanalyzeModal] = useState(false);
@@ -164,6 +216,25 @@ export default function ProjectDetails() {
       }
     };
     loadChatHistory();
+  }, [projectId, user]);
+
+  useEffect(() => {
+    if (!projectId || !user) return;
+    const loadPayments = async () => {
+      setPaymentsLoading(true);
+      try {
+        const q = query(collection(db, "tender_payments"), where("userId", "==", user.uid), where("projectId", "==", projectId));
+        const snap = await getDocs(q);
+        const docs = snap.docs.map(d => ({ id: d.id, ...d.data() } as TenderPayment));
+        docs.sort((a, b) => (b.createdAt?.toMillis?.() ?? 0) - (a.createdAt?.toMillis?.() ?? 0));
+        setPayments(docs);
+      } catch (e) {
+        console.error("Failed to load payments:", e);
+      } finally {
+        setPaymentsLoading(false);
+      }
+    };
+    loadPayments();
   }, [projectId, user]);
 
   const handleSaveName = async () => {
@@ -623,6 +694,146 @@ export default function ProjectDetails() {
     }
   };
 
+  const openAddPayment = () => {
+    setEditingPayment(null);
+    setPaymentForm(defaultPaymentForm);
+    setShowAddPayment(true);
+  };
+
+  const openEditPayment = (p: TenderPayment) => {
+    setEditingPayment(p);
+    setPaymentForm({
+      type: p.type,
+      amount: String(p.amount),
+      datePaid: p.datePaid,
+      paymentMode: p.paymentMode,
+      referenceNumber: p.referenceNumber,
+      notes: p.notes,
+      receiptUrl: p.receiptUrl || '',
+    });
+    setShowAddPayment(true);
+  };
+
+  const handleSavePayment = async () => {
+    if (!projectId || !user) return;
+    const amt = Number(paymentForm.amount);
+    if (!paymentForm.amount || isNaN(amt) || amt <= 0) { toast.error("Enter a valid amount"); return; }
+    if (!paymentForm.datePaid) { toast.error("Enter the payment date"); return; }
+    setSavingPayment(true);
+    try {
+      const data: any = {
+        userId: user.uid,
+        projectId,
+        type: paymentForm.type,
+        amount: amt,
+        datePaid: paymentForm.datePaid,
+        paymentMode: paymentForm.paymentMode,
+        referenceNumber: paymentForm.referenceNumber.trim(),
+        notes: paymentForm.notes.trim(),
+        receiptUrl: paymentForm.receiptUrl,
+      };
+      if (paymentForm.type === 'EMD') {
+        data.emdStatus = editingPayment?.type === 'EMD' ? (editingPayment.emdStatus ?? 'Paid') : 'Paid';
+        data.emdRefundDate = editingPayment?.type === 'EMD' ? (editingPayment.emdRefundDate ?? '') : '';
+      }
+      if (editingPayment) {
+        await updateDoc(doc(db, "tender_payments", editingPayment.id), data);
+        setPayments(prev => prev.map(p => p.id === editingPayment.id ? { ...p, ...data } : p));
+        toast.success("Payment updated");
+      } else {
+        data.createdAt = serverTimestamp();
+        const ref = await addDoc(collection(db, "tender_payments"), data);
+        setPayments(prev => [{ id: ref.id, ...data } as TenderPayment, ...prev]);
+        toast.success("Payment added");
+      }
+      setShowAddPayment(false);
+      setEditingPayment(null);
+      setPaymentForm(defaultPaymentForm);
+    } catch (e: any) {
+      toast.error("Failed to save: " + e.message);
+    } finally {
+      setSavingPayment(false);
+    }
+  };
+
+  const handleDeletePayment = async (id: string) => {
+    setDeletingPaymentId(id);
+    try {
+      await deleteDoc(doc(db, "tender_payments", id));
+      setPayments(prev => prev.filter(p => p.id !== id));
+      toast.success("Payment deleted");
+    } catch (e: any) {
+      toast.error("Failed to delete: " + e.message);
+    } finally {
+      setDeletingPaymentId(null);
+    }
+  };
+
+  const handleEmdStatusChange = async (payment: TenderPayment, newStatus: EmdStatus) => {
+    try {
+      const update: any = { emdStatus: newStatus };
+      if (newStatus === 'Refunded') update.emdRefundDate = new Date().toISOString().split('T')[0];
+      else update.emdRefundDate = '';
+      await updateDoc(doc(db, "tender_payments", payment.id), update);
+      setPayments(prev => prev.map(p => p.id === payment.id ? { ...p, ...update } : p));
+      toast.success(`EMD marked as ${newStatus}`);
+    } catch (e: any) {
+      toast.error("Failed to update EMD status");
+    }
+  };
+
+  const handleReceiptUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !user) return;
+    e.target.value = '';
+
+    setReceiptUploading(true);
+    let downloadUrl = '';
+    try {
+      const { ref, uploadBytes, getDownloadURL } = await import("firebase/storage");
+      const { storage } = await import("../lib/firebase");
+      const storageRef = ref(storage, `users/${user.uid}/receipts/${Date.now()}-${file.name}`);
+      await uploadBytes(storageRef, file);
+      downloadUrl = await getDownloadURL(storageRef);
+      setPaymentForm(prev => ({ ...prev, receiptUrl: downloadUrl }));
+    } catch (e: any) {
+      toast.error("Upload failed: " + e.message);
+      setReceiptUploading(false);
+      return;
+    }
+    setReceiptUploading(false);
+
+    setExtractingReceipt(true);
+    try {
+      const base64 = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve((reader.result as string).split(',')[1]);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+      const res = await fetchWithAuth("/api/extract-receipt", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ receiptBase64: base64, mimeType: file.type || 'application/pdf' }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setPaymentForm(prev => ({
+          ...prev,
+          amount: data.amount ? String(data.amount) : prev.amount,
+          datePaid: data.datePaid || prev.datePaid,
+          referenceNumber: data.referenceNumber || prev.referenceNumber,
+          paymentMode: (data.paymentMode as PaymentMode) || prev.paymentMode,
+        }));
+        toast.success("Receipt scanned — please verify the pre-filled values");
+      }
+    } catch {
+      // extraction failure is non-fatal
+    } finally {
+      setExtractingReceipt(false);
+    }
+  };
+
   const handleSendMessage = async () => {
     if (!chatInput.trim() || chatLoading) return;
 
@@ -653,7 +864,12 @@ export default function ProjectDetails() {
           tenderDocument: project.payloadRef,
           analysisResult: project.details,
           messages: newMessages.map(m => ({ role: m.role, text: m.text })),
-          language: i18n.language
+          language: i18n.language,
+          paymentRecords: payments.length > 0 ? payments.map(p => ({
+            type: p.type, amount: p.amount, datePaid: p.datePaid,
+            paymentMode: p.paymentMode, referenceNumber: p.referenceNumber,
+            notes: p.notes, emdStatus: p.emdStatus,
+          })) : undefined,
         })
       });
 
@@ -815,6 +1031,7 @@ export default function ProjectDetails() {
          <button onClick={() => setActiveTab('overview')} className={`px-6 py-3 font-semibold text-sm border-b-2 whitespace-nowrap transition-colors ${activeTab === 'overview' ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>Tender Overview</button>
          <button onClick={() => setActiveTab('docs')} className={`px-6 py-3 font-semibold text-sm border-b-2 whitespace-nowrap transition-colors ${activeTab === 'docs' ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>Auto-Generate Documents</button>
          <button onClick={() => setActiveTab('calculator')} className={`px-6 py-3 font-semibold text-sm border-b-2 whitespace-nowrap transition-colors ${activeTab === 'calculator' ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>Bid Engine & Profit Calculator</button>
+         <button onClick={() => setActiveTab('account')} className={`px-6 py-3 font-semibold text-sm border-b-2 whitespace-nowrap transition-colors ${activeTab === 'account' ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>Account</button>
          <button onClick={() => setActiveTab('chat')} className={`px-6 py-3 font-semibold text-sm border-b-2 whitespace-nowrap transition-colors ${activeTab === 'chat' ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>Tender Chat AI</button>
          <button onClick={() => setActiveTab('notes')} className={`px-6 py-3 font-semibold text-sm border-b-2 whitespace-nowrap transition-colors ${activeTab === 'notes' ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>Analysis Notes</button>
       </div>
@@ -1789,6 +2006,248 @@ export default function ProjectDetails() {
                </div>
             </div>
           )}
+
+          {activeTab === 'account' && (() => {
+            const totalEmd = payments.filter(p => p.type === 'EMD').reduce((s, p) => s + p.amount, 0);
+            const emdOutstanding = payments.filter(p => p.type === 'EMD' && p.emdStatus !== 'Refunded').reduce((s, p) => s + p.amount, 0);
+            const totalFees = payments.filter(p => p.type !== 'EMD').reduce((s, p) => s + p.amount, 0);
+            const totalSpent = payments.reduce((s, p) => s + p.amount, 0);
+
+            const emdStatusColor: Record<EmdStatus, string> = {
+              'Paid': 'bg-amber-100 text-amber-800',
+              'Pending Refund': 'bg-blue-100 text-blue-800',
+              'Refunded': 'bg-green-100 text-green-800',
+            };
+            const typeColor: Record<PaymentType, string> = {
+              'EMD': 'bg-purple-100 text-purple-800',
+              'Tender Fee': 'bg-indigo-100 text-indigo-800',
+              'Processing Fee': 'bg-cyan-100 text-cyan-800',
+              'Document Fee': 'bg-teal-100 text-teal-800',
+              'Other': 'bg-slate-100 text-slate-700',
+            };
+
+            return (
+              <div className="space-y-6">
+                {/* Summary Cards */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                  <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5 flex items-center gap-4">
+                    <div className="bg-indigo-50 rounded-lg p-3"><IndianRupee className="w-6 h-6 text-indigo-600" /></div>
+                    <div>
+                      <div className="text-xs text-slate-500 font-medium">Total Spent</div>
+                      <div className="text-2xl font-bold text-slate-800">₹{totalSpent.toLocaleString('en-IN')}</div>
+                    </div>
+                  </div>
+                  <div className="bg-white rounded-xl border border-amber-200 shadow-sm p-5 flex items-center gap-4">
+                    <div className="bg-amber-50 rounded-lg p-3"><Wallet className="w-6 h-6 text-amber-600" /></div>
+                    <div>
+                      <div className="text-xs text-slate-500 font-medium">EMD Outstanding</div>
+                      <div className="text-2xl font-bold text-amber-700">₹{emdOutstanding.toLocaleString('en-IN')}</div>
+                    </div>
+                  </div>
+                  <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5 flex items-center gap-4">
+                    <div className="bg-slate-50 rounded-lg p-3"><CreditCard className="w-6 h-6 text-slate-600" /></div>
+                    <div>
+                      <div className="text-xs text-slate-500 font-medium">Total Fees</div>
+                      <div className="text-2xl font-bold text-slate-800">₹{totalFees.toLocaleString('en-IN')}</div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Add Payment Panel */}
+                <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+                  <div className="p-5 border-b border-slate-100 flex items-center justify-between">
+                    <h3 className="font-semibold text-slate-800 flex items-center gap-2">
+                      <Receipt className="w-5 h-5 text-indigo-600" /> Payment Records
+                    </h3>
+                    {!showAddPayment && (
+                      <button onClick={openAddPayment} className="flex items-center gap-1.5 text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 px-3 py-1.5 rounded-lg transition-colors">
+                        <Plus className="w-4 h-4" /> Add Payment
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Add / Edit Form */}
+                  {showAddPayment && (
+                    <div className="p-5 border-b border-indigo-100 bg-indigo-50/40">
+                      <h4 className="text-sm font-semibold text-indigo-800 mb-4">{editingPayment ? 'Edit Payment' : 'New Payment'}</h4>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        {/* Type */}
+                        <div>
+                          <label className="block text-xs font-medium text-slate-600 mb-1">Payment Type</label>
+                          <select value={paymentForm.type} onChange={e => setPaymentForm(f => ({ ...f, type: e.target.value as PaymentType }))}
+                            className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 bg-white">
+                            {(['EMD','Tender Fee','Processing Fee','Document Fee','Other'] as PaymentType[]).map(t => <option key={t}>{t}</option>)}
+                          </select>
+                        </div>
+                        {/* Amount */}
+                        <div>
+                          <label className="block text-xs font-medium text-slate-600 mb-1">Amount (₹)</label>
+                          <input type="number" min="0" value={paymentForm.amount} onChange={e => setPaymentForm(f => ({ ...f, amount: e.target.value }))}
+                            placeholder="e.g. 50000"
+                            className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500" />
+                        </div>
+                        {/* Date */}
+                        <div>
+                          <label className="block text-xs font-medium text-slate-600 mb-1">Date Paid</label>
+                          <input type="date" value={paymentForm.datePaid} onChange={e => setPaymentForm(f => ({ ...f, datePaid: e.target.value }))}
+                            className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500" />
+                        </div>
+                        {/* Payment Mode */}
+                        <div>
+                          <label className="block text-xs font-medium text-slate-600 mb-1">Payment Mode</label>
+                          <select value={paymentForm.paymentMode} onChange={e => setPaymentForm(f => ({ ...f, paymentMode: e.target.value as PaymentMode }))}
+                            className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 bg-white">
+                            {(['DD','Bank Guarantee','Online','Cash'] as PaymentMode[]).map(m => <option key={m}>{m}</option>)}
+                          </select>
+                        </div>
+                        {/* Reference Number */}
+                        <div>
+                          <label className="block text-xs font-medium text-slate-600 mb-1">Reference / DD / UTR Number</label>
+                          <input type="text" value={paymentForm.referenceNumber} onChange={e => setPaymentForm(f => ({ ...f, referenceNumber: e.target.value }))}
+                            placeholder="Transaction ID, DD no., UTR..."
+                            className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500" />
+                        </div>
+                        {/* Receipt Upload */}
+                        <div>
+                          <label className="block text-xs font-medium text-slate-600 mb-1">Receipt (optional — AI will pre-fill fields)</label>
+                          <div className="flex items-center gap-2">
+                            <button type="button" onClick={() => receiptInputRef.current?.click()}
+                              disabled={receiptUploading || extractingReceipt}
+                              className="flex items-center gap-1.5 text-xs font-medium text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 px-3 py-2 rounded-lg transition-colors disabled:opacity-50">
+                              {receiptUploading ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Uploading…</> :
+                               extractingReceipt ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Scanning…</> :
+                               <><Upload className="w-3.5 h-3.5" /> Upload Receipt</>}
+                            </button>
+                            {paymentForm.receiptUrl && (
+                              <a href={paymentForm.receiptUrl} target="_blank" rel="noopener noreferrer"
+                                className="text-xs text-indigo-600 underline">View</a>
+                            )}
+                          </div>
+                          <input ref={receiptInputRef} type="file" className="hidden" accept="image/*,application/pdf" onChange={handleReceiptUpload} />
+                        </div>
+                        {/* Notes — full width */}
+                        <div className="sm:col-span-2">
+                          <label className="block text-xs font-medium text-slate-600 mb-1">Notes</label>
+                          <textarea value={paymentForm.notes} onChange={e => setPaymentForm(f => ({ ...f, notes: e.target.value }))}
+                            rows={2} placeholder="Any additional details..."
+                            className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 resize-none" />
+                        </div>
+                      </div>
+                      <div className="flex gap-2 mt-4">
+                        <button onClick={handleSavePayment} disabled={savingPayment}
+                          className="flex items-center gap-1.5 text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 px-4 py-2 rounded-lg transition-colors disabled:opacity-50">
+                          {savingPayment ? <><Loader2 className="w-4 h-4 animate-spin" /> Saving…</> : <><Check className="w-4 h-4" /> Save Payment</>}
+                        </button>
+                        <button onClick={() => { setShowAddPayment(false); setEditingPayment(null); setPaymentForm(defaultPaymentForm); }}
+                          className="text-sm font-medium text-slate-600 hover:text-slate-800 px-4 py-2 rounded-lg border border-slate-200 hover:bg-slate-50 transition-colors">
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Payment List */}
+                  <div className="p-5">
+                    {paymentsLoading ? (
+                      <div className="flex justify-center py-8"><Loader2 className="w-6 h-6 animate-spin text-indigo-400" /></div>
+                    ) : payments.length === 0 ? (
+                      <div className="text-center py-10 border-2 border-dashed border-slate-200 rounded-xl">
+                        <IndianRupee className="w-10 h-10 text-slate-300 mx-auto mb-3" />
+                        <p className="text-sm text-slate-500 font-medium">No payments recorded yet</p>
+                        <p className="text-xs text-slate-400 mt-1">Track EMD, tender fees, and other payments for this project.</p>
+                      </div>
+                    ) : (
+                      <div className="space-y-3">
+                        {payments.map(p => (
+                          <div key={p.id} className="bg-slate-50 rounded-xl border border-slate-200 overflow-hidden">
+                            <div className="p-4 flex flex-col sm:flex-row sm:items-start gap-3">
+                              {/* Left: type + amount */}
+                              <div className="flex-1 min-w-0">
+                                <div className="flex flex-wrap items-center gap-2 mb-1">
+                                  <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${typeColor[p.type]}`}>{p.type}</span>
+                                  {p.type === 'EMD' && p.emdStatus && (
+                                    <span className={`text-xs font-semibold px-2 py-0.5 rounded-full flex items-center gap-1 ${emdStatusColor[p.emdStatus]}`}>
+                                      {p.emdStatus === 'Paid' && <Clock className="w-3 h-3" />}
+                                      {p.emdStatus === 'Pending Refund' && <RotateCcw className="w-3 h-3" />}
+                                      {p.emdStatus === 'Refunded' && <BadgeCheck className="w-3 h-3" />}
+                                      {p.emdStatus}
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="text-xl font-bold text-slate-800">₹{p.amount.toLocaleString('en-IN')}</div>
+                                <div className="text-xs text-slate-500 mt-0.5 flex flex-wrap gap-x-3 gap-y-0.5">
+                                  <span><Calendar className="w-3 h-3 inline mr-0.5" />{new Date(p.datePaid).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}</span>
+                                  <span><CreditCard className="w-3 h-3 inline mr-0.5" />{p.paymentMode}</span>
+                                  {p.referenceNumber && <span className="font-mono">Ref: {p.referenceNumber}</span>}
+                                  {p.type === 'EMD' && p.emdRefundDate && <span className="text-green-700">Refunded: {new Date(p.emdRefundDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}</span>}
+                                </div>
+                                {p.notes && <p className="text-xs text-slate-500 mt-1 italic">{p.notes}</p>}
+                              </div>
+                              {/* Right: actions */}
+                              <div className="flex flex-col gap-1.5 shrink-0">
+                                {p.type === 'EMD' && (
+                                  <div className="flex gap-1">
+                                    {p.emdStatus !== 'Pending Refund' && p.emdStatus !== 'Refunded' && (
+                                      <button onClick={() => handleEmdStatusChange(p, 'Pending Refund')}
+                                        className="text-xs px-2 py-1 rounded border border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100 transition-colors flex items-center gap-1">
+                                        <RotateCcw className="w-3 h-3" /> Refund Pending
+                                      </button>
+                                    )}
+                                    {p.emdStatus !== 'Refunded' && (
+                                      <button onClick={() => handleEmdStatusChange(p, 'Refunded')}
+                                        className="text-xs px-2 py-1 rounded border border-green-200 bg-green-50 text-green-700 hover:bg-green-100 transition-colors flex items-center gap-1">
+                                        <BadgeCheck className="w-3 h-3" /> Mark Refunded
+                                      </button>
+                                    )}
+                                    {p.emdStatus === 'Refunded' && (
+                                      <button onClick={() => handleEmdStatusChange(p, 'Paid')}
+                                        className="text-xs px-2 py-1 rounded border border-slate-200 bg-slate-100 text-slate-600 hover:bg-slate-200 transition-colors">
+                                        Undo
+                                      </button>
+                                    )}
+                                  </div>
+                                )}
+                                <div className="flex gap-1 justify-end">
+                                  {p.receiptUrl && (
+                                    <a href={p.receiptUrl} target="_blank" rel="noopener noreferrer"
+                                      className="text-xs px-2 py-1 rounded border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 transition-colors flex items-center gap-1">
+                                      <Receipt className="w-3 h-3" /> Receipt
+                                    </a>
+                                  )}
+                                  <button onClick={() => openEditPayment(p)}
+                                    className="text-xs px-2 py-1 rounded border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 transition-colors flex items-center gap-1">
+                                    <Edit2 className="w-3 h-3" /> Edit
+                                  </button>
+                                  <button onClick={() => handleDeletePayment(p.id)} disabled={deletingPaymentId === p.id}
+                                    className="text-xs px-2 py-1 rounded border border-red-200 bg-red-50 text-red-600 hover:bg-red-100 transition-colors flex items-center gap-1 disabled:opacity-50">
+                                    {deletingPaymentId === p.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <Trash2 className="w-3 h-3" />}
+                                  </button>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* EMD summary callout if any EMD outstanding */}
+                {emdOutstanding > 0 && (
+                  <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex items-start gap-3">
+                    <Wallet className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+                    <div>
+                      <div className="text-sm font-semibold text-amber-800">₹{emdOutstanding.toLocaleString('en-IN')} EMD currently locked</div>
+                      <div className="text-xs text-amber-700 mt-0.5">
+                        {payments.filter(p => p.type === 'EMD' && p.emdStatus !== 'Refunded').length} EMD payment{payments.filter(p => p.type === 'EMD' && p.emdStatus !== 'Refunded').length !== 1 ? 's' : ''} pending refund.
+                        Mark them as refunded once your bank confirms receipt.
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
 
           {activeTab === 'notes' && (
             <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6">

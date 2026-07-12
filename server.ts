@@ -1468,7 +1468,7 @@ app.post(
   requireActiveEntitlement,
   async (req: AuthenticatedRequest, res) => {
     try {
-      const { tenderDocument, analysisResult, messages, language } = req.body;
+      const { tenderDocument, analysisResult, messages, language, paymentRecords } = req.body;
       if ((!tenderDocument && !analysisResult) || !messages || !Array.isArray(messages)) {
         return res
           .status(400)
@@ -1528,6 +1528,11 @@ ${tenderContextText || "No raw text provided."}
 
 --- PREVIOUS AI ANALYSIS ---
 ${analysisResult ? JSON.stringify(analysisResult) : "No previous analysis provided."}
+${Array.isArray(paymentRecords) && paymentRecords.length > 0 ? `
+--- PAYMENT RECORDS (user-recorded for this project) ---
+${paymentRecords.map((p: any) => `${p.type}: ₹${p.amount} | Date: ${p.datePaid} | Mode: ${p.paymentMode} | Ref: ${p.referenceNumber || "N/A"}${p.type === "EMD" ? ` | EMD Status: ${p.emdStatus}` : ""}${p.notes ? ` | Notes: ${p.notes}` : ""}`).join("\n")}
+Total Paid: ₹${paymentRecords.reduce((s: number, p: any) => s + (Number(p.amount) || 0), 0)} | EMD Outstanding: ₹${paymentRecords.filter((p: any) => p.type === "EMD" && p.emdStatus !== "Refunded").reduce((s: number, p: any) => s + (Number(p.amount) || 0), 0)}
+` : ""}
 `;
 
       const formattedContents = messages.map((msg: any) => ({
@@ -1548,6 +1553,55 @@ ${analysisResult ? JSON.stringify(analysisResult) : "No previous analysis provid
       res.json({ answer: response.text });
     } catch (err: any) {
       console.error("Chat Tender Error:", err);
+      res.status(400).json({ error: err.message });
+    }
+  }
+);
+
+app.post(
+  "/api/extract-receipt",
+  verifyFirebaseToken,
+  requireActiveEntitlement,
+  async (req: AuthenticatedRequest, res) => {
+    try {
+      const { receiptBase64, mimeType } = req.body;
+      if (!receiptBase64) return res.status(400).json({ error: "receiptBase64 is required" });
+
+      const aiClient = getAI();
+      const response = await generateContentWithRetry(aiClient, {
+        model: "gemini-3.5-flash",
+        contents: [{
+          role: "user",
+          parts: [
+            { inlineData: { mimeType: mimeType || "image/jpeg", data: receiptBase64 } },
+            { text: `Extract payment details from this receipt/challan/bank statement.
+Return ONLY a JSON object with these fields (omit any field you cannot determine with confidence):
+{
+  "amount": <number in INR, no symbols>,
+  "datePaid": "<YYYY-MM-DD>",
+  "referenceNumber": "<UTR / transaction ID / challan no. / DD no.>",
+  "paymentMode": "<one of: DD, Bank Guarantee, Online, Cash>"
+}
+Rules:
+- amount: total payment as a plain number (e.g. 50000)
+- datePaid: in YYYY-MM-DD format
+- referenceNumber: the most specific identifier on the receipt
+- paymentMode: map to the closest of DD / Bank Guarantee / Online / Cash
+- Return ONLY valid JSON, no markdown fences, no extra text` }
+          ]
+        }],
+      });
+
+      let extracted: Record<string, any> = {};
+      try {
+        const raw = (response.text || "").trim().replace(/^```json\s*/i, "").replace(/```\s*$/, "").trim();
+        extracted = JSON.parse(raw);
+      } catch {
+        // parsing failure is non-fatal — client handles empty gracefully
+      }
+      res.json(extracted);
+    } catch (err: any) {
+      console.error("Extract receipt error:", err);
       res.status(400).json({ error: err.message });
     }
   }

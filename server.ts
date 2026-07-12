@@ -386,6 +386,37 @@ function buildDocHtml(fragment: string, docType: string): string {
 </html>`;
 }
 
+function buildFormDocHtml(fragment: string): string {
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Form</title>
+<style>
+  @page { size: A4 portrait; margin: 40mm 20mm 25mm 20mm; }
+  * { box-sizing: border-box; }
+  body { font-family: 'Times New Roman', Times, serif; font-size: 11pt; line-height: 1.6; color: #111827; margin: 0; padding: 0; background: #ffffff; }
+  #form-header { position: fixed; top: 0; left: 0; right: 0; height: 40mm; overflow: hidden; background: white; }
+  #form-footer { position: fixed; bottom: 0; left: 0; right: 0; height: 25mm; overflow: hidden; background: white; }
+  h1 { font-size: 15pt; font-weight: bold; text-align: center; margin: 0 0 10pt; }
+  h2 { font-size: 12pt; font-weight: bold; margin: 14pt 0 5pt; }
+  h3 { font-size: 11pt; font-weight: bold; margin: 10pt 0 4pt; text-decoration: underline; }
+  p { margin: 0 0 7pt; }
+  ul, ol { margin: 0 0 7pt; padding-left: 18pt; }
+  li { margin-bottom: 2pt; }
+  table { width: 100%; border-collapse: collapse; margin: 8pt 0 14pt; page-break-inside: auto; font-size: 10pt; }
+  tr { page-break-inside: avoid; }
+  th, td { border: 1px solid #374151; padding: 5pt 8pt; text-align: left; vertical-align: top; word-break: break-word; }
+  th { background-color: #f3f4f6; font-weight: bold; }
+  strong { font-weight: bold; }
+  em { font-style: italic; }
+</style>
+</head>
+<body>${fragment}</body>
+</html>`;
+}
+
 // ---------------------------------------------------------------------------
 // Razorpay helpers
 // ---------------------------------------------------------------------------
@@ -1516,7 +1547,7 @@ app.post(
   async (req: AuthenticatedRequest, res) => {
     try {
       const { docType, tenderDetails, userProfile, financialData, extraInstructions, language,
-              exactFormBase64, exactFormMimeType, exactFormUrl, useUserLetterhead } =
+              exactFormBase64, exactFormMimeType, exactFormUrl } =
         req.body;
       if (!tenderDetails) {
         return res.status(400).json({ error: "tenderDetails is required" });
@@ -1589,21 +1620,17 @@ STRICT RULES — follow every one without exception:
    b) BIDDER FIELDS (company name, address, GST, PAN, signatory, etc.) — fill from the BUSINESS PROFILE below.
    For any field where data is genuinely unavailable from both sources, output exactly "__________" (12 underscores). NEVER output "[FILL MANUALLY]", "[NOT APPLICABLE]", "[INSERT HERE]", "[FILL]", "[N/A]", or any other bracketed marker — only "__________".
 5. Reproduce the form's layout as faithfully as possible using HTML tables (<table>/<tr>/<th>/<td>) with rowspan and colspan attributes to faithfully reproduce merged cells, column spans, nested cells, and the form's exact visual structure. Multi-column forms become multi-column <table> elements. Nested cells (e.g. multiple fields stacked in one cell) use rowspan/colspan or nested <table> elements.
-6. Output ONLY the completed form as a clean HTML fragment — no preamble, no commentary, no <html>/<head>/<body>/<style>/<script> wrapper, no inline CSS. Use <table>, <tr>, <th>, <td> with rowspan/colspan as needed. Use <p> for paragraph text, <strong> for bold, <br> for line breaks within a cell. Do NOT embed base64 image data, data: URIs, or any binary content — omit logos and images entirely. Do NOT output any Markdown syntax.
-7. HEADER/FOOTER DE-DUPLICATION: Multi-page forms repeat the organization name, CIN, address, and tagline at the top of every page, and contact/website details at the bottom of every page. These are print repetitions — NOT separate form fields. Structure your output as follows:
-   • Output the letterhead/header block ONCE at the very top (organization name, CIN/registration, address, tagline if present).
-   • Output the form's actual content (fields, tables, declarations, clauses) as one clean continuous sequence — merge all pages as if it were a single document.
-   • Output the contact/footer block ONCE at the very bottom (phone, email, website, etc.).
-   • Do NOT repeat the header, letterhead, tagline, or footer anywhere in the body of the document.
+6. Output ONLY the completed form as a clean HTML fragment — no preamble, no commentary, no <html>/<head>/<body>/<style>/<script> wrapper, no inline CSS. Do NOT add any title, label, date, timestamp, or metadata that is not present in the uploaded form — begin directly with the form's own content. Use <table>, <tr>, <th>, <td> with rowspan/colspan as needed. Use <p> for paragraph text, <strong> for bold, <br> for line breaks within a cell. Do NOT embed base64 image data, data: URIs, or any binary content — omit logos and images entirely. Do NOT output any Markdown syntax.
+7. HEADER/FOOTER STRUCTURE FOR REPEATING PAGES: Multi-page forms repeat the organisation name, CIN, address, and tagline at the top of every page, and contact/website details at the bottom of every page. Reproduce them as follows:
+   • Wrap the letterhead/header block (organisation name, CIN/registration, address, tagline if present) in: <header id="form-header">...</header> — this element will be rendered on every page of the PDF.
+   • Output the form's actual content (fields, tables, declarations, clauses) in one clean continuous sequence between the header and footer — do NOT repeat the header or footer anywhere in the body.
+   • Wrap the contact/footer block (phone, email, website, etc.) in: <footer id="form-footer">...</footer> — this element will be rendered on every page of the PDF.
+   • If the form has no distinct letterhead/header block, omit the <header> element entirely. If the form has no footer block, omit the <footer> element entirely.
 8. ARTIFACT REMOVAL: The following are print/pagination artifacts — remove them completely, do not reproduce them anywhere in your output:
    • Page number markers in any form: "- 10 -", "- 11 -", "Page 2 of 5", "2/5", etc.
    • Repeated website URLs, telephone lines, or taglines such as "ASSURING THE BEST SERVICES..." or "YOUR SATISFACTION IS OUR MOTTO" when they appear mid-document as page-footer repetitions.
    • Any text that is clearly a running page header or footer repeating on each physical page rather than being part of the actual form content.
 9. STRICT PROHIBITION — FABRICATED LEGAL DOCUMENTS: NEVER generate, fabricate, or invent stamp paper certificates, e-stamp blocks, e-stamp certificate numbers (e-SBTR, CERT-IN, or any format), serial numbers, UID/UUID codes, or any fictional statutory document identifiers. A field for stamp details must contain "__________" (12 underscores) but MUST NEVER contain a fabricated certificate block with invented numbers, amounts, dates, or issuing authority stamps.${
-  useUserLetterhead
-    ? `\n10. LETTERHEAD REPLACEMENT — CRITICAL: The user has enabled their own letterhead, which will be printed in the reserved header zone at the top of every page. You MUST therefore completely omit the uploaded form's government letterhead, organisation name block, logo area, address header, and any top-of-page branding from your HTML output — do NOT reproduce them at all. Begin the document directly with the first substantive form section (e.g. the title or first table). This ensures the user's letterhead replaces the government header cleanly without duplication.`
-    : ""
-}${
   language && language !== "en"
     ? `\nCRITICAL LANGUAGE REQUIREMENT: Fill in bidder data in ${language === "hi" ? "Hindi" : language === "gu" ? "Gujarati" : language}, but keep all printed form labels exactly as they appear in the uploaded image.`
     : ""
@@ -1645,7 +1672,7 @@ ${JSON.stringify(tenderDetails)}${financialContext}${extraContext}`;
           config: { systemInstruction: exactFormSystemInstruction },
         });
         const fragment = response.text || "<p>Empty response from AI.</p>";
-        return res.json({ document: buildDocHtml(fragment, docType as string || "Form Fill"), format: "html" });
+        return res.json({ document: buildFormDocHtml(fragment), format: "html" });
       } else {
         // ── Standard mode: generate from tender data analysis ──
         const isAutoFill =
@@ -1746,11 +1773,17 @@ app.post(
       const page = await browser.newPage();
       // networkidle0 ensures fonts/resources in srcdoc are fully settled
       await page.setContent(renderHtml, { waitUntil: "networkidle0" });
+      const hasFormHeader = /id=["']form-header["']/.test(renderHtml);
+      const hasFormFooter = /id=["']form-footer["']/.test(renderHtml);
       const pdfBuffer = await page.pdf({
         format: "A4",
         printBackground: true,
-        // Puppeteer margin is more reliable than CSS @page margin for Chrome headless
-        margin: { top: "44mm", right: "20mm", bottom: "30mm", left: "20mm" },
+        margin: {
+          top:    hasFormHeader ? "40mm" : "44mm",
+          right:  "20mm",
+          bottom: hasFormFooter ? "25mm" : "30mm",
+          left:   "20mm",
+        },
       });
       await browser.close();
 

@@ -524,7 +524,6 @@ export default function ProjectDetails() {
             tenderDetails: project.details,
             userProfile: businessProfile,
             extraInstructions,
-            useUserLetterhead: useLetterhead,
             financialData: {
               revenue,
               materials,
@@ -568,10 +567,10 @@ export default function ProjectDetails() {
           html: generatedDoc,
           filename: docType,
           isMarkdown: !generatedDocIsHtml,
-          useUserLetterhead: useLetterhead,
-          letterheadImageBase64: useLetterhead ? (businessProfile?.letterheadBackgroundImage ?? "") : "",
-          letterheadHeaderHtml: useLetterhead ? (businessProfile?.letterheadHeader ?? "") : "",
-          letterheadFooterHtml: useLetterhead ? (businessProfile?.letterheadFooter ?? "") : "",
+          useUserLetterhead: exactFormMode ? false : useLetterhead,
+          letterheadImageBase64: (!exactFormMode && useLetterhead) ? (businessProfile?.letterheadBackgroundImage ?? "") : "",
+          letterheadHeaderHtml: (!exactFormMode && useLetterhead) ? (businessProfile?.letterheadHeader ?? "") : "",
+          letterheadFooterHtml: (!exactFormMode && useLetterhead) ? (businessProfile?.letterheadFooter ?? "") : "",
         }),
       });
       if (!res.ok) {
@@ -1043,10 +1042,12 @@ export default function ProjectDetails() {
                         <span className="text-xs font-bold text-indigo-900 uppercase">Generated Output</span>
                         
                         <div className="flex items-center gap-3">
-                           <label className="flex items-center gap-1.5 text-xs font-medium text-slate-700 cursor-pointer">
-                             <input type="checkbox" checked={useLetterhead} onChange={(e) => setUseLetterhead(e.target.checked)} className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500" />
-                             Use Letterhead
-                           </label>
+                           {!exactFormMode && (
+                             <label className="flex items-center gap-1.5 text-xs font-medium text-slate-700 cursor-pointer">
+                               <input type="checkbox" checked={useLetterhead} onChange={(e) => setUseLetterhead(e.target.checked)} className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500" />
+                               Use Letterhead
+                             </label>
+                           )}
                            {generatedDocIsHtml ? (
                              <button onClick={() => {
                                if (isEditingDoc) { toast("Click 'Preview' to apply your edits before printing.", { icon: "✏️" }); return; }

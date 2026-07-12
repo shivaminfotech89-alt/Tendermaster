@@ -1546,7 +1546,7 @@ app.post(
 Your task is to generate high-quality, professional draft documents based on the provided tender analysis and the user's business profile.
 Use the business profile data (Company Name, Address, GST, PAN, etc.) and Tender Details (Tender No., Dates, Authority Name, etc.) to automatically fill in ALL placeholders.
 CRITICAL RULE: DO NOT leave placeholders like "[Tender Number - To be filled by bidder]" or "[Date]" or "[Bidder Name]" in the output. You MUST aggressively find and replace all such "fill in the blank" brackets with the actual data from the provided Tender Details and Business Profile. If an exact piece of information is missing, use a logical assumed default or current date rather than leaving a bracketed placeholder.
-If the document requested is an "Auto-Fill: [Annexure Name]", your job is to auto-generate the filled-up annexure exactly as it should be submitted. Since real annexures are often tabular forms in PDFs, YOU MUST reconstruct the exact Annexure/Schedule/Form tabular layout required by the agency using semantic HTML tables (&lt;table&gt;/&lt;tr&gt;/&lt;th&gt;/&lt;td&gt;) and lists (&lt;ul&gt;/&lt;ol&gt;). Place the bidder's information directly into the respective form fields/cells. Ensure it accurately represents the structured form that can be submitted to the agency. Do not leave blanks if information can be reasonably derived or if standard boilerplate is applicable.
+If the document requested is an "Auto-Fill: [Annexure Name]", your job is to auto-generate the filled-up annexure exactly as it should be submitted. Since real annexures are often tabular forms in PDFs, YOU MUST reconstruct the exact Annexure/Schedule/Form tabular layout required by the agency using Markdown tables and lists. Place the bidder's information directly into the respective form fields/cells. Ensure it accurately represents the structured form that can be submitted to the agency. Do not leave blanks if information can be reasonably derived or if standard boilerplate is applicable.
 
 --- FORMAT DETECTION — MANDATORY FIRST STEP ---
 Before generating the document, examine the TENDER DETAILS JSON below to determine whether the tender authority prescribes a SPECIFIC FORMAT, PROFORMA, or STRUCTURE for the requested document type. Signals to look for:
@@ -1560,15 +1560,9 @@ CASE A — Tender DOES specify a format for this document:
 • Do NOT add sections, blocks, or declarations that are not in the original. For example: do not invent stamp-certificate blocks, notary sections, witness fields, or authority attestation panels unless the tender explicitly includes them.
 • Do NOT reorder the fields or sections — preserve the tender's sequence exactly.
 • Fill the bidder's actual data into the correct cells/fields. Do not leave blanks or bracketed placeholders if the information is available.
-• Begin your HTML output with this exact element:
-<p class="case-note">✓ Prepared to match the format specified in the tender document.</p>
 
 CASE B — Tender does NOT specify a format for this document:
-• Generate using a standard professional format appropriate for Indian government tendering.
-• Begin your HTML output with this exact element:
-<p class="case-note">Prepared in a standard professional format — the tender did not mandate a specific proforma for this document. Please review against the tender before submission.</p>
-
-You MUST output exactly one of these two &lt;p class="case-note"&gt; elements as the very first element of your HTML fragment, then the document HTML content below it.${
+• Generate using a standard professional format appropriate for Indian government tendering.${
         language && language !== "en"
           ? `\nCRITICAL LANGUAGE REQUIREMENT: You MUST draft the document STRICTLY in ${language === "hi" ? "Hindi" : language === "gu" ? "Gujarati" : language}, unless the user asks otherwise.`
           : `\nCRITICAL LANGUAGE REQUIREMENT: You MUST draft the document STRICTLY in English, unless the user asks otherwise.`
@@ -1659,8 +1653,8 @@ ${JSON.stringify(tenderDetails)}${financialContext}${extraContext}`;
           docType.includes("Schedule") ||
           docType.includes("Form");
         const prompt = isAutoFill
-          ? `Apply the FORMAT DETECTION step from your instructions, then auto-fill the requested form/annexure/schedule: "${docType}". Re-create the form's exact structural layout using HTML tables (<table>/<thead>/<tbody>/<tr>/<th>/<td>) to faithfully emulate the form's columns and rows, and insert the bidder's data directly. Start with the mandatory <p class="case-note"> element (Case A or Case B), then the form HTML. Return ONLY a clean HTML fragment — no <html>/<head>/<body>/<style>/<script> wrapper, no inline CSS, no Markdown, no base64, no images.`
-          : `Apply the FORMAT DETECTION step from your instructions, then draft a highly professional, ready-to-use "${docType}" based on the Tender Details and Business Profile provided. Keep constraints and specifics of Indian tendering format in mind. Start with the mandatory <p class="case-note"> element (Case A or Case B), then the document body. Return ONLY a clean HTML fragment — no <html>/<head>/<body>/<style>/<script> wrapper, no inline CSS, no Markdown, no base64, no images. Use semantic HTML: <h1>/<h2>/<h3> for headings, <p> for paragraphs, <ul>/<ol>/<li> for lists, <table>/<thead>/<tbody>/<tr>/<th>/<td> for tables, <strong>/<em> for emphasis.`;
+          ? `Apply the FORMAT DETECTION step from your instructions, then auto-fill the requested form/annexure/schedule: "${docType}". Re-create the form's exact structural layout using Markdown tables and lists to faithfully emulate the form's columns and rows, and insert the bidder's data directly. Return ONLY the completed form as clean Markdown — no HTML tags, no preamble, no commentary.`
+          : `Apply the FORMAT DETECTION step from your instructions, then draft a highly professional, ready-to-use "${docType}" based on the Tender Details and Business Profile provided. Keep constraints and specifics of Indian tendering format in mind. Return ONLY the document as clean Markdown — use ## and ### headings, **bold**, Markdown tables, and bullet/numbered lists where appropriate. No HTML tags.`;
 
         response = await generateContentWithRetry(aiClient, {
           model: "gemini-3.5-flash",
@@ -1669,8 +1663,7 @@ ${JSON.stringify(tenderDetails)}${financialContext}${extraContext}`;
         });
       }
 
-      const fragment = response.text || "<p>Empty response from AI.</p>";
-      res.json({ document: buildDocHtml(fragment, docType as string), format: "html" });
+      res.json({ document: response.text || "Empty response from AI.", format: "markdown" });
     } catch (err: any) {
       console.error("Generate Doc Error:", err);
       res.status(400).json({ error: err.message });

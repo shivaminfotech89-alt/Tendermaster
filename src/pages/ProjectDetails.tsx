@@ -46,9 +46,17 @@ function fmtDate(ts: any): string {
   return d.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
 }
 
-type PaymentType = 'EMD' | 'Tender Fee' | 'Processing Fee' | 'Document Fee' | 'Other';
+type PaymentType =
+  | 'EMD' | 'Security Deposit' | 'Performance Security' | 'Retention Money'
+  | 'Tender Fee' | 'Document Fee' | 'Processing Fee' | 'e-Portal Fee' | 'Stamp Duty' | 'Notary/DSC' | 'Other';
 type PaymentMode = 'DD' | 'Bank Guarantee' | 'Online' | 'Cash';
-type EmdStatus = 'Paid' | 'Pending Refund' | 'Refunded';
+type RefundStatus = 'Paid' | 'Pending Refund' | 'Refunded';
+
+const REFUNDABLE_TYPES: PaymentType[] = ['EMD', 'Security Deposit', 'Performance Security', 'Retention Money'];
+
+function isRefundableByDefault(type: PaymentType): boolean {
+  return REFUNDABLE_TYPES.includes(type);
+}
 
 interface TenderPayment {
   id: string;
@@ -61,8 +69,10 @@ interface TenderPayment {
   referenceNumber: string;
   notes: string;
   receiptUrl?: string;
-  emdStatus?: EmdStatus;
-  emdRefundDate?: string;
+  refundable: boolean;
+  refundStatus?: RefundStatus;
+  refundDate?: string;
+  expectedRefundDate?: string;
   createdAt: any;
 }
 
@@ -74,6 +84,8 @@ interface PaymentFormState {
   referenceNumber: string;
   notes: string;
   receiptUrl: string;
+  refundable: boolean;
+  expectedRefundDate: string;
 }
 
 const defaultPaymentForm: PaymentFormState = {
@@ -84,6 +96,8 @@ const defaultPaymentForm: PaymentFormState = {
   referenceNumber: '',
   notes: '',
   receiptUrl: '',
+  refundable: true,
+  expectedRefundDate: '',
 };
 
 export default function ProjectDetails() {
@@ -710,6 +724,8 @@ export default function ProjectDetails() {
       referenceNumber: p.referenceNumber,
       notes: p.notes,
       receiptUrl: p.receiptUrl || '',
+      refundable: p.refundable ?? isRefundableByDefault(p.type),
+      expectedRefundDate: p.expectedRefundDate || '',
     });
     setShowAddPayment(true);
   };
@@ -731,10 +747,13 @@ export default function ProjectDetails() {
         referenceNumber: paymentForm.referenceNumber.trim(),
         notes: paymentForm.notes.trim(),
         receiptUrl: paymentForm.receiptUrl,
+        refundable: paymentForm.refundable,
+        expectedRefundDate: paymentForm.expectedRefundDate,
       };
-      if (paymentForm.type === 'EMD') {
-        data.emdStatus = editingPayment?.type === 'EMD' ? (editingPayment.emdStatus ?? 'Paid') : 'Paid';
-        data.emdRefundDate = editingPayment?.type === 'EMD' ? (editingPayment.emdRefundDate ?? '') : '';
+      if (paymentForm.refundable) {
+        const prevStatus = editingPayment?.refundStatus ?? (editingPayment as any)?.emdStatus;
+        data.refundStatus = prevStatus ?? 'Paid';
+        data.refundDate = editingPayment?.refundDate ?? '';
       }
       if (editingPayment) {
         await updateDoc(doc(db, "tender_payments", editingPayment.id), data);
@@ -769,16 +788,16 @@ export default function ProjectDetails() {
     }
   };
 
-  const handleEmdStatusChange = async (payment: TenderPayment, newStatus: EmdStatus) => {
+  const handleRefundStatusChange = async (payment: TenderPayment, newStatus: RefundStatus) => {
     try {
-      const update: any = { emdStatus: newStatus };
-      if (newStatus === 'Refunded') update.emdRefundDate = new Date().toISOString().split('T')[0];
-      else update.emdRefundDate = '';
+      const update: any = { refundStatus: newStatus };
+      if (newStatus === 'Refunded') update.refundDate = new Date().toISOString().split('T')[0];
+      else update.refundDate = '';
       await updateDoc(doc(db, "tender_payments", payment.id), update);
       setPayments(prev => prev.map(p => p.id === payment.id ? { ...p, ...update } : p));
-      toast.success(`EMD marked as ${newStatus}`);
+      toast.success(`Marked as ${newStatus}`);
     } catch (e: any) {
-      toast.error("Failed to update EMD status");
+      toast.error("Failed to update refund status");
     }
   };
 
@@ -868,7 +887,8 @@ export default function ProjectDetails() {
           paymentRecords: payments.length > 0 ? payments.map(p => ({
             type: p.type, amount: p.amount, datePaid: p.datePaid,
             paymentMode: p.paymentMode, referenceNumber: p.referenceNumber,
-            notes: p.notes, emdStatus: p.emdStatus,
+            notes: p.notes, refundable: p.refundable, refundStatus: p.refundStatus,
+            expectedRefundDate: p.expectedRefundDate,
           })) : undefined,
         })
       });
@@ -1031,7 +1051,7 @@ export default function ProjectDetails() {
          <button onClick={() => setActiveTab('overview')} className={`px-6 py-3 font-semibold text-sm border-b-2 whitespace-nowrap transition-colors ${activeTab === 'overview' ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>Tender Overview</button>
          <button onClick={() => setActiveTab('docs')} className={`px-6 py-3 font-semibold text-sm border-b-2 whitespace-nowrap transition-colors ${activeTab === 'docs' ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>Auto-Generate Documents</button>
          <button onClick={() => setActiveTab('calculator')} className={`px-6 py-3 font-semibold text-sm border-b-2 whitespace-nowrap transition-colors ${activeTab === 'calculator' ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>Bid Engine & Profit Calculator</button>
-         <button onClick={() => setActiveTab('account')} className={`px-6 py-3 font-semibold text-sm border-b-2 whitespace-nowrap transition-colors ${activeTab === 'account' ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>Account</button>
+         <button onClick={() => setActiveTab('account')} className={`px-6 py-3 font-semibold text-sm border-b-2 whitespace-nowrap transition-colors ${activeTab === 'account' ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>Payments</button>
          <button onClick={() => setActiveTab('chat')} className={`px-6 py-3 font-semibold text-sm border-b-2 whitespace-nowrap transition-colors ${activeTab === 'chat' ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>Tender Chat AI</button>
          <button onClick={() => setActiveTab('notes')} className={`px-6 py-3 font-semibold text-sm border-b-2 whitespace-nowrap transition-colors ${activeTab === 'notes' ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>Analysis Notes</button>
       </div>
@@ -2008,21 +2028,26 @@ export default function ProjectDetails() {
           )}
 
           {activeTab === 'account' && (() => {
-            const totalEmd = payments.filter(p => p.type === 'EMD').reduce((s, p) => s + p.amount, 0);
-            const emdOutstanding = payments.filter(p => p.type === 'EMD' && p.emdStatus !== 'Refunded').reduce((s, p) => s + p.amount, 0);
-            const totalFees = payments.filter(p => p.type !== 'EMD').reduce((s, p) => s + p.amount, 0);
-            const totalSpent = payments.reduce((s, p) => s + p.amount, 0);
+            const refundableLocked = payments.filter(p => (p.refundable ?? isRefundableByDefault(p.type)) && (p.refundStatus ?? (p as any).emdStatus) !== 'Refunded').reduce((s, p) => s + p.amount, 0);
+            const nonRefundableSpent = payments.filter(p => !(p.refundable ?? isRefundableByDefault(p.type))).reduce((s, p) => s + p.amount, 0);
+            const totalPaid = payments.reduce((s, p) => s + p.amount, 0);
 
-            const emdStatusColor: Record<EmdStatus, string> = {
+            const refundStatusColor: Record<RefundStatus, string> = {
               'Paid': 'bg-amber-100 text-amber-800',
               'Pending Refund': 'bg-blue-100 text-blue-800',
               'Refunded': 'bg-green-100 text-green-800',
             };
-            const typeColor: Record<PaymentType, string> = {
+            const typeColor: Partial<Record<PaymentType, string>> = {
               'EMD': 'bg-purple-100 text-purple-800',
+              'Security Deposit': 'bg-violet-100 text-violet-800',
+              'Performance Security': 'bg-fuchsia-100 text-fuchsia-800',
+              'Retention Money': 'bg-pink-100 text-pink-800',
               'Tender Fee': 'bg-indigo-100 text-indigo-800',
               'Processing Fee': 'bg-cyan-100 text-cyan-800',
               'Document Fee': 'bg-teal-100 text-teal-800',
+              'e-Portal Fee': 'bg-sky-100 text-sky-800',
+              'Stamp Duty': 'bg-orange-100 text-orange-800',
+              'Notary/DSC': 'bg-yellow-100 text-yellow-800',
               'Other': 'bg-slate-100 text-slate-700',
             };
 
@@ -2033,27 +2058,27 @@ export default function ProjectDetails() {
                   <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5 flex items-center gap-4">
                     <div className="bg-indigo-50 rounded-lg p-3"><IndianRupee className="w-6 h-6 text-indigo-600" /></div>
                     <div>
-                      <div className="text-xs text-slate-500 font-medium">Total Spent</div>
-                      <div className="text-2xl font-bold text-slate-800">₹{totalSpent.toLocaleString('en-IN')}</div>
+                      <div className="text-xs text-slate-500 font-medium">Total Paid</div>
+                      <div className="text-2xl font-bold text-slate-800">₹{totalPaid.toLocaleString('en-IN')}</div>
                     </div>
                   </div>
                   <div className="bg-white rounded-xl border border-amber-200 shadow-sm p-5 flex items-center gap-4">
                     <div className="bg-amber-50 rounded-lg p-3"><Wallet className="w-6 h-6 text-amber-600" /></div>
                     <div>
-                      <div className="text-xs text-slate-500 font-medium">EMD Outstanding</div>
-                      <div className="text-2xl font-bold text-amber-700">₹{emdOutstanding.toLocaleString('en-IN')}</div>
+                      <div className="text-xs text-slate-500 font-medium">Refundable — locked up</div>
+                      <div className="text-2xl font-bold text-amber-700">₹{refundableLocked.toLocaleString('en-IN')}</div>
                     </div>
                   </div>
-                  <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5 flex items-center gap-4">
-                    <div className="bg-slate-50 rounded-lg p-3"><CreditCard className="w-6 h-6 text-slate-600" /></div>
+                  <div className="bg-white rounded-xl border border-red-100 shadow-sm p-5 flex items-center gap-4">
+                    <div className="bg-red-50 rounded-lg p-3"><CreditCard className="w-6 h-6 text-red-500" /></div>
                     <div>
-                      <div className="text-xs text-slate-500 font-medium">Total Fees</div>
-                      <div className="text-2xl font-bold text-slate-800">₹{totalFees.toLocaleString('en-IN')}</div>
+                      <div className="text-xs text-slate-500 font-medium">Non-refundable — spent</div>
+                      <div className="text-2xl font-bold text-red-600">₹{nonRefundableSpent.toLocaleString('en-IN')}</div>
                     </div>
                   </div>
                 </div>
 
-                {/* Add Payment Panel */}
+                {/* Payment Records Panel */}
                 <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
                   <div className="p-5 border-b border-slate-100 flex items-center justify-between">
                     <h3 className="font-semibold text-slate-800 flex items-center gap-2">
@@ -2074,9 +2099,16 @@ export default function ProjectDetails() {
                         {/* Type */}
                         <div>
                           <label className="block text-xs font-medium text-slate-600 mb-1">Payment Type</label>
-                          <select value={paymentForm.type} onChange={e => setPaymentForm(f => ({ ...f, type: e.target.value as PaymentType }))}
-                            className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 bg-white">
-                            {(['EMD','Tender Fee','Processing Fee','Document Fee','Other'] as PaymentType[]).map(t => <option key={t}>{t}</option>)}
+                          <select value={paymentForm.type} onChange={e => {
+                            const t = e.target.value as PaymentType;
+                            setPaymentForm(f => ({ ...f, type: t, refundable: isRefundableByDefault(t) }));
+                          }} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 bg-white">
+                            <optgroup label="Refundable">
+                              {(['EMD','Security Deposit','Performance Security','Retention Money'] as PaymentType[]).map(t => <option key={t}>{t}</option>)}
+                            </optgroup>
+                            <optgroup label="Non-refundable">
+                              {(['Tender Fee','Document Fee','Processing Fee','e-Portal Fee','Stamp Duty','Notary/DSC','Other'] as PaymentType[]).map(t => <option key={t}>{t}</option>)}
+                            </optgroup>
                           </select>
                         </div>
                         {/* Amount */}
@@ -2086,7 +2118,7 @@ export default function ProjectDetails() {
                             placeholder="e.g. 50000"
                             className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500" />
                         </div>
-                        {/* Date */}
+                        {/* Date Paid */}
                         <div>
                           <label className="block text-xs font-medium text-slate-600 mb-1">Date Paid</label>
                           <input type="date" value={paymentForm.datePaid} onChange={e => setPaymentForm(f => ({ ...f, datePaid: e.target.value }))}
@@ -2106,6 +2138,28 @@ export default function ProjectDetails() {
                           <input type="text" value={paymentForm.referenceNumber} onChange={e => setPaymentForm(f => ({ ...f, referenceNumber: e.target.value }))}
                             placeholder="Transaction ID, DD no., UTR..."
                             className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500" />
+                        </div>
+                        {/* Refundable toggle + expected refund date */}
+                        <div>
+                          <label className="block text-xs font-medium text-slate-600 mb-2">Refundable?</label>
+                          <div className="flex items-center gap-4">
+                            <label className="flex items-center gap-1.5 cursor-pointer text-sm">
+                              <input type="checkbox" checked={paymentForm.refundable}
+                                onChange={e => setPaymentForm(f => ({ ...f, refundable: e.target.checked }))}
+                                className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500" />
+                              <span className={paymentForm.refundable ? 'text-indigo-700 font-medium' : 'text-slate-500'}>
+                                {paymentForm.refundable ? 'Yes — refundable' : 'No — sunk cost'}
+                              </span>
+                            </label>
+                          </div>
+                          {paymentForm.refundable && (
+                            <div className="mt-2">
+                              <label className="block text-xs text-slate-500 mb-1">Expected refund date (optional)</label>
+                              <input type="date" value={paymentForm.expectedRefundDate}
+                                onChange={e => setPaymentForm(f => ({ ...f, expectedRefundDate: e.target.value }))}
+                                className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500" />
+                            </div>
+                          )}
                         </div>
                         {/* Receipt Upload */}
                         <div>
@@ -2154,92 +2208,100 @@ export default function ProjectDetails() {
                       <div className="text-center py-10 border-2 border-dashed border-slate-200 rounded-xl">
                         <IndianRupee className="w-10 h-10 text-slate-300 mx-auto mb-3" />
                         <p className="text-sm text-slate-500 font-medium">No payments recorded yet</p>
-                        <p className="text-xs text-slate-400 mt-1">Track EMD, tender fees, and other payments for this project.</p>
+                        <p className="text-xs text-slate-400 mt-1">Track EMD, security deposits, tender fees, and other payments for this project.</p>
                       </div>
                     ) : (
                       <div className="space-y-3">
-                        {payments.map(p => (
-                          <div key={p.id} className="bg-slate-50 rounded-xl border border-slate-200 overflow-hidden">
-                            <div className="p-4 flex flex-col sm:flex-row sm:items-start gap-3">
-                              {/* Left: type + amount */}
-                              <div className="flex-1 min-w-0">
-                                <div className="flex flex-wrap items-center gap-2 mb-1">
-                                  <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${typeColor[p.type]}`}>{p.type}</span>
-                                  {p.type === 'EMD' && p.emdStatus && (
-                                    <span className={`text-xs font-semibold px-2 py-0.5 rounded-full flex items-center gap-1 ${emdStatusColor[p.emdStatus]}`}>
-                                      {p.emdStatus === 'Paid' && <Clock className="w-3 h-3" />}
-                                      {p.emdStatus === 'Pending Refund' && <RotateCcw className="w-3 h-3" />}
-                                      {p.emdStatus === 'Refunded' && <BadgeCheck className="w-3 h-3" />}
-                                      {p.emdStatus}
+                        {payments.map(p => {
+                          const isRefundable = p.refundable ?? isRefundableByDefault(p.type);
+                          const status: RefundStatus | undefined = p.refundStatus ?? (p as any).emdStatus;
+                          return (
+                            <div key={p.id} className="bg-slate-50 rounded-xl border border-slate-200 overflow-hidden">
+                              <div className="p-4 flex flex-col sm:flex-row sm:items-start gap-3">
+                                {/* Left: type + amount */}
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex flex-wrap items-center gap-2 mb-1">
+                                    <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${typeColor[p.type] ?? 'bg-slate-100 text-slate-700'}`}>{p.type}</span>
+                                    <span className={`text-xs px-2 py-0.5 rounded-full ${isRefundable ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-red-50 text-red-600 border border-red-200'}`}>
+                                      {isRefundable ? 'Refundable' : 'Non-refundable'}
                                     </span>
-                                  )}
-                                </div>
-                                <div className="text-xl font-bold text-slate-800">₹{p.amount.toLocaleString('en-IN')}</div>
-                                <div className="text-xs text-slate-500 mt-0.5 flex flex-wrap gap-x-3 gap-y-0.5">
-                                  <span><Calendar className="w-3 h-3 inline mr-0.5" />{new Date(p.datePaid).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}</span>
-                                  <span><CreditCard className="w-3 h-3 inline mr-0.5" />{p.paymentMode}</span>
-                                  {p.referenceNumber && <span className="font-mono">Ref: {p.referenceNumber}</span>}
-                                  {p.type === 'EMD' && p.emdRefundDate && <span className="text-green-700">Refunded: {new Date(p.emdRefundDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}</span>}
-                                </div>
-                                {p.notes && <p className="text-xs text-slate-500 mt-1 italic">{p.notes}</p>}
-                              </div>
-                              {/* Right: actions */}
-                              <div className="flex flex-col gap-1.5 shrink-0">
-                                {p.type === 'EMD' && (
-                                  <div className="flex gap-1">
-                                    {p.emdStatus !== 'Pending Refund' && p.emdStatus !== 'Refunded' && (
-                                      <button onClick={() => handleEmdStatusChange(p, 'Pending Refund')}
-                                        className="text-xs px-2 py-1 rounded border border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100 transition-colors flex items-center gap-1">
-                                        <RotateCcw className="w-3 h-3" /> Refund Pending
-                                      </button>
-                                    )}
-                                    {p.emdStatus !== 'Refunded' && (
-                                      <button onClick={() => handleEmdStatusChange(p, 'Refunded')}
-                                        className="text-xs px-2 py-1 rounded border border-green-200 bg-green-50 text-green-700 hover:bg-green-100 transition-colors flex items-center gap-1">
-                                        <BadgeCheck className="w-3 h-3" /> Mark Refunded
-                                      </button>
-                                    )}
-                                    {p.emdStatus === 'Refunded' && (
-                                      <button onClick={() => handleEmdStatusChange(p, 'Paid')}
-                                        className="text-xs px-2 py-1 rounded border border-slate-200 bg-slate-100 text-slate-600 hover:bg-slate-200 transition-colors">
-                                        Undo
-                                      </button>
+                                    {isRefundable && status && (
+                                      <span className={`text-xs font-semibold px-2 py-0.5 rounded-full flex items-center gap-1 ${refundStatusColor[status]}`}>
+                                        {status === 'Paid' && <Clock className="w-3 h-3" />}
+                                        {status === 'Pending Refund' && <RotateCcw className="w-3 h-3" />}
+                                        {status === 'Refunded' && <BadgeCheck className="w-3 h-3" />}
+                                        {status}
+                                      </span>
                                     )}
                                   </div>
-                                )}
-                                <div className="flex gap-1 justify-end">
-                                  {p.receiptUrl && (
-                                    <a href={p.receiptUrl} target="_blank" rel="noopener noreferrer"
-                                      className="text-xs px-2 py-1 rounded border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 transition-colors flex items-center gap-1">
-                                      <Receipt className="w-3 h-3" /> Receipt
-                                    </a>
+                                  <div className="text-xl font-bold text-slate-800">₹{p.amount.toLocaleString('en-IN')}</div>
+                                  <div className="text-xs text-slate-500 mt-0.5 flex flex-wrap gap-x-3 gap-y-0.5">
+                                    <span><Calendar className="w-3 h-3 inline mr-0.5" />{new Date(p.datePaid).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}</span>
+                                    <span><CreditCard className="w-3 h-3 inline mr-0.5" />{p.paymentMode}</span>
+                                    {p.referenceNumber && <span className="font-mono">Ref: {p.referenceNumber}</span>}
+                                    {p.expectedRefundDate && status !== 'Refunded' && <span className="text-blue-600">Exp. refund: {new Date(p.expectedRefundDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}</span>}
+                                    {p.refundDate && <span className="text-green-700">Refunded: {new Date(p.refundDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}</span>}
+                                  </div>
+                                  {p.notes && <p className="text-xs text-slate-500 mt-1 italic">{p.notes}</p>}
+                                </div>
+                                {/* Right: actions */}
+                                <div className="flex flex-col gap-1.5 shrink-0">
+                                  {isRefundable && (
+                                    <div className="flex flex-wrap gap-1">
+                                      {status !== 'Pending Refund' && status !== 'Refunded' && (
+                                        <button onClick={() => handleRefundStatusChange(p, 'Pending Refund')}
+                                          className="text-xs px-2 py-1 rounded border border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100 transition-colors flex items-center gap-1">
+                                          <RotateCcw className="w-3 h-3" /> Refund Pending
+                                        </button>
+                                      )}
+                                      {status !== 'Refunded' && (
+                                        <button onClick={() => handleRefundStatusChange(p, 'Refunded')}
+                                          className="text-xs px-2 py-1 rounded border border-green-200 bg-green-50 text-green-700 hover:bg-green-100 transition-colors flex items-center gap-1">
+                                          <BadgeCheck className="w-3 h-3" /> Mark Refunded
+                                        </button>
+                                      )}
+                                      {status === 'Refunded' && (
+                                        <button onClick={() => handleRefundStatusChange(p, 'Paid')}
+                                          className="text-xs px-2 py-1 rounded border border-slate-200 bg-slate-100 text-slate-600 hover:bg-slate-200 transition-colors">
+                                          Undo
+                                        </button>
+                                      )}
+                                    </div>
                                   )}
-                                  <button onClick={() => openEditPayment(p)}
-                                    className="text-xs px-2 py-1 rounded border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 transition-colors flex items-center gap-1">
-                                    <Edit2 className="w-3 h-3" /> Edit
-                                  </button>
-                                  <button onClick={() => handleDeletePayment(p.id)} disabled={deletingPaymentId === p.id}
-                                    className="text-xs px-2 py-1 rounded border border-red-200 bg-red-50 text-red-600 hover:bg-red-100 transition-colors flex items-center gap-1 disabled:opacity-50">
-                                    {deletingPaymentId === p.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <Trash2 className="w-3 h-3" />}
-                                  </button>
+                                  <div className="flex gap-1 justify-end">
+                                    {p.receiptUrl && (
+                                      <a href={p.receiptUrl} target="_blank" rel="noopener noreferrer"
+                                        className="text-xs px-2 py-1 rounded border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 transition-colors flex items-center gap-1">
+                                        <Receipt className="w-3 h-3" /> Receipt
+                                      </a>
+                                    )}
+                                    <button onClick={() => openEditPayment(p)}
+                                      className="text-xs px-2 py-1 rounded border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 transition-colors flex items-center gap-1">
+                                      <Edit2 className="w-3 h-3" /> Edit
+                                    </button>
+                                    <button onClick={() => handleDeletePayment(p.id)} disabled={deletingPaymentId === p.id}
+                                      className="text-xs px-2 py-1 rounded border border-red-200 bg-red-50 text-red-600 hover:bg-red-100 transition-colors flex items-center gap-1 disabled:opacity-50">
+                                      {deletingPaymentId === p.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <Trash2 className="w-3 h-3" />}
+                                    </button>
+                                  </div>
                                 </div>
                               </div>
                             </div>
-                          </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     )}
                   </div>
                 </div>
 
-                {/* EMD summary callout if any EMD outstanding */}
-                {emdOutstanding > 0 && (
+                {/* Locked-up refundable callout */}
+                {refundableLocked > 0 && (
                   <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex items-start gap-3">
                     <Wallet className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
                     <div>
-                      <div className="text-sm font-semibold text-amber-800">₹{emdOutstanding.toLocaleString('en-IN')} EMD currently locked</div>
+                      <div className="text-sm font-semibold text-amber-800">₹{refundableLocked.toLocaleString('en-IN')} locked up in refundable deposits</div>
                       <div className="text-xs text-amber-700 mt-0.5">
-                        {payments.filter(p => p.type === 'EMD' && p.emdStatus !== 'Refunded').length} EMD payment{payments.filter(p => p.type === 'EMD' && p.emdStatus !== 'Refunded').length !== 1 ? 's' : ''} pending refund.
+                        {payments.filter(p => (p.refundable ?? isRefundableByDefault(p.type)) && (p.refundStatus ?? (p as any).emdStatus) !== 'Refunded').length} payment{payments.filter(p => (p.refundable ?? isRefundableByDefault(p.type)) && (p.refundStatus ?? (p as any).emdStatus) !== 'Refunded').length !== 1 ? 's' : ''} awaiting refund.
                         Mark them as refunded once your bank confirms receipt.
                       </div>
                     </div>

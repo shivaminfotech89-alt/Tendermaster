@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useAuth } from "../auth/AuthProvider";
-import { FileSearch, Trash2 } from "lucide-react";
+import { FileSearch, Trash2, Search, X } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { collection, query, where, onSnapshot, doc, deleteDoc } from "firebase/firestore";
 import { db } from "../lib/firebase";
@@ -16,6 +16,7 @@ export default function Projects() {
   const navigate = useNavigate();
   const [savedTenders, setSavedTenders] = useState<any[]>([]);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
 
   useEffect(() => {
     if (!user) return;
@@ -39,11 +40,43 @@ export default function Projects() {
     }
   };
 
+  const filteredTenders = searchQuery.trim()
+    ? savedTenders.filter(t => {
+        const q = searchQuery.toLowerCase();
+        return (
+          (t.projectName || "").toLowerCase().includes(q) ||
+          (t.details?.tender_simplified?.tender_name || "").toLowerCase().includes(q) ||
+          (t.details?.tender_simplified?.tender_id || "").toLowerCase().includes(q) ||
+          (t.details?.tender_simplified?.authority_name || "").toLowerCase().includes(q) ||
+          (t.details?.tender_simplified?.is_active ? "active" : "closed").includes(q)
+        );
+      })
+    : savedTenders;
+
   return (
     <div className="p-6 md:p-8 max-w-7xl mx-auto pb-24">
-      <div className="mb-8">
+      <div className="mb-6">
         <h1 className="text-3xl font-bold tracking-tight text-slate-900">Your Projects Pipeline</h1>
         <p className="text-slate-500 mt-1">Manage and track your saved tenders and analyses.</p>
+      </div>
+
+      {/* Search */}
+      <div className="mb-4">
+        <div className="relative max-w-sm">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
+          <input
+            type="text"
+            placeholder="Search by name, authority, tender ID…"
+            value={searchQuery}
+            onChange={e => setSearchQuery(e.target.value)}
+            className="w-full pl-9 pr-8 py-2 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 bg-white"
+          />
+          {searchQuery && (
+            <button onClick={() => setSearchQuery("")} className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
+              <X className="w-4 h-4" />
+            </button>
+          )}
+        </div>
       </div>
 
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm flex flex-col min-h-[24rem]">
@@ -51,6 +84,12 @@ export default function Projects() {
           <div className="flex-1 flex flex-col items-center justify-center text-slate-400 p-8">
              <FileSearch className="w-12 h-12 mb-4 opacity-50" />
              <p>No projects found. Start by analyzing a new tender.</p>
+          </div>
+        ) : filteredTenders.length === 0 ? (
+          <div className="flex-1 flex flex-col items-center justify-center text-slate-400 p-8">
+            <Search className="w-12 h-12 mb-4 opacity-50" />
+            <p className="font-medium">No projects match "{searchQuery}"</p>
+            <p className="text-sm mt-1">Try a different keyword or <button onClick={() => setSearchQuery("")} className="text-indigo-600 underline">clear the search</button>.</p>
           </div>
         ) : (
           <div className="flex-1 overflow-x-auto p-0">
@@ -68,7 +107,7 @@ export default function Projects() {
                  </tr>
                </thead>
                <tbody className="divide-y divide-slate-100">
-                  {savedTenders.map(t => {
+                  {filteredTenders.map(t => {
                      const tenderTitle = t.details?.tender_simplified?.tender_name || t.projectName || "Unnamed Tender";
                      const authorityName = t.details?.tender_simplified?.authority_name || "Unknown Authority";
                      const tenderValue = t.details?.tender_simplified?.tender_value || t.details?.financial_estimate?.total_estimated_cost || "N/A";

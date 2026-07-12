@@ -1530,8 +1530,12 @@ ${tenderContextText || "No raw text provided."}
 ${analysisResult ? JSON.stringify(analysisResult) : "No previous analysis provided."}
 ${Array.isArray(paymentRecords) && paymentRecords.length > 0 ? `
 --- PAYMENT RECORDS (user-recorded for this project) ---
-${paymentRecords.map((p: any) => `${p.type}: ₹${p.amount} | Date: ${p.datePaid} | Mode: ${p.paymentMode} | Ref: ${p.referenceNumber || "N/A"}${p.type === "EMD" ? ` | EMD Status: ${p.emdStatus}` : ""}${p.notes ? ` | Notes: ${p.notes}` : ""}`).join("\n")}
-Total Paid: ₹${paymentRecords.reduce((s: number, p: any) => s + (Number(p.amount) || 0), 0)} | EMD Outstanding: ₹${paymentRecords.filter((p: any) => p.type === "EMD" && p.emdStatus !== "Refunded").reduce((s: number, p: any) => s + (Number(p.amount) || 0), 0)}
+${paymentRecords.map((p: any) => {
+  const refundable = p.refundable ?? ['EMD','Security Deposit','Performance Security','Retention Money'].includes(p.type);
+  const status = p.refundStatus ?? p.emdStatus;
+  return `${p.type} [${refundable ? 'Refundable' : 'Non-refundable'}]: ₹${p.amount} | Date: ${p.datePaid} | Mode: ${p.paymentMode} | Ref: ${p.referenceNumber || "N/A"}${refundable ? ` | Refund Status: ${status || 'Paid'}` : ""}${p.expectedRefundDate ? ` | Expected Refund: ${p.expectedRefundDate}` : ""}${p.notes ? ` | Notes: ${p.notes}` : ""}`;
+}).join("\n")}
+Total Paid: ₹${paymentRecords.reduce((s: number, p: any) => s + (Number(p.amount) || 0), 0)} | Refundable Locked: ₹${paymentRecords.filter((p: any) => (p.refundable ?? ['EMD','Security Deposit','Performance Security','Retention Money'].includes(p.type)) && (p.refundStatus ?? p.emdStatus) !== "Refunded").reduce((s: number, p: any) => s + (Number(p.amount) || 0), 0)} | Non-refundable Spent: ₹${paymentRecords.filter((p: any) => !(p.refundable ?? ['EMD','Security Deposit','Performance Security','Retention Money'].includes(p.type))).reduce((s: number, p: any) => s + (Number(p.amount) || 0), 0)}
 ` : ""}
 `;
 

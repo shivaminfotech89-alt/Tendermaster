@@ -77,6 +77,7 @@ export default function ProjectDetails() {
   const [generatedDocIsHtml, setGeneratedDocIsHtml] = useState(false);
   const [downloadingPdf, setDownloadingPdf] = useState(false);
   const [downloadingDocx, setDownloadingDocx] = useState(false);
+  const [printWithoutLetterhead, setPrintWithoutLetterhead] = useState(false);
   
   // Checked items for action center
   const [checkedItems, setCheckedItems] = useState<string[]>([]);
@@ -1048,12 +1049,21 @@ export default function ProjectDetails() {
                                Use Letterhead
                              </label>
                            )}
+                           {exactFormMode && (
+                             <label className="flex items-center gap-1.5 text-xs font-medium text-slate-700 cursor-pointer">
+                               <input type="checkbox" checked={printWithoutLetterhead} onChange={(e) => setPrintWithoutLetterhead(e.target.checked)} className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500" />
+                               Print without letterhead
+                             </label>
+                           )}
                            {generatedDocIsHtml ? (
                              <button onClick={() => {
                                if (isEditingDoc) { toast("Click 'Preview' to apply your edits before printing.", { icon: "✏️" }); return; }
                                const pw = window.open('', '', 'width=900,height=1100');
                                if (!pw) return;
-                               pw.document.write(generatedDoc);
+                               const htmlToPrint = (exactFormMode && printWithoutLetterhead)
+                                 ? generatedDoc.replace('<body>', '<body class="no-letterhead">')
+                                 : generatedDoc;
+                               pw.document.write(htmlToPrint);
                                pw.document.close();
                                pw.focus();
                                setTimeout(() => { pw.print(); pw.close(); }, 500);
@@ -1087,11 +1097,13 @@ export default function ProjectDetails() {
                                <FileText className="w-3 h-3" /> Print
                              </button>
                            )}
-                           <button onClick={downloadPdf} disabled={downloadingPdf}
-                             className="text-xs flex items-center gap-1 text-indigo-600 hover:text-indigo-800 font-medium transition-colors disabled:opacity-50">
-                             {downloadingPdf ? <Loader2 className="w-3 h-3 animate-spin" /> : <Download className="w-3 h-3" />}
-                             {downloadingPdf ? "Generating…" : "PDF"}
-                           </button>
+                           {!exactFormMode && (
+                             <button onClick={downloadPdf} disabled={downloadingPdf}
+                               className="text-xs flex items-center gap-1 text-indigo-600 hover:text-indigo-800 font-medium transition-colors disabled:opacity-50">
+                               {downloadingPdf ? <Loader2 className="w-3 h-3 animate-spin" /> : <Download className="w-3 h-3" />}
+                               {downloadingPdf ? "Generating…" : "PDF"}
+                             </button>
+                           )}
                            <button onClick={downloadDocx} disabled={downloadingDocx}
                              className="text-xs flex items-center gap-1 text-indigo-600 hover:text-indigo-800 font-medium transition-colors disabled:opacity-50">
                              {downloadingDocx ? <Loader2 className="w-3 h-3 animate-spin" /> : <FileText className="w-3 h-3" />}

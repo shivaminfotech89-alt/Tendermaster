@@ -394,23 +394,36 @@ function buildFormDocHtml(fragment: string): string {
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Form</title>
 <style>
-  @page { size: A4 portrait; margin: 40mm 20mm 25mm 20mm; }
+  @page { size: A4 portrait; margin: 12mm 20mm; }
   * { box-sizing: border-box; }
   body { font-family: 'Times New Roman', Times, serif; font-size: 11pt; line-height: 1.6; color: #111827; margin: 0; padding: 0; background: #ffffff; }
-  #form-header { position: fixed; top: 0; left: 0; right: 0; height: 40mm; overflow: hidden; background: white; }
-  #form-footer { position: fixed; bottom: 0; left: 0; right: 0; height: 25mm; overflow: hidden; background: white; }
+  /* page-layout: outer table whose thead/tfoot repeat on every printed page */
+  table.page-layout { width: 100%; border-collapse: collapse; border: none; table-layout: fixed; }
+  table.page-layout > thead { display: table-header-group; }
+  table.page-layout > tfoot { display: table-footer-group; }
+  table.page-layout > thead > tr > td,
+  table.page-layout > tfoot > tr > td,
+  table.page-layout > tbody > tr > td { border: none; padding: 0; vertical-align: top; }
+  #letterhead-header td { padding-bottom: 6pt; border-bottom: 1px solid #374151; }
+  #letterhead-footer td { padding-top: 6pt; border-top: 1px solid #374151; }
+  /* "print without letterhead": hide the header and footer rows */
+  body.no-letterhead #letterhead-header,
+  body.no-letterhead #letterhead-footer { display: none; }
+  /* inner form tables */
+  table:not(.page-layout) { width: 100%; border-collapse: collapse; margin: 8pt 0 14pt; page-break-inside: auto; font-size: 10pt; }
+  table:not(.page-layout) tr { page-break-inside: avoid; }
+  table:not(.page-layout) th,
+  table:not(.page-layout) td { border: 1px solid #374151; padding: 5pt 8pt; text-align: left; vertical-align: top; word-break: break-word; }
+  table:not(.page-layout) th { background-color: #f3f4f6; font-weight: bold; }
   h1 { font-size: 15pt; font-weight: bold; text-align: center; margin: 0 0 10pt; }
   h2 { font-size: 12pt; font-weight: bold; margin: 14pt 0 5pt; }
   h3 { font-size: 11pt; font-weight: bold; margin: 10pt 0 4pt; text-decoration: underline; }
   p { margin: 0 0 7pt; }
   ul, ol { margin: 0 0 7pt; padding-left: 18pt; }
   li { margin-bottom: 2pt; }
-  table { width: 100%; border-collapse: collapse; margin: 8pt 0 14pt; page-break-inside: auto; font-size: 10pt; }
-  tr { page-break-inside: avoid; }
-  th, td { border: 1px solid #374151; padding: 5pt 8pt; text-align: left; vertical-align: top; word-break: break-word; }
-  th { background-color: #f3f4f6; font-weight: bold; }
   strong { font-weight: bold; }
   em { font-style: italic; }
+  @media print { body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
 </style>
 </head>
 <body>${fragment}</body>
@@ -1621,11 +1634,17 @@ STRICT RULES — follow every one without exception:
    For any field where data is genuinely unavailable from both sources, output exactly "__________" (12 underscores). NEVER output "[FILL MANUALLY]", "[NOT APPLICABLE]", "[INSERT HERE]", "[FILL]", "[N/A]", or any other bracketed marker — only "__________".
 5. Reproduce the form's layout as faithfully as possible using HTML tables (<table>/<tr>/<th>/<td>) with rowspan and colspan attributes to faithfully reproduce merged cells, column spans, nested cells, and the form's exact visual structure. Multi-column forms become multi-column <table> elements. Nested cells (e.g. multiple fields stacked in one cell) use rowspan/colspan or nested <table> elements.
 6. Output ONLY the completed form as a clean HTML fragment — no preamble, no commentary, no <html>/<head>/<body>/<style>/<script> wrapper, no inline CSS. Do NOT add any title, label, date, timestamp, or metadata that is not present in the uploaded form — begin directly with the form's own content. Use <table>, <tr>, <th>, <td> with rowspan/colspan as needed. Use <p> for paragraph text, <strong> for bold, <br> for line breaks within a cell. Do NOT embed base64 image data, data: URIs, or any binary content — omit logos and images entirely. Do NOT output any Markdown syntax.
-7. HEADER/FOOTER STRUCTURE FOR REPEATING PAGES: Multi-page forms repeat the organisation name, CIN, address, and tagline at the top of every page, and contact/website details at the bottom of every page. Reproduce them as follows:
-   • Wrap the letterhead/header block (organisation name, CIN/registration, address, tagline if present) in: <header id="form-header">...</header> — this element will be rendered on every page of the PDF.
-   • Output the form's actual content (fields, tables, declarations, clauses) in one clean continuous sequence between the header and footer — do NOT repeat the header or footer anywhere in the body.
-   • Wrap the contact/footer block (phone, email, website, etc.) in: <footer id="form-footer">...</footer> — this element will be rendered on every page of the PDF.
-   • If the form has no distinct letterhead/header block, omit the <header> element entirely. If the form has no footer block, omit the <footer> element entirely.
+7. HEADER/FOOTER STRUCTURE — wrap your ENTIRE output in a page-layout table so the header and footer repeat on every printed page without overlapping content:
+   <table class="page-layout">
+     <thead id="letterhead-header"><tr><td>[letterhead block: org name, CIN/registration, address, tagline]</td></tr></thead>
+     <tbody><tr><td>[ALL form content: every field, table, section, declaration, clause]</td></tr></tbody>
+     <tfoot id="letterhead-footer"><tr><td>[contact/footer block: phone, email, website]</td></tr></tfoot>
+   </table>
+   The browser's print engine repeats <thead> at the top and <tfoot> at the bottom of every page automatically — heights are driven by content, so nothing is clipped and nothing overlaps.
+   • If the form has no distinct letterhead/header block, omit <thead id="letterhead-header"> entirely.
+   • If the form has no distinct footer block, omit <tfoot id="letterhead-footer"> entirely.
+   • Nesting <table> elements inside the <tbody><tr><td> is valid — preserve all form tables there.
+   • Do NOT use <header> or <footer> HTML elements — use only the <thead>/<tfoot> structure above.
 8. ARTIFACT REMOVAL: The following are print/pagination artifacts — remove them completely, do not reproduce them anywhere in your output:
    • Page number markers in any form: "- 10 -", "- 11 -", "Page 2 of 5", "2/5", etc.
    • Repeated website URLs, telephone lines, or taglines such as "ASSURING THE BEST SERVICES..." or "YOUR SATISFACTION IS OUR MOTTO" when they appear mid-document as page-footer repetitions.

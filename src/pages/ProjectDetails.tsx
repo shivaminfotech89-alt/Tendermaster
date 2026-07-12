@@ -2,7 +2,7 @@ import { useEffect, useState, useRef } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { doc, getDoc, updateDoc, deleteDoc, addDoc, collection, query, where, getDocs, writeBatch, serverTimestamp, arrayUnion } from "firebase/firestore";
 import { db } from "../lib/firebase";
-import { ArrowLeft, AlertCircle, Calculator, Building, Activity, Upload, FileText, Download, Loader2, Save, Plus, Target, CheckCircle, ListTodo, Calendar, MessageSquare, Send, X, Trash2, RefreshCw, Edit2, Check, ChevronRight, Info, IndianRupee, Wallet, Receipt, CreditCard, RotateCcw, BadgeCheck, Clock } from "lucide-react";
+import { ArrowLeft, AlertCircle, Calculator, Building, Activity, Upload, FileText, Download, Loader2, Save, Plus, Target, CheckCircle, ListTodo, Calendar, MessageSquare, Send, X, Trash2, RefreshCw, Edit2, Check, ChevronRight, Info, IndianRupee, Wallet, Receipt, CreditCard, RotateCcw, BadgeCheck, Clock, Copy, ArrowUpRight } from "lucide-react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import JSZip from "jszip";
@@ -45,6 +45,8 @@ function fmtDate(ts: any): string {
   const d = ts?.toDate ? ts.toDate() : new Date(ts);
   return d.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
 }
+
+const LETTER_SENTINEL = '%%LETTER_DRAFT%%';
 
 type PaymentType =
   | 'EMD' | 'Security Deposit' | 'Performance Security' | 'Retention Money'
@@ -1978,22 +1980,59 @@ export default function ProjectDetails() {
                  {messages.length === 0 ? (
                    <div className="h-full flex flex-col items-center justify-center text-slate-400 text-center">
                       <MessageSquare className="w-12 h-12 mb-3 opacity-30 text-indigo-500" />
-                      <p className="text-sm">Ask anything about this specific project.</p>
-                      <div className="flex flex-wrap gap-2 justify-center mt-4 max-w-sm">
+                      <p className="text-sm">Ask anything about this project, or ask me to draft a letter.</p>
+                      <div className="flex flex-wrap gap-2 justify-center mt-4 max-w-md">
                         <button onClick={() => setChatInput("What is the exact EMD amount and deadline?")} className="text-xs bg-white border border-slate-200 text-slate-600 px-3 py-1.5 rounded-full hover:bg-slate-100">EMD & Deadlines?</button>
                         <button onClick={() => setChatInput("Summarize the specific technical eligibility criteria.")} className="text-xs bg-white border border-slate-200 text-slate-600 px-3 py-1.5 rounded-full hover:bg-slate-100">Technical Eligibility?</button>
+                        <button onClick={() => setChatInput("Draft an EMD refund request letter to the department.")} className="text-xs bg-white border border-slate-200 text-slate-600 px-3 py-1.5 rounded-full hover:bg-slate-100">Draft EMD refund request</button>
+                        <button onClick={() => setChatInput("Write a letter requesting an extension of the bid submission deadline.")} className="text-xs bg-white border border-slate-200 text-slate-600 px-3 py-1.5 rounded-full hover:bg-slate-100">Draft deadline extension letter</button>
                       </div>
                    </div>
                  ) : (
-                   messages.map((msg, i) => (
-                     <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                       <div className={`max-w-[80%] rounded-2xl p-4 text-sm ${msg.role === 'user' ? 'bg-indigo-600 text-white rounded-br-sm' : 'bg-white border border-slate-200 text-slate-800 rounded-bl-sm shadow-sm'}`}>
-                          <div className={msg.role === 'user' ? "prose prose-sm prose-invert max-w-none" : "prose prose-sm max-w-none prose-blue"}>
-                             <Markdown remarkPlugins={[remarkGfm]}>{msg.text}</Markdown>
-                          </div>
+                   messages.map((msg, i) => {
+                     const isLetter = msg.role === 'model' && msg.text.startsWith(LETTER_SENTINEL);
+                     const displayText = isLetter ? msg.text.slice(LETTER_SENTINEL.length).trimStart() : msg.text;
+                     return (
+                       <div key={i} className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
+                         {isLetter && (
+                           <div className="flex items-center gap-1.5 text-xs font-semibold text-indigo-700 bg-indigo-50 border border-indigo-200 px-2.5 py-1 rounded-t-lg rounded-br-lg mb-0.5 self-start">
+                             <FileText className="w-3.5 h-3.5" /> Letter Draft
+                           </div>
+                         )}
+                         <div className={`max-w-[80%] rounded-2xl p-4 text-sm ${msg.role === 'user' ? 'bg-indigo-600 text-white rounded-br-sm' : 'bg-white border border-slate-200 text-slate-800 rounded-bl-sm shadow-sm'} ${isLetter ? 'rounded-tl-none' : ''}`}>
+                           <div className={msg.role === 'user' ? "prose prose-sm prose-invert max-w-none" : "prose prose-sm max-w-none prose-blue"}>
+                             <Markdown remarkPlugins={[remarkGfm]}>{displayText}</Markdown>
+                           </div>
+                         </div>
+                         {isLetter && (
+                           <div className="flex gap-2 mt-1.5">
+                             <button
+                               onClick={() => {
+                                 navigator.clipboard.writeText(displayText).then(() => toast.success("Letter copied to clipboard"));
+                               }}
+                               className="flex items-center gap-1.5 text-xs font-medium text-slate-600 bg-white border border-slate-200 hover:bg-slate-50 px-3 py-1.5 rounded-lg transition-colors shadow-sm"
+                             >
+                               <Copy className="w-3.5 h-3.5" /> Copy
+                             </button>
+                             <button
+                               onClick={() => {
+                                 setExactFormMode(false);
+                                 setGeneratedDoc(displayText);
+                                 setGeneratedDocIsHtml(false);
+                                 setDocType("Letter (Chat Draft)");
+                                 setIsEditingDoc(false);
+                                 setActiveTab('docs');
+                                 toast.success("Letter loaded in Doc Generator — print or download from the toolbar above.");
+                               }}
+                               className="flex items-center gap-1.5 text-xs font-medium text-indigo-700 bg-indigo-50 border border-indigo-200 hover:bg-indigo-100 px-3 py-1.5 rounded-lg transition-colors shadow-sm"
+                             >
+                               <ArrowUpRight className="w-3.5 h-3.5" /> Open in Doc Generator
+                             </button>
+                           </div>
+                         )}
                        </div>
-                     </div>
-                   ))
+                     );
+                   })
                  )}
                  {chatLoading && (
                    <div className="flex justify-start">

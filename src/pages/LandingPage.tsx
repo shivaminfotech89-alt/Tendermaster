@@ -1,14 +1,17 @@
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { CheckCircle2, FileText, ArrowRight, Menu, X, AlertTriangle, Calendar, MessageSquare, TrendingUp } from 'lucide-react';
+import {
+  CheckCircle2, FileText, ArrowRight, Menu, X, Calendar, MessageSquare,
+  TrendingUp, Building2, Languages, CreditCard, Folder, LayoutGrid
+} from 'lucide-react';
 import { useAuth } from '../auth/AuthProvider';
 import toast from 'react-hot-toast';
 
 export default function LandingPage() {
   const { user } = useAuth();
   const [isMenuOpen, setIsMenuOpen] = useState(false);
-
   const navigate = useNavigate();
+
   const handleRazorpayClick = async (amount: number) => {
     if (!user) {
       toast("Please create an account first to subscribe.");
@@ -71,7 +74,10 @@ export default function LandingPage() {
   };
 
   return (
-    <div className="min-h-screen bg-white font-sans text-slate-900 selection:bg-indigo-100 scroll-smooth">
+    <div
+      style={{ fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" }}
+      className="min-h-screen bg-white text-slate-900 selection:bg-indigo-100 scroll-smooth"
+    >
 
       {/* ── Header ── */}
       <header className="sticky top-0 bg-white/92 backdrop-blur-md z-20 border-b border-slate-100">
@@ -103,7 +109,6 @@ export default function LandingPage() {
           </button>
         </div>
 
-        {/* Mobile menu */}
         {isMenuOpen && (
           <div className="md:hidden bg-white border-b border-slate-100 px-6 py-4 space-y-4 shadow-lg">
             <a href="#how" className="block text-sm font-semibold text-slate-600" onClick={() => setIsMenuOpen(false)}>How it works</a>
@@ -128,11 +133,14 @@ export default function LandingPage() {
         <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-indigo-50 text-indigo-700 font-bold text-xs mb-6 uppercase tracking-wider">
           Built for Indian government tenders
         </div>
-        <h1 className="text-4xl md:text-5xl font-extrabold text-slate-900 leading-tight tracking-tight max-w-3xl mx-auto" style={{ letterSpacing: '-.03em' }}>
-          Know which tenders to bid on — before you spend a rupee preparing one.
+        <h1
+          className="text-4xl md:text-5xl font-extrabold text-slate-900 leading-tight max-w-3xl mx-auto"
+          style={{ letterSpacing: '-.03em' }}
+        >
+          Upload a tender. Know in 60 seconds whether to bid. Get every annexure filled and submission-ready.
         </h1>
-        <p className="mt-5 text-lg text-slate-500 max-w-xl mx-auto leading-relaxed">
-          TenderMaster AI reads the tender document, checks it against your business profile, and gives you a clear bid decision in seconds.
+        <p className="mt-5 text-lg text-slate-500 max-w-2xl mx-auto leading-relaxed">
+          And never lose track of your EMD again. TenderMaster AI reads the document, checks it against your business profile, and hands you a bid decision — plus the paperwork.
         </p>
         <div className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-3.5">
           {user ? (
@@ -156,9 +164,9 @@ export default function LandingPage() {
         <p className="text-xs font-bold text-slate-400 uppercase tracking-widest text-center mb-11">How it works</p>
         <div className="grid md:grid-cols-3 gap-9">
           {[
-            { n: '1', title: 'Upload the tender', desc: 'Drop the PDF or paste a GeM / CPPP link.' },
-            { n: '2', title: 'AI reads & analyzes it', desc: 'Eligibility, financials, risk clauses, key dates.' },
-            { n: '3', title: 'Get your bid decision', desc: 'A clear bid / caution / no-bid, with reasons.' },
+            { n: '1', title: 'Upload the tender', desc: 'PDF, a ZIP of documents, or a GeM / CPPP link.' },
+            { n: '2', title: 'AI analyzes against your profile', desc: 'Eligibility, compliance, financials, risk, deadlines, win probability.' },
+            { n: '3', title: 'Get a decision — and the paperwork', desc: 'A bid recommendation, plus every annexure filled and ready to submit.' },
           ].map(({ n, title, desc }) => (
             <div key={n} className="text-center">
               <div className="w-14 h-14 mx-auto rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center text-xl font-extrabold mb-5">{n}</div>
@@ -169,51 +177,99 @@ export default function LandingPage() {
         </div>
       </section>
 
+      {/* ── Differentiator — Form Fill ── */}
+      <section className="max-w-6xl mx-auto px-6 lg:px-14 pb-16">
+        <div className="grid md:grid-cols-2 gap-10 items-center bg-gradient-to-br from-indigo-700 to-blue-600 rounded-2xl p-8 md:p-11 shadow-2xl shadow-indigo-600/20">
+
+          {/* Left: copy */}
+          <div>
+            <div className="inline-flex items-center gap-1.5 text-xs font-extrabold tracking-wider text-slate-900 bg-green-400 px-3 py-1.5 rounded-full mb-5">
+              ⚡ THE DIFFERENTIATOR — NO ONE ELSE DOES THIS
+            </div>
+            <h2 className="text-2xl md:text-3xl font-extrabold text-white leading-snug" style={{ letterSpacing: '-.02em' }}>
+              We don't summarize your tender. We fill it out.
+            </h2>
+            <p className="text-sm text-indigo-100 mt-4 leading-relaxed">
+              Upload the tender's actual annexure or proforma. TenderMaster reproduces it verbatim — nested tables, original clause wording, header and footer on every page — and fills in your business data. Not a generic template: the exact form the department issued, submission-ready in minutes instead of hours of retyping.
+            </p>
+            <div className="flex items-stretch gap-6 mt-6 flex-wrap">
+              <div>
+                <div className="text-xl font-extrabold text-white">Hours → Minutes</div>
+                <div className="text-xs text-indigo-200 mt-0.5">per bid, on paperwork alone</div>
+              </div>
+              <div className="w-px bg-white/25 self-stretch" />
+              <div>
+                <div className="text-xl font-extrabold text-white">Zero</div>
+                <div className="text-xs text-indigo-200 mt-0.5">fabricated stamps or statutory numbers</div>
+              </div>
+            </div>
+            <p className="text-xs text-indigo-200/80 mt-4">
+              Blank fields stay blank for your signature — you stay in control of what's submitted.
+            </p>
+          </div>
+
+          {/* Right: mock annexure */}
+          <div className="bg-white rounded-2xl p-5 shadow-2xl shadow-slate-900/25">
+            <div className="text-xs font-bold text-slate-400 tracking-wider border-b border-slate-100 pb-2.5 mb-3">
+              ANNEXURE-III · DECLARATION OF ELIGIBILITY
+            </div>
+            <div className="space-y-2.5 text-sm">
+              <div className="flex justify-between items-baseline">
+                <span className="text-slate-500">Name of Bidder</span>
+                <span className="font-bold text-slate-900 text-right ml-4">Your company name</span>
+              </div>
+              <div className="flex justify-between items-baseline">
+                <span className="text-slate-500">GSTIN</span>
+                <span className="font-bold text-slate-900 text-right ml-4">From your profile</span>
+              </div>
+              <div className="flex justify-between items-baseline">
+                <span className="text-slate-500">Registration Class</span>
+                <span className="font-bold text-slate-900 text-right ml-4">Auto-filled</span>
+              </div>
+              <div className="flex justify-between items-baseline border-t border-dashed border-slate-200 pt-2.5">
+                <span className="text-slate-500">Authorised Signatory</span>
+                <span className="text-slate-300 text-right ml-4">___________</span>
+              </div>
+            </div>
+            <div className="mt-3 text-xs text-slate-400 text-center">Blank fields stay blank — you sign and submit</div>
+          </div>
+        </div>
+      </section>
+
       {/* ── Features ── */}
       <section id="features" className="bg-slate-50 py-16 px-6 lg:px-14">
-        <div className="max-w-5xl mx-auto">
-          <h2 className="text-2xl font-extrabold text-slate-900 text-center mb-11" style={{ letterSpacing: '-.02em' }}>
-            Everything you need to decide, fast
+        <div className="max-w-6xl mx-auto">
+          <h2 className="text-2xl font-extrabold text-slate-900 text-center mb-2" style={{ letterSpacing: '-.02em' }}>
+            Everything a bidder needs, in one place
           </h2>
-          <div className="grid sm:grid-cols-2 md:grid-cols-3 gap-5">
+          <p className="text-sm text-slate-500 text-center mb-11">
+            From first read of the tender to tracking the refund of your Security Deposit.
+          </p>
+
+          <div className="grid sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
+
             <div className="bg-white border border-slate-100 rounded-2xl p-6">
               <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center mb-4">
                 <CheckCircle2 className="w-5 h-5" />
               </div>
-              <div className="font-bold text-slate-900 text-sm mb-1.5">Eligibility matching</div>
-              <div className="text-sm text-slate-500 leading-relaxed">Auto-checks turnover, licences and past-work criteria against your profile.</div>
-            </div>
-
-            <div className="bg-white border border-slate-100 rounded-2xl p-6">
-              <div className="w-10 h-10 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center mb-4">
-                <TrendingUp className="w-5 h-5" />
-              </div>
-              <div className="font-bold text-slate-900 text-sm mb-1.5">Financial & profit analysis</div>
-              <div className="text-sm text-slate-500 leading-relaxed">EMD, working capital and estimated margin, before you commit.</div>
+              <div className="font-bold text-slate-900 text-sm mb-1.5">Tender analysis</div>
+              <div className="text-sm text-slate-500 leading-relaxed">Match score, eligibility, compliance matrix, win probability and risk flags from the full document.</div>
             </div>
 
             <div className="bg-white border border-slate-100 rounded-2xl p-6">
               <div className="w-10 h-10 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center mb-4">
-                <AlertTriangle className="w-5 h-5" />
+                <Building2 className="w-5 h-5" />
               </div>
-              <div className="font-bold text-slate-900 text-sm mb-1.5">Risk assessment</div>
-              <div className="text-sm text-slate-500 leading-relaxed">Flags one-sided clauses — LD caps, PBG terms, payment holds.</div>
+              <div className="font-bold text-slate-900 text-sm mb-1.5">Business profile</div>
+              <div className="text-sm text-slate-500 leading-relaxed">Fill your statutory details once — GST, PAN, Udyam, turnover, directors — auto-filled from certificates.</div>
             </div>
 
             <div className="bg-white border border-slate-100 rounded-2xl p-6">
-              <div className="w-10 h-10 rounded-xl bg-red-50 text-red-600 flex items-center justify-center mb-4">
-                <Calendar className="w-5 h-5" />
+              <div className="w-10 h-10 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center mb-4">
+                <TrendingUp className="w-5 h-5" />
               </div>
-              <div className="font-bold text-slate-900 text-sm mb-1.5">Deadline tracking</div>
-              <div className="text-sm text-slate-500 leading-relaxed">Pre-bid meetings, submission and opening dates, never missed.</div>
-            </div>
-
-            <div className="bg-white border border-slate-100 rounded-2xl p-6">
-              <div className="w-10 h-10 rounded-xl bg-cyan-50 text-cyan-600 flex items-center justify-center mb-4">
-                <FileText className="w-5 h-5" />
-              </div>
-              <div className="font-bold text-slate-900 text-sm mb-1.5">Document generation</div>
-              <div className="text-sm text-slate-500 leading-relaxed">Compliance checklists and bid summary reports, ready to export.</div>
+              <div className="font-bold text-slate-900 text-sm mb-1.5">Bid engine &amp; profit calculator</div>
+              <div className="text-sm text-slate-500 leading-relaxed">Enter revenue, materials, labour and overheads — get margin and a recommended bid amount.</div>
             </div>
 
             <div className="bg-white border border-slate-100 rounded-2xl p-6">
@@ -221,8 +277,49 @@ export default function LandingPage() {
                 <MessageSquare className="w-5 h-5" />
               </div>
               <div className="font-bold text-slate-900 text-sm mb-1.5">Tender chat</div>
-              <div className="text-sm text-slate-500 leading-relaxed">Ask questions of the document directly, in plain language.</div>
+              <div className="text-sm text-slate-500 leading-relaxed">"What's the EMD? Am I eligible?" — plain-language answers instead of Ctrl+F through a PDF.</div>
             </div>
+
+            <div className="bg-white border border-slate-100 rounded-2xl p-6">
+              <div className="w-10 h-10 rounded-xl bg-purple-50 text-purple-700 flex items-center justify-center mb-4">
+                <Languages className="w-5 h-5" />
+              </div>
+              <div className="font-bold text-slate-900 text-sm mb-1.5">Analysis in your language</div>
+              <div className="text-sm text-slate-500 leading-relaxed">Every result — English, Hindi or Gujarati. Read it the way your team actually talks.</div>
+            </div>
+
+            <div className="bg-white border border-slate-100 rounded-2xl p-6">
+              <div className="w-10 h-10 rounded-xl bg-red-50 text-red-600 flex items-center justify-center mb-4">
+                <CreditCard className="w-5 h-5" />
+              </div>
+              <div className="font-bold text-slate-900 text-sm mb-1.5">Payments tracker</div>
+              <div className="text-sm text-slate-500 leading-relaxed">Every EMD and Security Deposit tracked Paid → Pending Refund → Refunded, so your capital doesn't sit forgotten.</div>
+            </div>
+
+            <div className="bg-white border border-slate-100 rounded-2xl p-6">
+              <div className="w-10 h-10 rounded-xl bg-cyan-50 text-cyan-600 flex items-center justify-center mb-4">
+                <Folder className="w-5 h-5" />
+              </div>
+              <div className="font-bold text-slate-900 text-sm mb-1.5">Documents center</div>
+              <div className="text-sm text-slate-500 leading-relaxed">Every certificate and record, uploaded once, searchable — no hunting at 11 pm before a deadline.</div>
+            </div>
+
+            <div className="bg-white border border-slate-100 rounded-2xl p-6">
+              <div className="w-10 h-10 rounded-xl bg-red-50 text-red-600 flex items-center justify-center mb-4">
+                <Calendar className="w-5 h-5" />
+              </div>
+              <div className="font-bold text-slate-900 text-sm mb-1.5">Deadline notifications</div>
+              <div className="text-sm text-slate-500 leading-relaxed">Submission and pre-bid dates, extracted automatically and never missed.</div>
+            </div>
+
+            <div className="bg-white border border-slate-100 rounded-2xl p-6">
+              <div className="w-10 h-10 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center mb-4">
+                <LayoutGrid className="w-5 h-5" />
+              </div>
+              <div className="font-bold text-slate-900 text-sm mb-1.5">Dashboard &amp; pipeline</div>
+              <div className="text-sm text-slate-500 leading-relaxed">Active tenders, high-match count, deadlines this week and your whole bidding operation on one screen.</div>
+            </div>
+
           </div>
         </div>
       </section>
@@ -235,11 +332,11 @@ export default function LandingPage() {
             <div className="text-xs text-slate-400 mt-1">Per tender analysis</div>
           </div>
           <div className="py-6 px-3 text-center md:border-r border-slate-100">
-            <div className="text-base font-extrabold text-slate-900 leading-tight">GeM, CPPP & nProcure</div>
+            <div className="text-base font-extrabold text-slate-900 leading-tight">GeM, CPPP &amp; nProcure</div>
             <div className="text-xs text-slate-400 mt-1">Portals supported</div>
           </div>
           <div className="py-6 px-3 text-center border-r border-slate-100 border-t md:border-t-0">
-            <div className="text-base font-extrabold text-slate-900 leading-tight">Eligibility, risk & profit</div>
+            <div className="text-base font-extrabold text-slate-900 leading-tight">Eligibility, risk &amp; profit</div>
             <div className="text-xs text-slate-400 mt-1">All in one analysis</div>
           </div>
           <div className="py-6 px-3 text-center border-t md:border-t-0">
@@ -258,10 +355,11 @@ export default function LandingPage() {
           <p className="text-sm text-slate-500 text-center mb-10">Cancel anytime. No hidden fees.</p>
 
           <div className="flex flex-col md:flex-row gap-6 justify-center items-stretch max-w-2xl mx-auto">
+
             {/* Quarterly */}
             <div className="flex-1 border border-slate-200 rounded-2xl p-7 flex flex-col">
               <div className="text-sm font-bold text-slate-500">Quarterly</div>
-              <div className="mt-2 text-3xl font-extrabold text-slate-900">
+              <div className="mt-2 text-4xl font-extrabold text-slate-900">
                 ₹999 <span className="text-sm font-semibold text-slate-400">/ 3 months</span>
               </div>
               <div className="my-5 h-px bg-slate-100" />
@@ -275,7 +373,7 @@ export default function LandingPage() {
                 onClick={() => handleRazorpayClick(999)}
                 className="mt-6 w-full py-3 border border-slate-300 rounded-xl font-bold text-slate-700 text-sm hover:bg-slate-50 transition-colors flex items-center justify-center gap-2"
               >
-                Subscribe Quarterly <ArrowRight className="w-4 h-4" />
+                Choose Quarterly <ArrowRight className="w-4 h-4" />
               </button>
             </div>
 
@@ -285,7 +383,7 @@ export default function LandingPage() {
                 BEST VALUE
               </div>
               <div className="text-sm font-bold text-indigo-700">Annual</div>
-              <div className="mt-2 text-3xl font-extrabold text-slate-900">
+              <div className="mt-2 text-4xl font-extrabold text-slate-900">
                 ₹1,999 <span className="text-sm font-semibold text-slate-400">/ year</span>
               </div>
               <div className="text-xs font-bold text-emerald-600 mt-1">Save ~₹1,997 vs. quarterly</div>
@@ -300,9 +398,10 @@ export default function LandingPage() {
                 onClick={() => handleRazorpayClick(1999)}
                 className="mt-6 w-full py-3 bg-indigo-600 text-white rounded-xl font-bold text-sm hover:bg-indigo-700 transition-colors flex items-center justify-center gap-2"
               >
-                Subscribe Annually <ArrowRight className="w-4 h-4" />
+                Choose Annual <ArrowRight className="w-4 h-4" />
               </button>
             </div>
+
           </div>
         </div>
       </section>

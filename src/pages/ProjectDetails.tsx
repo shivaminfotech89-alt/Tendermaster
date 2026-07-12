@@ -1026,6 +1026,7 @@ export default function ProjectDetails() {
                              </button>
                            ) : (
                              <button onClick={() => {
+                               if (isEditingDoc) { toast("Click 'Preview' to apply your edits before printing.", { icon: "✏️" }); return; }
                                const printWindow = window.open('', '', 'width=800,height=900');
                                if (!printWindow) return;
                                const content = document.getElementById('generated-doc-content')?.innerHTML || '';

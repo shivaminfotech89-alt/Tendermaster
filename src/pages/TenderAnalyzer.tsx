@@ -1359,6 +1359,7 @@ export default function TenderAnalyzer() {
                              </button>
                            ) : (
                              <button onClick={() => {
+                               if (isEditingDoc) { toast("Click 'Preview' to apply your edits before printing.", { icon: "✏️" }); return; }
                                const printWindow = window.open('', '', 'width=800,height=900');
                                if (!printWindow) return;
                                const content = document.getElementById('generated-doc-content-analyzer')?.innerHTML || '';
@@ -1369,7 +1370,7 @@ export default function TenderAnalyzer() {
                                    bgImageHtml = `<img src="${businessProfile.letterheadBackgroundImage}" style="position:fixed;top:0;left:0;width:100vw;height:100vh;z-index:-1;pointer-events:none;object-fit:cover;" />`;
                                    pageMargin = '0'; bodyPadding = '0 20mm';
                                    headerHtml = `<div style="height:35mm;width:100%;"></div>`;
-                                   footerHtml = `<div style="height:25mm;width:100%;"></div>`;
+                                   footerHtml = `<div style="height:30mm;width:100%;"></div>`;
                                  } else {
                                    headerHtml = businessProfile.letterheadHeader || `<div style="text-align:center;padding-bottom:5mm;border-bottom:2px solid #000;margin-bottom:5mm;"><h2>${businessProfile.companyName || 'Company Name'}</h2><p>${businessProfile.contactDetails || ''}</p></div>`;
                                    footerHtml = businessProfile.letterheadFooter || `<div style="text-align:center;padding-top:5mm;border-top:1px solid #000;margin-top:5mm;font-size:12px;"><p>${businessProfile.website || ''}</p></div>`;

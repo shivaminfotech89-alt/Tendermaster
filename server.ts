@@ -334,7 +334,7 @@ function buildDocHtml(fragment: string, docType: string): string {
     size: A4 portrait;
     margin-top: 44mm;
     margin-right: 20mm;
-    margin-bottom: 22mm;
+    margin-bottom: 30mm;
     margin-left: 20mm;
   }
   * { box-sizing: border-box; }
@@ -1714,7 +1714,7 @@ app.post(
         if (letterheadFooterHtml) {
           renderHtml = renderHtml.replace(
             "</body>",
-            `<div style="position:fixed;bottom:0;left:0;right:0;height:22mm;overflow:hidden;box-sizing:border-box;">${letterheadFooterHtml}</div></body>`
+            `<div style="position:fixed;bottom:0;left:0;right:0;height:30mm;overflow:hidden;box-sizing:border-box;">${letterheadFooterHtml}</div></body>`
           );
         }
       }

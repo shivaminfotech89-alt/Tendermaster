@@ -1516,7 +1516,7 @@ app.post(
   async (req: AuthenticatedRequest, res) => {
     try {
       const { docType, tenderDetails, userProfile, financialData, extraInstructions, language,
-              exactFormBase64, exactFormMimeType, exactFormUrl } =
+              exactFormBase64, exactFormMimeType, exactFormUrl, useUserLetterhead } =
         req.body;
       if (!tenderDetails) {
         return res.status(400).json({ error: "tenderDetails is required" });
@@ -1588,8 +1588,8 @@ STRICT RULES — follow every one without exception:
    a) TENDER-REFERENCE FIELDS (Tender No., Tender ID, Name of Work, submission deadline, issuing department/authority, NIT number, etc.) — fill these from the TENDER DETAILS provided below. These values are known; do NOT leave them blank.
    b) BIDDER FIELDS (company name, address, GST, PAN, signatory, etc.) — fill from the BUSINESS PROFILE below.
    For any field where data is genuinely unavailable from both sources, output exactly "__________" (12 underscores). NEVER output "[FILL MANUALLY]", "[NOT APPLICABLE]", "[INSERT HERE]", "[FILL]", "[N/A]", or any other bracketed marker — only "__________".
-5. Reproduce the form's layout as faithfully as possible using Markdown tables. Multi-column forms become multi-column Markdown tables.
-6. Output ONLY the completed form in clean Markdown — no preamble, no commentary, no header lines. Do NOT output any HTML tags whatsoever (including <div>, <img>, <br>, <table>, <span>, <p>, or any other tag). Use Markdown tables for tabular layouts. For line breaks within a table cell use two trailing spaces before a newline, not a <br> tag. Do NOT embed base64 image data, data: URIs, or any binary content — omit logos and images entirely.
+5. Reproduce the form's layout as faithfully as possible using HTML tables (<table>/<tr>/<th>/<td>) with rowspan and colspan attributes to faithfully reproduce merged cells, column spans, nested cells, and the form's exact visual structure. Multi-column forms become multi-column <table> elements. Nested cells (e.g. multiple fields stacked in one cell) use rowspan/colspan or nested <table> elements.
+6. Output ONLY the completed form as a clean HTML fragment — no preamble, no commentary, no <html>/<head>/<body>/<style>/<script> wrapper, no inline CSS. Use <table>, <tr>, <th>, <td> with rowspan/colspan as needed. Use <p> for paragraph text, <strong> for bold, <br> for line breaks within a cell. Do NOT embed base64 image data, data: URIs, or any binary content — omit logos and images entirely. Do NOT output any Markdown syntax.
 7. HEADER/FOOTER DE-DUPLICATION: Multi-page forms repeat the organization name, CIN, address, and tagline at the top of every page, and contact/website details at the bottom of every page. These are print repetitions — NOT separate form fields. Structure your output as follows:
    • Output the letterhead/header block ONCE at the very top (organization name, CIN/registration, address, tagline if present).
    • Output the form's actual content (fields, tables, declarations, clauses) as one clean continuous sequence — merge all pages as if it were a single document.
@@ -1598,7 +1598,12 @@ STRICT RULES — follow every one without exception:
 8. ARTIFACT REMOVAL: The following are print/pagination artifacts — remove them completely, do not reproduce them anywhere in your output:
    • Page number markers in any form: "- 10 -", "- 11 -", "Page 2 of 5", "2/5", etc.
    • Repeated website URLs, telephone lines, or taglines such as "ASSURING THE BEST SERVICES..." or "YOUR SATISFACTION IS OUR MOTTO" when they appear mid-document as page-footer repetitions.
-   • Any text that is clearly a running page header or footer repeating on each physical page rather than being part of the actual form content.${
+   • Any text that is clearly a running page header or footer repeating on each physical page rather than being part of the actual form content.
+9. STRICT PROHIBITION — FABRICATED LEGAL DOCUMENTS: NEVER generate, fabricate, or invent stamp paper certificates, e-stamp blocks, e-stamp certificate numbers (e-SBTR, CERT-IN, or any format), serial numbers, UID/UUID codes, or any fictional statutory document identifiers. A field for stamp details must contain "__________" (12 underscores) but MUST NEVER contain a fabricated certificate block with invented numbers, amounts, dates, or issuing authority stamps.${
+  useUserLetterhead
+    ? `\n10. LETTERHEAD REPLACEMENT — CRITICAL: The user has enabled their own letterhead, which will be printed in the reserved header zone at the top of every page. You MUST therefore completely omit the uploaded form's government letterhead, organisation name block, logo area, address header, and any top-of-page branding from your HTML output — do NOT reproduce them at all. Begin the document directly with the first substantive form section (e.g. the title or first table). This ensures the user's letterhead replaces the government header cleanly without duplication.`
+    : ""
+}${
   language && language !== "en"
     ? `\nCRITICAL LANGUAGE REQUIREMENT: Fill in bidder data in ${language === "hi" ? "Hindi" : language === "gu" ? "Gujarati" : language}, but keep all printed form labels exactly as they appear in the uploaded image.`
     : ""
@@ -1631,7 +1636,7 @@ ${JSON.stringify(tenderDetails)}${financialContext}${extraContext}`;
           inlineData: { mimeType: resolvedMimeType, data: resolvedBase64 },
         };
         const textPart = {
-          text: "Reproduce and fill the exact blank form shown in the uploaded file. Follow all rules in your instructions strictly. Return ONLY the completed form in Markdown format.",
+          text: "Reproduce and fill the exact blank form shown in the uploaded file. Follow all rules in your instructions strictly. Return ONLY the completed form as a clean HTML fragment — no <html>/<head>/<body> wrapper, no inline CSS, no Markdown syntax. Use HTML tables with rowspan/colspan to reproduce merged and nested cells exactly.",
         };
 
         response = await generateContentWithRetry(aiClient, {
@@ -1639,7 +1644,8 @@ ${JSON.stringify(tenderDetails)}${financialContext}${extraContext}`;
           contents: [{ role: "user", parts: [formPart, textPart] }],
           config: { systemInstruction: exactFormSystemInstruction },
         });
-        return res.json({ document: response.text || "Empty response from AI.", format: "markdown" });
+        const fragment = response.text || "<p>Empty response from AI.</p>";
+        return res.json({ document: buildDocHtml(fragment, docType as string || "Form Fill"), format: "html" });
       } else {
         // ── Standard mode: generate from tender data analysis ──
         const isAutoFill =

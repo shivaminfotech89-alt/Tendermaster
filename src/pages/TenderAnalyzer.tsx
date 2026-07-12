@@ -446,6 +446,7 @@ export default function TenderAnalyzer() {
             userProfile: businessProfile,
             extraInstructions,
             language: i18n.language,
+            useUserLetterhead: useLetterhead,
             ...(exactFormUrl ? { exactFormUrl, exactFormMimeType } : {}),
          })
       });
@@ -1381,6 +1382,7 @@ export default function TenderAnalyzer() {
                            </label>
                            {generatedDocIsHtml ? (
                              <button onClick={() => {
+                               if (isEditingDoc) { toast("Click 'Preview' to apply your edits before printing.", { icon: "✏️" }); return; }
                                const pw = window.open('', '', 'width=900,height=1100');
                                if (!pw) return;
                                pw.document.write(generatedDoc);
@@ -1427,8 +1429,7 @@ export default function TenderAnalyzer() {
                              {downloadingDocx ? <Loader2 className="w-3 h-3 animate-spin" /> : <FileText className="w-3 h-3" />}
                              {downloadingDocx ? "Generating…" : "Word"}
                            </button>
-                           {!generatedDocIsHtml && (
-                             <button onClick={() => {
+                           <button onClick={() => {
                                const blob = new Blob([generatedDoc], {type: "text/plain"});
                                const url = URL.createObjectURL(blob);
                                const a = document.createElement("a");
@@ -1438,13 +1439,10 @@ export default function TenderAnalyzer() {
                              }} className="text-xs flex items-center gap-1 text-slate-500 hover:text-slate-700 font-medium transition-colors">
                                <Download className="w-3 h-3" /> .txt
                              </button>
-                           )}
-                           {!generatedDocIsHtml && (
-                             <button onClick={() => { navigator.clipboard.writeText(generatedDoc); toast.success("Copied to clipboard!"); }}
+                           <button onClick={() => { navigator.clipboard.writeText(generatedDoc); toast.success("Copied to clipboard!"); }}
                                className="text-xs flex items-center gap-1 text-indigo-600 hover:text-indigo-800 font-medium">
                                <FileText className="w-3 h-3" /> Copy
                              </button>
-                           )}
                            <button onClick={() => setIsEditingDoc(!isEditingDoc)} className="text-xs flex items-center gap-1 text-indigo-600 hover:text-indigo-800 font-medium">
                              <Edit2 className="w-3 h-3" /> {isEditingDoc ? "Preview" : generatedDocIsHtml ? "Edit HTML" : "Edit"}
                            </button>

@@ -1758,6 +1758,13 @@ app.post(
         }
       }
 
+      // Tell chromium-min it's in a Lambda-like environment so it inflates
+      // al2.tar.br (contains libnss3 etc.) and sets LD_LIBRARY_PATH correctly.
+      // Vercel doesn't set AWS_EXECUTION_ENV, so the module's init code skips
+      // the library setup — setting it here before the first import fixes that.
+      if (!process.env.AWS_EXECUTION_ENV) {
+        process.env.AWS_EXECUTION_ENV = "AWS_Lambda_nodejs18.x";
+      }
       const chromium = (await import("@sparticuz/chromium-min")).default;
       const puppeteer = (await import("puppeteer-core")).default;
 
@@ -1767,7 +1774,7 @@ app.post(
         executablePath: await chromium.executablePath(
           "https://github.com/Sparticuz/chromium/releases/download/v131.0.1/chromium-v131.0.1-pack.tar"
         ),
-        headless: "shell" as const,
+        headless: chromium.headless as any,
       });
 
       const page = await browser.newPage();
@@ -1778,6 +1785,7 @@ app.post(
       const pdfBuffer = await page.pdf({
         format: "A4",
         printBackground: true,
+        displayHeaderFooter: false,
         margin: {
           top:    hasFormHeader ? "40mm" : "44mm",
           right:  "20mm",

@@ -12,8 +12,16 @@ import Razorpay from "razorpay";
 import crypto from "crypto";
 import dns from "dns";
 import { promisify } from "util";
+// Bundled by esbuild (--bundle inlines local files; --packages=external only skips npm deps).
+import { PLANS, PLAN_DAYS_FALLBACK } from './src/lib/plans';
 
 const lookupPromise = promisify(dns.lookup);
+
+// Derived from shared PLANS constant (bundled by esbuild --bundle; local files are inlined).
+const PLAN_DAYS: Record<number, number> = Object.fromEntries(
+  PLANS.map(p => [p.amountPaise, p.days])
+) as Record<number, number>;
+const VALID_PAISE = new Set<number>(PLANS.map(p => p.amountPaise));
 
 let firebaseConfig: any = {};
 try {
@@ -456,8 +464,8 @@ function getRazorpay(): Razorpay {
 app.post("/api/create-payment-link", verifyFirebaseToken, async (req: AuthenticatedRequest, res) => {
   try {
     const { amount, currency = "INR", description, customer, callback_url } = req.body;
-    if (!amount || amount < 100) {
-      return res.status(400).json({ error: "Amount must be at least 100 paise" });
+    if (!amount || !VALID_PAISE.has(Number(amount))) {
+      return res.status(400).json({ error: "Invalid plan amount" });
     }
     const rzp = getRazorpay();
     const paymentLink = await rzp.paymentLink.create({
@@ -481,8 +489,8 @@ app.post("/api/create-payment-link", verifyFirebaseToken, async (req: Authentica
 app.post("/api/create-order", verifyFirebaseToken, async (req: AuthenticatedRequest, res) => {
   try {
     const { amount, currency = "INR", receipt } = req.body;
-    if (!amount || amount < 100) {
-      return res.status(400).json({ error: "Amount must be at least 100 paise" });
+    if (!amount || !VALID_PAISE.has(Number(amount))) {
+      return res.status(400).json({ error: "Invalid plan amount" });
     }
     const rzp = getRazorpay();
     const order = await rzp.orders.create({ amount, currency, receipt });
@@ -563,9 +571,10 @@ app.post("/api/verify-payment", verifyFirebaseToken, async (req: AuthenticatedRe
 
     // Map authoritative amount (paise) → subscription days
     const authorizedAmountPaise = Number(payment.amount);
-    let days = 30; // fallback for any unrecognised amount
-    if (authorizedAmountPaise === 99900) days = 90;   // ₹999
-    else if (authorizedAmountPaise === 199900) days = 365; // ₹1999
+    const days = PLAN_DAYS[authorizedAmountPaise] ?? (
+      console.error(`[verify-payment] Unrecognised amount ${authorizedAmountPaise} paise — falling back to ${PLAN_DAYS_FALLBACK} days`),
+      PLAN_DAYS_FALLBACK
+    );
 
     const newExpiry = new Date();
     newExpiry.setDate(newExpiry.getDate() + days);
@@ -727,9 +736,10 @@ app.post("/api/razorpay-webhook", async (req, res) => {
         try {
           const userRecord = await getAuth().getUserByEmail(email);
           if (userRecord?.uid) {
-            let days = 30;
-            if (amountPaise === 99900) days = 90;
-            else if (amountPaise === 199900) days = 365;
+            const days = PLAN_DAYS[amountPaise] ?? (
+              console.error(`[webhook] Unrecognised amount ${amountPaise} paise for ${email} — falling back to ${PLAN_DAYS_FALLBACK} days`),
+              PLAN_DAYS_FALLBACK
+            );
 
             const newExpiry = new Date();
             newExpiry.setDate(newExpiry.getDate() + days);

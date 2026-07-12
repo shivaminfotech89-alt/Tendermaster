@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../auth/AuthProvider';
 import toast from 'react-hot-toast';
+import { PLANS } from '../lib/plans';
 
 export default function LandingPage() {
   const { user } = useAuth();
@@ -356,51 +357,59 @@ export default function LandingPage() {
 
           <div className="flex flex-col md:flex-row gap-6 justify-center items-stretch max-w-2xl mx-auto">
 
-            {/* Quarterly */}
-            <div className="flex-1 border border-slate-200 rounded-2xl p-7 flex flex-col">
-              <div className="text-sm font-bold text-slate-500">Quarterly</div>
-              <div className="mt-2 text-4xl font-extrabold text-slate-900">
-                ₹999 <span className="text-sm font-semibold text-slate-400">/ 3 months</span>
-              </div>
-              <div className="my-5 h-px bg-slate-100" />
-              <ul className="space-y-2.5 text-sm text-slate-700 flex-1 leading-relaxed">
-                <li>✓ Unlimited tender analyses</li>
-                <li>✓ Eligibility &amp; risk reports</li>
-                <li>✓ Deadline reminders</li>
-                <li>✓ Email support</li>
-              </ul>
-              <button
-                onClick={() => handleRazorpayClick(999)}
-                className="mt-6 w-full py-3 border border-slate-300 rounded-xl font-bold text-slate-700 text-sm hover:bg-slate-50 transition-colors flex items-center justify-center gap-2"
-              >
-                Choose Quarterly <ArrowRight className="w-4 h-4" />
-              </button>
-            </div>
+            {PLANS.map((plan, i) => {
+              const featured = i === 1;
+              const quarterlyAnnualisedCost = PLANS[0].amountRupees * 4;
+              const annualSaving = quarterlyAnnualisedCost - plan.amountRupees;
+              const features = i === 0
+                ? ["Unlimited tender analyses", "Eligibility & risk reports", "Deadline reminders", "Email support"]
+                : ["Everything in Quarterly", "Priority support", "Early access to new features", "Bulk tender import"];
 
-            {/* Annual — highlighted */}
-            <div className="flex-1 border-2 border-indigo-600 rounded-2xl p-7 flex flex-col relative shadow-xl shadow-indigo-600/10">
-              <div className="absolute -top-3.5 left-7 bg-indigo-600 text-white text-xs font-extrabold px-3 py-1 rounded-full">
-                BEST VALUE
-              </div>
-              <div className="text-sm font-bold text-indigo-700">Annual</div>
-              <div className="mt-2 text-4xl font-extrabold text-slate-900">
-                ₹1,999 <span className="text-sm font-semibold text-slate-400">/ year</span>
-              </div>
-              <div className="text-xs font-bold text-emerald-600 mt-1">Save ~₹1,997 vs. quarterly</div>
-              <div className="my-5 h-px bg-slate-100" />
-              <ul className="space-y-2.5 text-sm text-slate-700 flex-1 leading-relaxed">
-                <li>✓ Everything in Quarterly</li>
-                <li>✓ Priority support</li>
-                <li>✓ Early access to new features</li>
-                <li>✓ Bulk tender import</li>
-              </ul>
-              <button
-                onClick={() => handleRazorpayClick(1999)}
-                className="mt-6 w-full py-3 bg-indigo-600 text-white rounded-xl font-bold text-sm hover:bg-indigo-700 transition-colors flex items-center justify-center gap-2"
-              >
-                Choose Annual <ArrowRight className="w-4 h-4" />
-              </button>
-            </div>
+              return (
+                <div
+                  key={plan.amountPaise}
+                  className={`flex-1 rounded-2xl p-7 flex flex-col relative ${
+                    featured
+                      ? "border-2 border-indigo-600 shadow-xl shadow-indigo-600/10"
+                      : "border border-slate-200"
+                  }`}
+                >
+                  {featured && (
+                    <div className="absolute -top-3.5 left-7 bg-indigo-600 text-white text-xs font-extrabold px-3 py-1 rounded-full">
+                      BEST VALUE
+                    </div>
+                  )}
+                  <div className={`text-sm font-bold ${featured ? "text-indigo-700" : "text-slate-500"}`}>
+                    {plan.label}
+                  </div>
+                  <div className="mt-2 text-4xl font-extrabold text-slate-900">
+                    ₹{plan.amountRupees.toLocaleString('en-IN')}{' '}
+                    <span className={`text-sm font-semibold ${featured ? "text-slate-400" : "text-slate-400"}`}>
+                      / {plan.duration}
+                    </span>
+                  </div>
+                  {featured && (
+                    <div className="text-xs font-bold text-emerald-600 mt-1">
+                      Save ~₹{annualSaving.toLocaleString('en-IN')} vs. quarterly
+                    </div>
+                  )}
+                  <div className="my-5 h-px bg-slate-100" />
+                  <ul className="space-y-2.5 text-sm text-slate-700 flex-1 leading-relaxed">
+                    {features.map(f => <li key={f}>✓ {f}</li>)}
+                  </ul>
+                  <button
+                    onClick={() => handleRazorpayClick(plan.amountRupees)}
+                    className={`mt-6 w-full py-3 rounded-xl font-bold text-sm transition-colors flex items-center justify-center gap-2 ${
+                      featured
+                        ? "bg-indigo-600 text-white hover:bg-indigo-700"
+                        : "border border-slate-300 text-slate-700 hover:bg-slate-50"
+                    }`}
+                  >
+                    Choose {plan.label} <ArrowRight className="w-4 h-4" />
+                  </button>
+                </div>
+              );
+            })}
 
           </div>
         </div>

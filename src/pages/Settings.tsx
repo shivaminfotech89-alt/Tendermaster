@@ -6,6 +6,7 @@ import { db } from '../lib/firebase';
 import { doc, getDoc, updateDoc } from 'firebase/firestore';
 import { toast } from 'react-hot-toast';
 import { fetchWithAuth } from "../lib/api";
+import { PLANS } from "../lib/plans";
 
 export default function Settings() {
   const { user, role, subscriptionExpiry } = useAuth();
@@ -283,60 +284,62 @@ export default function Settings() {
                   <div className="mt-8 space-y-8">
                      
                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                       {/* 3 Months Plan */}
-                       <div className="bg-gradient-to-br from-slate-900 to-slate-800 rounded-2xl p-6 text-white shadow-xl relative overflow-hidden flex flex-col">
-                          <div className="absolute top-0 right-0 p-4 opacity-5">
-                             <Shield className="w-32 h-32" />
-                          </div>
-                          <div className="relative z-10 flex-1">
-                             <h3 className="text-xl font-bold mb-1 text-slate-200">Quarterly Plan</h3>
-                             <div className="text-3xl font-extrabold mb-4 flex items-baseline gap-1">
-                                ₹999 <span className="text-sm font-medium text-slate-400">/ 3 months</span>
+                       {PLANS.map((plan, i) => {
+                         const featured = i === 1;
+                         return (
+                           <div
+                             key={plan.amountPaise}
+                             className={`rounded-2xl p-6 text-white shadow-xl relative overflow-hidden flex flex-col ${
+                               featured
+                                 ? "bg-gradient-to-br from-indigo-900 to-purple-900 border border-indigo-500/30"
+                                 : "bg-gradient-to-br from-slate-900 to-slate-800"
+                             }`}
+                           >
+                             <div className={`absolute top-0 right-0 p-4 ${featured ? "opacity-10" : "opacity-5"}`}>
+                               <Shield className="w-32 h-32" />
                              </div>
-                             
-                             <ul className="space-y-2 mb-6 text-sm text-slate-300">
-                                {premiumFeatures.map((feat, i) => (
-                                   <li key={i} className="flex items-start gap-2">
-                                     <div className="mt-1 w-1.5 h-1.5 bg-blue-400 rounded-full shrink-0"></div>
+                             <div className="relative z-10 flex-1">
+                               {featured && (
+                                 <span className="bg-indigo-500/30 text-indigo-100 text-xs font-bold px-2 py-1 rounded inline-block mb-3">
+                                   BEST VALUE
+                                 </span>
+                               )}
+                               <h3 className={`text-xl font-bold mb-1 ${featured ? "text-indigo-100" : "text-slate-200"}`}>
+                                 {plan.label} Plan
+                               </h3>
+                               <div className="text-3xl font-extrabold mb-4 flex items-baseline gap-1">
+                                 ₹{plan.amountRupees.toLocaleString('en-IN')}{' '}
+                                 <span className={`text-sm font-medium ${featured ? "text-indigo-300" : "text-slate-400"}`}>
+                                   / {plan.duration}
+                                 </span>
+                               </div>
+                               <ul className={`space-y-2 mb-6 text-sm ${featured ? "text-indigo-100" : "text-slate-300"}`}>
+                                 {premiumFeatures.map((feat, fi) => (
+                                   <li key={fi} className="flex items-start gap-2">
+                                     <div className={`mt-1 w-1.5 h-1.5 rounded-full shrink-0 ${featured ? "bg-emerald-400" : "bg-blue-400"}`} />
                                      {feat}
                                    </li>
-                                ))}
-                             </ul>
-                          </div>
-                          <div className="relative z-10">
-                             <button onClick={() => handleCheckout(999)} disabled={checkingOut === 999} className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white font-bold py-3 px-4 rounded-xl transition-colors flex items-center justify-center gap-2">
-                               {checkingOut === 999 ? <Loader2 className="w-5 h-5 animate-spin" /> : "Subscribe Now"}
-                             </button>
-                          </div>
-                       </div>
-
-                       {/* 1 Year Plan */}
-                       <div className="bg-gradient-to-br from-indigo-900 to-purple-900 rounded-2xl p-6 text-white shadow-xl relative overflow-hidden flex flex-col border border-indigo-500/30">
-                          <div className="absolute top-0 right-0 p-4 opacity-10">
-                             <Shield className="w-32 h-32" />
-                          </div>
-                          <div className="relative z-10 flex-1">
-                             <span className="bg-indigo-500/30 text-indigo-100 text-xs font-bold px-2 py-1 rounded inline-block mb-3">BEST VALUE</span>
-                             <h3 className="text-xl font-bold mb-1 text-indigo-100">Yearly Plan</h3>
-                             <div className="text-3xl font-extrabold mb-4 flex items-baseline gap-1">
-                                ₹1999 <span className="text-sm font-medium text-indigo-300">/ year</span>
+                                 ))}
+                               </ul>
                              </div>
-                             
-                             <ul className="space-y-2 mb-6 text-sm text-indigo-100">
-                                {premiumFeatures.map((feat, i) => (
-                                   <li key={i} className="flex items-start gap-2">
-                                     <div className="mt-1 w-1.5 h-1.5 bg-emerald-400 rounded-full shrink-0"></div>
-                                     {feat}
-                                   </li>
-                                ))}
-                             </ul>
-                          </div>
-                          <div className="relative z-10">
-                             <button onClick={() => handleCheckout(1999)} disabled={checkingOut === 1999} className="w-full bg-indigo-500 hover:bg-indigo-400 disabled:bg-indigo-300 text-white font-bold py-3 px-4 rounded-xl transition-colors flex items-center justify-center gap-2 shadow-lg shadow-indigo-900/50">
-                               {checkingOut === 1999 ? <Loader2 className="w-5 h-5 animate-spin" /> : "Subscribe Now"}
-                             </button>
-                          </div>
-                       </div>
+                             <div className="relative z-10">
+                               <button
+                                 onClick={() => handleCheckout(plan.amountRupees)}
+                                 disabled={checkingOut === plan.amountRupees}
+                                 className={`w-full font-bold py-3 px-4 rounded-xl transition-colors flex items-center justify-center gap-2 ${
+                                   featured
+                                     ? "bg-indigo-500 hover:bg-indigo-400 disabled:bg-indigo-300 shadow-lg shadow-indigo-900/50"
+                                     : "bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400"
+                                 } text-white`}
+                               >
+                                 {checkingOut === plan.amountRupees
+                                   ? <Loader2 className="w-5 h-5 animate-spin" />
+                                   : "Subscribe Now"}
+                               </button>
+                             </div>
+                           </div>
+                         );
+                       })}
                      </div>
                   </div>
                 )}

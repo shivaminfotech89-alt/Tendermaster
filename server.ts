@@ -330,13 +330,7 @@ function buildDocHtml(fragment: string, docType: string): string {
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>${safeTitle}</title>
 <style>
-  @page {
-    size: A4 portrait;
-    margin-top: 44mm;
-    margin-right: 20mm;
-    margin-bottom: 30mm;
-    margin-left: 20mm;
-  }
+  @page { size: A4 portrait; }
   * { box-sizing: border-box; }
   body {
     font-family: 'Times New Roman', Times, serif;
@@ -1546,6 +1540,7 @@ app.post(
 Your task is to generate high-quality, professional draft documents based on the provided tender analysis and the user's business profile.
 Use the business profile data (Company Name, Address, GST, PAN, etc.) and Tender Details (Tender No., Dates, Authority Name, etc.) to automatically fill in ALL placeholders.
 CRITICAL RULE: DO NOT leave placeholders like "[Tender Number - To be filled by bidder]" or "[Date]" or "[Bidder Name]" in the output. You MUST aggressively find and replace all such "fill in the blank" brackets with the actual data from the provided Tender Details and Business Profile. If an exact piece of information is missing, use a logical assumed default or current date rather than leaving a bracketed placeholder.
+STRICT PROHIBITION — FABRICATED LEGAL DOCUMENTS: NEVER generate, fabricate, or invent stamp paper certificates, e-stamp blocks, e-stamp certificate numbers (e-SBTR, CERT-IN, or any format), serial numbers, UID/UUID codes, or any fictional statutory document identifiers. A document MAY include a note such as "To be executed on non-judicial stamp paper of appropriate value as per applicable Stamp Act" or provide a blank placeholder line for stamp details — but MUST NEVER contain a pre-filled certificate block with invented certificate numbers, amounts, dates, or issuing authority stamps. Generating fabricated legal identifiers is strictly prohibited.
 If the document requested is an "Auto-Fill: [Annexure Name]", your job is to auto-generate the filled-up annexure exactly as it should be submitted. Since real annexures are often tabular forms in PDFs, YOU MUST reconstruct the exact Annexure/Schedule/Form tabular layout required by the agency using Markdown tables and lists. Place the bidder's information directly into the respective form fields/cells. Ensure it accurately represents the structured form that can be submitted to the agency. Do not leave blanks if information can be reasonably derived or if standard boilerplate is applicable.
 
 --- FORMAT DETECTION — MANDATORY FIRST STEP ---
@@ -1683,6 +1678,7 @@ app.post(
       const {
         html,
         filename,
+        isMarkdown,
         useUserLetterhead,
         letterheadImageBase64,
         letterheadHeaderHtml,
@@ -1690,6 +1686,7 @@ app.post(
       } = req.body as {
         html?: string;
         filename?: string;
+        isMarkdown?: boolean;
         useUserLetterhead?: boolean;
         letterheadImageBase64?: string;
         letterheadHeaderHtml?: string;
@@ -1699,11 +1696,20 @@ app.post(
         return res.status(400).json({ error: "html is required" });
       }
 
+      // Convert Markdown → HTML shell when the document is Markdown-formatted (Mode A)
+      let renderHtml: string;
+      if (isMarkdown) {
+        const { marked } = await import("marked");
+        const fragment = String(marked.parse(html, { gfm: true }));
+        renderHtml = buildDocHtml(fragment, filename || "document");
+      } else {
+        renderHtml = html;
+      }
+
       // Path B: HTML header/footer — inject before Puppeteer renders (no image available)
       const hasImage = useUserLetterhead && letterheadImageBase64;
       const hasHtml =
         useUserLetterhead && !hasImage && (letterheadHeaderHtml || letterheadFooterHtml);
-      let renderHtml = html;
       if (hasHtml) {
         if (letterheadHeaderHtml) {
           renderHtml = renderHtml.replace(
@@ -1737,8 +1743,8 @@ app.post(
       const pdfBuffer = await page.pdf({
         format: "A4",
         printBackground: true,
-        // Margins intentionally 0 — @page CSS in the HTML shell controls all margins
-        margin: { top: "0", right: "0", bottom: "0", left: "0" },
+        // Puppeteer margin is more reliable than CSS @page margin for Chrome headless
+        margin: { top: "44mm", right: "20mm", bottom: "30mm", left: "20mm" },
       });
       await browser.close();
 
@@ -1790,6 +1796,69 @@ app.post(
     } catch (err: any) {
       console.error("Generate PDF Error:", err);
       res.status(500).json({ error: err.message || "PDF generation failed" });
+    }
+  }
+);
+
+// ---------------------------------------------------------------------------
+// Word (.docx) generation endpoint
+// ---------------------------------------------------------------------------
+app.post(
+  "/api/generate-docx",
+  verifyFirebaseToken,
+  requireActiveEntitlement,
+  async (req: AuthenticatedRequest, res) => {
+    try {
+      const { html, filename, isMarkdown } = req.body as {
+        html?: string;
+        filename?: string;
+        isMarkdown?: boolean;
+      };
+      if (!html || typeof html !== "string") {
+        return res.status(400).json({ error: "html is required" });
+      }
+
+      let docHtml: string;
+      if (isMarkdown) {
+        const { marked } = await import("marked");
+        const fragment = String(marked.parse(html, { gfm: true }));
+        // Minimal HTML wrapper — no PDF-specific CSS, cleaner for Word conversion
+        docHtml = `<!DOCTYPE html><html><head><meta charset="UTF-8"><style>
+          body{font-family:Calibri,Arial,sans-serif;font-size:11pt;line-height:1.5;color:#111;}
+          h1{font-size:16pt;font-weight:bold;text-align:center;}
+          h2{font-size:13pt;font-weight:bold;}
+          h3{font-size:12pt;font-weight:bold;}
+          table{width:100%;border-collapse:collapse;margin:8pt 0;}
+          th,td{border:1px solid #374151;padding:4pt 8pt;text-align:left;vertical-align:top;}
+          th{background:#f3f4f6;font-weight:bold;}
+        </style></head><body>${fragment}</body></html>`;
+      } else {
+        docHtml = html;
+      }
+
+      const HTMLtoDOCX = (await import("html-to-docx")).default;
+      const buffer = await HTMLtoDOCX(docHtml, undefined, {
+        table: { row: { cantSplit: true } },
+        footer: false,
+        pageNumber: false,
+        margin: { top: 1134, right: 1134, bottom: 1134, left: 1134 },
+      });
+
+      const safeName =
+        (filename || "document")
+          .replace(/[^a-zA-Z0-9_\- ]/g, "")
+          .replace(/\s+/g, "_")
+          .slice(0, 80) || "document";
+
+      res.setHeader(
+        "Content-Type",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+      );
+      res.setHeader("Content-Disposition", `attachment; filename="${safeName}.docx"`);
+      res.send(Buffer.from(buffer as ArrayBuffer));
+    } catch (err: any) {
+      console.error("Generate DOCX Error:", err);
+      res.status(500).json({ error: err.message || "Word generation failed" });
     }
   }
 );

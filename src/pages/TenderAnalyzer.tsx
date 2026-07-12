@@ -136,6 +136,7 @@ export default function TenderAnalyzer() {
   const [formUploading, setFormUploading] = useState(false);
   const [generatedDocIsHtml, setGeneratedDocIsHtml] = useState(false);
   const [downloadingPdf, setDownloadingPdf] = useState(false);
+  const [downloadingDocx, setDownloadingDocx] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const chatBottomRef = useRef<HTMLDivElement>(null);
@@ -472,7 +473,7 @@ export default function TenderAnalyzer() {
   };
 
   const downloadPdf = async () => {
-    if (!generatedDoc || !generatedDocIsHtml) return;
+    if (!generatedDoc) return;
     setDownloadingPdf(true);
     try {
       const res = await fetchWithAuth("/api/generate-pdf", {
@@ -481,6 +482,7 @@ export default function TenderAnalyzer() {
         body: JSON.stringify({
           html: generatedDoc,
           filename: docType,
+          isMarkdown: !generatedDocIsHtml,
           useUserLetterhead: useLetterhead,
           letterheadImageBase64: useLetterhead ? (businessProfile?.letterheadBackgroundImage ?? "") : "",
           letterheadHeaderHtml: useLetterhead ? (businessProfile?.letterheadHeader ?? "") : "",
@@ -502,6 +504,37 @@ export default function TenderAnalyzer() {
       toast.error("PDF generation failed: " + e.message);
     } finally {
       setDownloadingPdf(false);
+    }
+  };
+
+  const downloadDocx = async () => {
+    if (!generatedDoc) return;
+    setDownloadingDocx(true);
+    try {
+      const res = await fetchWithAuth("/api/generate-docx", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          html: generatedDoc,
+          filename: docType,
+          isMarkdown: !generatedDocIsHtml,
+        }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: "Word generation failed" }));
+        throw new Error(err.error || "Word generation failed");
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = docType.replace(/\s+/g, "_") + ".docx";
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e: any) {
+      toast.error("Word generation failed: " + e.message);
+    } finally {
+      setDownloadingDocx(false);
     }
   };
 
@@ -1384,13 +1417,17 @@ export default function TenderAnalyzer() {
                                <FileText className="w-3 h-3" /> Print
                              </button>
                            )}
-                           {generatedDocIsHtml ? (
-                             <button onClick={downloadPdf} disabled={downloadingPdf}
-                               className="text-xs flex items-center gap-1 text-indigo-600 hover:text-indigo-800 font-medium transition-colors disabled:opacity-50">
-                               {downloadingPdf ? <Loader2 className="w-3 h-3 animate-spin" /> : <Download className="w-3 h-3" />}
-                               {downloadingPdf ? "Generating…" : "Download PDF"}
-                             </button>
-                           ) : (
+                           <button onClick={downloadPdf} disabled={downloadingPdf}
+                             className="text-xs flex items-center gap-1 text-indigo-600 hover:text-indigo-800 font-medium transition-colors disabled:opacity-50">
+                             {downloadingPdf ? <Loader2 className="w-3 h-3 animate-spin" /> : <Download className="w-3 h-3" />}
+                             {downloadingPdf ? "Generating…" : "PDF"}
+                           </button>
+                           <button onClick={downloadDocx} disabled={downloadingDocx}
+                             className="text-xs flex items-center gap-1 text-indigo-600 hover:text-indigo-800 font-medium transition-colors disabled:opacity-50">
+                             {downloadingDocx ? <Loader2 className="w-3 h-3 animate-spin" /> : <FileText className="w-3 h-3" />}
+                             {downloadingDocx ? "Generating…" : "Word"}
+                           </button>
+                           {!generatedDocIsHtml && (
                              <button onClick={() => {
                                const blob = new Blob([generatedDoc], {type: "text/plain"});
                                const url = URL.createObjectURL(blob);
@@ -1398,8 +1435,8 @@ export default function TenderAnalyzer() {
                                a.href = url;
                                a.download = docType.replace(/\s+/g, "_") + ".txt";
                                a.click();
-                             }} className="text-xs flex items-center gap-1 text-indigo-600 hover:text-indigo-800 font-medium transition-colors">
-                               <Download className="w-3 h-3" /> Download
+                             }} className="text-xs flex items-center gap-1 text-slate-500 hover:text-slate-700 font-medium transition-colors">
+                               <Download className="w-3 h-3" /> .txt
                              </button>
                            )}
                            {!generatedDocIsHtml && (

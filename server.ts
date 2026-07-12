@@ -1057,6 +1057,7 @@ app.post("/api/analyze-tender", verifyFirebaseToken, async (req: AuthenticatedRe
       const filesSkipped: { index: number; reason: string }[] = [];
       let filesAnalyzed = 0;
 
+      const notes: string[] = [];
       docContents = [
         `--- USER PROFILE ---\n${userProfile}${extraContextStr}\n\n--- TENDER DOCUMENTS (Fetched from Storage) ---\n`,
       ];
@@ -1078,9 +1079,12 @@ app.post("/api/analyze-tender", verifyFirebaseToken, async (req: AuthenticatedRe
           if (contentType.includes("text/plain")) {
             const text = Buffer.from(buffer).toString("utf-8");
             docContents.push(`\n--- DOCUMENT CONTENT ---\n${text}\n`);
+            notes.push(`file ${i + 1}: text-layer path (${text.length} chars)`);
           } else {
             const base64 = Buffer.from(buffer).toString("base64");
             docContents.push({ inlineData: { mimeType: contentType, data: base64 } });
+            notes.push(`file ${i + 1}: image/pdf path (${contentType})`);
+            console.log(`[analyze-tender] file ${i + 1} using image/PDF path — content-type: ${contentType}, size: ${buffer.byteLength} bytes`);
           }
           filesAnalyzed++;
         } catch (err) {
@@ -1089,7 +1093,7 @@ app.post("/api/analyze-tender", verifyFirebaseToken, async (req: AuthenticatedRe
         }
       }
 
-      remarks = { totalFilesProvided, filesAnalyzed, filesSkipped, notes: [] };
+      remarks = { totalFilesProvided, filesAnalyzed, filesSkipped, notes };
     } else if (tenderType === "url") {
       // Phase 3: safeFetch handles SSRF check + fetch atomically
       try {

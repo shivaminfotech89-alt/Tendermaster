@@ -11,6 +11,7 @@ import { useTranslation } from "react-i18next";
 import { useAuth } from "../auth/AuthProvider";
 import { useAnalyzerStore } from "../context/AnalyzerContext";
 import { fetchWithAuth } from "../lib/api";
+import { extractPdfText, textToBase64, arrayBufferToBase64 } from "../lib/pdfToImage";
 
 function formatFileSize(bytes: number): string {
   if (bytes >= 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
@@ -434,9 +435,24 @@ export default function ProjectDetails() {
 
              for (const [filename, zipEntry] of Object.entries(contents.files)) {
                 if (!zipEntry.dir && filename.toLowerCase().endsWith('.pdf')) {
-                   const base64Data = await zipEntry.async("base64");
-                   pdfBase64Array.push(`data:application/pdf;base64,${base64Data}`);
-                   zipEntryNames.push(filename.split('/').pop() || filename);
+                   const shortName = filename.split('/').pop() || filename;
+                   const arrayBuffer = await zipEntry.async("arraybuffer");
+                   let dataUri: string;
+                   try {
+                     const extraction = await extractPdfText(arrayBuffer);
+                     if (extraction.isDigital) {
+                       console.log(`[PDF extraction] ${shortName} (ZIP) → TEXT (${extraction.charsExtracted} chars / ${extraction.pageCount} pages)`);
+                       dataUri = `data:text/plain;base64,${textToBase64(extraction.text)}`;
+                     } else {
+                       console.log(`[PDF extraction] ${shortName} (ZIP) → IMAGE fallback (${extraction.charsExtracted} chars / ${extraction.pageCount} pages)`);
+                       dataUri = `data:application/pdf;base64,${arrayBufferToBase64(arrayBuffer)}`;
+                     }
+                   } catch {
+                     console.warn(`[PDF extraction] ${shortName} (ZIP) → IMAGE fallback (extraction error)`);
+                     dataUri = `data:application/pdf;base64,${arrayBufferToBase64(arrayBuffer)}`;
+                   }
+                   pdfBase64Array.push(dataUri);
+                   zipEntryNames.push(shortName);
                 }
              }
              if (pdfBase64Array.length === 0) {
@@ -448,11 +464,20 @@ export default function ProjectDetails() {
              contentToSend = pdfBase64Array;
              uploadedEntryNames = zipEntryNames;
           } else {
-             contentToSend = await new Promise<string>((resolve) => {
-                 const reader = new FileReader();
-                 reader.onload = () => resolve(reader.result as string);
-                 reader.readAsDataURL(file);
-             });
+             const arrayBuffer = await file.arrayBuffer();
+             try {
+               const extraction = await extractPdfText(arrayBuffer);
+               if (extraction.isDigital) {
+                 console.log(`[PDF extraction] ${file.name} → TEXT (${extraction.charsExtracted} chars / ${extraction.pageCount} pages)`);
+                 contentToSend = `data:text/plain;base64,${textToBase64(extraction.text)}`;
+               } else {
+                 console.log(`[PDF extraction] ${file.name} → IMAGE fallback (${extraction.charsExtracted} chars / ${extraction.pageCount} pages)`);
+                 contentToSend = `data:application/pdf;base64,${arrayBufferToBase64(arrayBuffer)}`;
+               }
+             } catch {
+               console.warn(`[PDF extraction] ${file.name} → IMAGE fallback (extraction error)`);
+               contentToSend = `data:application/pdf;base64,${arrayBufferToBase64(arrayBuffer)}`;
+             }
           }
 
           // Upload files to Firebase Storage so they appear in Source Documents

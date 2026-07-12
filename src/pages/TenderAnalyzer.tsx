@@ -11,7 +11,7 @@ import * as XLSX from "xlsx";
 import { toast } from "react-hot-toast";
 import { useTranslation } from "react-i18next";
 import { fetchWithAuth } from "../lib/api";
-import { countPdfPages } from "../lib/pdfToImage";
+import { countPdfPages, extractPdfText, textToBase64, arrayBufferToBase64 } from "../lib/pdfToImage";
 
 const CollapsibleSection = ({ title, defaultOpen = true, children }: { title: string, defaultOpen?: boolean, children: React.ReactNode }) => {
   const [isOpen, setIsOpen] = useState(defaultOpen);
@@ -175,12 +175,23 @@ export default function TenderAnalyzer() {
     setPdfFileSize(files.reduce((acc, f) => acc + f.size, 0));
 
     for (const file of files) {
-       const base64 = await new Promise<string>((resolve) => {
-         const reader = new FileReader();
-         reader.onload = () => resolve(reader.result as string);
-         reader.readAsDataURL(file);
-       });
-       base64Files.push(base64);
+      const arrayBuffer = await file.arrayBuffer();
+      let dataUri: string;
+      try {
+        const extraction = await extractPdfText(arrayBuffer);
+        if (extraction.isDigital) {
+          console.log(`[PDF extraction] ${file.name} → TEXT (${extraction.charsExtracted} non-ws chars across ${extraction.pagesChecked} sampled pages of ${extraction.pageCount})`);
+          dataUri = `data:text/plain;base64,${textToBase64(extraction.text)}`;
+        } else {
+          console.log(`[PDF extraction] ${file.name} → IMAGE fallback (${extraction.charsExtracted} non-ws chars across ${extraction.pagesChecked} sampled pages of ${extraction.pageCount})`);
+          dataUri = `data:application/pdf;base64,${arrayBufferToBase64(arrayBuffer)}`;
+        }
+      } catch {
+        // pdfjs failed — fall back to sending raw PDF bytes
+        console.warn(`[PDF extraction] ${file.name} → IMAGE fallback (extraction error)`);
+        dataUri = `data:application/pdf;base64,${arrayBufferToBase64(arrayBuffer)}`;
+      }
+      base64Files.push(dataUri);
     }
     setTenderPdfBase64(base64Files as any);
   };
@@ -207,9 +218,24 @@ export default function TenderAnalyzer() {
 
         const lowerFilename = filename.toLowerCase();
         if (lowerFilename.endsWith('.pdf')) {
-          const base64Data = await zipEntry.async("base64");
-          fileDataArray.push(`data:application/pdf;base64,${base64Data}`);
-          fileNameArray.push(filename.split('/').pop() || filename);
+          const shortName = filename.split('/').pop() || filename;
+          const arrayBuffer = await zipEntry.async("arraybuffer");
+          let dataUri: string;
+          try {
+            const extraction = await extractPdfText(arrayBuffer);
+            if (extraction.isDigital) {
+              console.log(`[PDF extraction] ${shortName} (ZIP) → TEXT (${extraction.charsExtracted} chars / ${extraction.pageCount} pages)`);
+              dataUri = `data:text/plain;base64,${textToBase64(extraction.text)}`;
+            } else {
+              console.log(`[PDF extraction] ${shortName} (ZIP) → IMAGE fallback (${extraction.charsExtracted} chars / ${extraction.pageCount} pages)`);
+              dataUri = `data:application/pdf;base64,${arrayBufferToBase64(arrayBuffer)}`;
+            }
+          } catch {
+            console.warn(`[PDF extraction] ${shortName} (ZIP) → IMAGE fallback (extraction error)`);
+            dataUri = `data:application/pdf;base64,${arrayBufferToBase64(arrayBuffer)}`;
+          }
+          fileDataArray.push(dataUri);
+          fileNameArray.push(shortName);
         } else if (lowerFilename.endsWith('.xlsx') || lowerFilename.endsWith('.xls') || lowerFilename.endsWith('.csv')) {
           try {
             const arrayBuffer = await zipEntry.async("arraybuffer");

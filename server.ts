@@ -1679,9 +1679,9 @@ You may ONLY use values actually present in the Business Profile, Tender Details
 - Names, addresses, or contact details not supplied
 - Notary details, commission numbers, or attestation particulars
 If ANY value is not in the provided data, output __________ in its place. A blank the user fills by hand is CORRECT. An invented plausible-looking value is a SERIOUS ERROR that could invalidate the user's bid or expose them to legal liability.${
-        language && language !== "en"
-          ? `\nCRITICAL LANGUAGE REQUIREMENT: You MUST respond STRICTLY in ${language === "hi" ? "Hindi" : language === "gu" ? "Gujarati" : language}.`
-          : `\nCRITICAL LANGUAGE REQUIREMENT: You MUST respond STRICTLY in English.`
+        language && !language.startsWith("en")
+          ? `\nCRITICAL LANGUAGE REQUIREMENT: You MUST respond entirely in ${language.startsWith("hi") ? "Hindi" : language.startsWith("gu") ? "Gujarati" : language}. Every part of your reply — explanations, headings, lists, and any drafted letters — must be written in that language. Do not reply in English.`
+          : ""
       }
 
 --- TENDER CONTEXT ---

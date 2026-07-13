@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import { useAuth } from "../auth/AuthProvider";
 import {
   FileSearch, TrendingUp, CheckCircle, FileText,
-  Calendar, Target, ArrowRight,
+  Calendar, Target, ArrowRight, Zap, AlertTriangle,
 } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
 import { collection, query, where, onSnapshot } from "firebase/firestore";
@@ -76,7 +76,7 @@ function EmptyChart({ message }: { message: string }) {
 // ── Main component ───────────────────────────────────────────
 
 export default function Dashboard() {
-  const { user } = useAuth();
+  const { user, role, credits } = useAuth();
   const navigate = useNavigate();
 
   const [savedTenders, setSavedTenders] = useState<any[]>([]);
@@ -185,6 +185,44 @@ export default function Dashboard() {
           New Analysis
         </Link>
       </div>
+
+      {/* ── Credits widget ──────────────────────────────────── */}
+      {role !== "admin" && role !== "superadmin" && (() => {
+        const creditsLeft = credits.total - credits.used;
+        const pct = credits.total > 0 ? Math.max(0, Math.min(100, (creditsLeft / credits.total) * 100)) : 0;
+        const warn = credits.total > 0 && pct <= 20;
+        const expiryStr = credits.expiry
+          ? credits.expiry.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })
+          : null;
+        return (
+          <div className={`mb-6 rounded-xl border p-4 flex flex-col md:flex-row md:items-center gap-4 ${
+            !credits.hasCredits ? "bg-rose-50 border-rose-200" : warn ? "bg-amber-50 border-amber-200" : "bg-indigo-50 border-indigo-100"
+          }`}>
+            <div className={`w-10 h-10 rounded-lg flex items-center justify-center shrink-0 ${
+              !credits.hasCredits ? "bg-rose-100 text-rose-600" : warn ? "bg-amber-100 text-amber-600" : "bg-indigo-100 text-indigo-600"
+            }`}>
+              {(!credits.hasCredits || warn) ? <AlertTriangle className="w-5 h-5" /> : <Zap className="w-5 h-5" />}
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className={`text-sm font-bold ${!credits.hasCredits ? "text-rose-700" : warn ? "text-amber-700" : "text-indigo-700"}`}>
+                {!credits.hasCredits
+                  ? "Credits exhausted — buy more to analyse new tenders"
+                  : `${creditsLeft} of ${credits.total} credit${credits.total !== 1 ? "s" : ""} remaining${expiryStr ? ` · valid until ${expiryStr}` : ""}`}
+              </p>
+              {credits.total > 0 && (
+                <div className="mt-1.5 bg-white/70 rounded-full h-1.5 overflow-hidden w-full max-w-xs">
+                  <div className={`h-1.5 rounded-full ${!credits.hasCredits ? "bg-rose-400" : warn ? "bg-amber-400" : "bg-indigo-500"}`} style={{ width: `${pct}%` }} />
+                </div>
+              )}
+            </div>
+            {!credits.hasCredits && (
+              <Link to="/dashboard/settings?tab=subscription" className="shrink-0 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold px-4 py-2 rounded-lg whitespace-nowrap">
+                Buy Credits
+              </Link>
+            )}
+          </div>
+        );
+      })()}
 
       {/* ── Stat cards ─────────────────────────────────────── */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">

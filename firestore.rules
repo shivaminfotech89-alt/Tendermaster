@@ -104,5 +104,9 @@ service cloud.firestore {
     match /analysis_rate_limits/{uid} {
       allow read, write: if false;
     }
+
+    match /processed_payments/{paymentId} {
+      allow read, write: if false;
+    }
   }
 }

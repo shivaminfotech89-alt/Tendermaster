@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import { Link } from "react-router-dom";
 import { useAuth } from "../auth/AuthProvider";
 import { doc, getDoc, setDoc, collection, query, getDocs } from "firebase/firestore";
 import { db } from "../lib/firebase";
@@ -153,7 +154,7 @@ const defaultProfile = {
 type ProfileState = typeof defaultProfile;
 
 export default function BusinessProfile() {
-  const { user, role, subscriptionExpiry } = useAuth();
+  const { user, role, credits } = useAuth();
   const { t } = useTranslation();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -450,14 +451,8 @@ export default function BusinessProfile() {
       </div>
     );
 
-  const daysRemaining = subscriptionExpiry
-    ? Math.max(
-        0,
-        Math.ceil(
-          (subscriptionExpiry.getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24)
-        )
-      )
-    : 0;
+  const isAdminRole = role === "admin" || role === "superadmin";
+  const creditsLeft = credits.total - credits.used;
 
   return (
     <div className="p-6 md:p-8 max-w-4xl mx-auto pb-24">
@@ -468,12 +463,14 @@ export default function BusinessProfile() {
         </p>
       </div>
 
-      {/* Subscription Status */}
+      {/* Credits Status */}
       <div
         className={`mb-8 p-6 rounded-xl border ${
-          role === "premium" || role === "superadmin"
+          isAdminRole
+            ? "bg-slate-50 border-slate-200"
+            : credits.hasCredits
             ? "bg-amber-50 border-amber-200"
-            : "bg-slate-50 border-slate-200"
+            : "bg-rose-50 border-rose-200"
         } shadow-sm`}
       >
         <div className="flex flex-col md:flex-row gap-6 items-start md:items-center justify-between">
@@ -481,36 +478,34 @@ export default function BusinessProfile() {
             <div className="flex items-center gap-2 mb-2">
               <Crown
                 className={`w-6 h-6 ${
-                  role === "premium" || role === "superadmin"
-                    ? "text-amber-500"
-                    : "text-slate-400"
+                  isAdminRole ? "text-slate-500" : credits.hasCredits ? "text-amber-500" : "text-rose-400"
                 }`}
               />
               <h2 className="text-xl font-bold text-slate-900">
-                {role === "superadmin"
+                {isAdminRole
                   ? t("superadmin_access")
-                  : role === "premium"
-                  ? t("premium_plan")
-                  : t("free_plan")}
+                  : credits.hasCredits
+                  ? `${creditsLeft} Credit${creditsLeft !== 1 ? "s" : ""} Remaining`
+                  : "No Credits Remaining"}
               </h2>
             </div>
-            {role === "premium" && (
+            {!isAdminRole && credits.hasCredits && (
               <p className="text-amber-800 text-sm font-medium">
-                {t("days_remaining")}: <span className="font-bold">{daysRemaining}</span>
+                {credits.used} of {credits.total} used
+                {credits.expiry && ` — valid until ${credits.expiry.toLocaleDateString()}`}
               </p>
             )}
-            {role === "free" && (
+            {!isAdminRole && !credits.hasCredits && (
               <div className="mt-2">
-                <p className="text-slate-600 text-sm mb-3">
-                  {t("upgrade_to_premium")} to unlock full AI analysis, unlimited chats, and
-                  automatic document generation.
+                <p className="text-rose-700 text-sm mb-3">
+                  You have no credits remaining. Purchase credits to run new analyses and generate documents.
                 </p>
-                <div className="bg-white p-4 rounded-lg border border-slate-200 shadow-sm text-sm">
-                  <h4 className="font-bold text-slate-800 mb-2">How to upgrade:</h4>
-                  <p className="text-slate-600">
-                    Please visit the Settings page to select a plan and upgrade your account.
-                  </p>
-                </div>
+                <Link
+                  to="/dashboard/settings?tab=subscription"
+                  className="inline-flex items-center gap-2 bg-rose-600 hover:bg-rose-700 text-white px-4 py-2 rounded-lg text-sm font-semibold transition-colors"
+                >
+                  Buy Credits
+                </Link>
               </div>
             )}
           </div>

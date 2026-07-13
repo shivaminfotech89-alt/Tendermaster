@@ -351,19 +351,30 @@ export default function LandingPage() {
       <section id="pricing" className="bg-white border-t border-slate-100 py-16 px-6 lg:px-14">
         <div className="max-w-5xl mx-auto">
           <h2 className="text-2xl font-extrabold text-slate-900 text-center mb-2" style={{ letterSpacing: '-.02em' }}>
-            Simple, transparent pricing
+            Pay per tender, not per month
           </h2>
-          <p className="text-sm text-slate-500 text-center mb-10">Cancel anytime. No hidden fees.</p>
+          <p className="text-sm text-slate-500 text-center mb-2">Credits never expire — valid 24 months. Your data stays accessible forever.</p>
+          <p className="text-sm text-slate-400 text-center mb-10">1 credit = 1 tender analysis. Re-analyses on saved projects are free.</p>
+
+          {/* Trial callout */}
+          <div className="max-w-2xl mx-auto mb-8 rounded-2xl border border-indigo-100 bg-indigo-50 p-5 flex flex-col md:flex-row items-center gap-4">
+            <div className="flex-1">
+              <div className="text-sm font-bold text-indigo-700">Free Trial</div>
+              <div className="text-2xl font-extrabold text-slate-900 mt-0.5">1 credit — free</div>
+              <p className="text-sm text-slate-600 mt-1">Analyse your first tender at no cost. No card required.</p>
+            </div>
+            <Link to="/login" className="shrink-0 bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2.5 px-6 rounded-xl text-sm flex items-center gap-2">
+              Start Free <ArrowRight className="w-4 h-4" />
+            </Link>
+          </div>
 
           <div className="flex flex-col md:flex-row gap-6 justify-center items-stretch max-w-2xl mx-auto">
-
-            {PLANS.map((plan, i) => {
+            {PLANS.filter(p => !p.adminOnly).map((plan, i) => {
               const featured = i === 1;
-              const quarterlyAnnualisedCost = PLANS[0].amountRupees * 4;
-              const annualSaving = quarterlyAnnualisedCost - plan.amountRupees;
+              const perCredit = Math.round(plan.amountRupees / plan.credits);
               const features = i === 0
-                ? ["Unlimited tender analyses", "Eligibility & risk reports", "Deadline reminders", "Email support"]
-                : ["Everything in Quarterly", "Priority support", "Early access to new features", "Bulk tender import"];
+                ? [`${plan.credits} tender analyses`, "Eligibility & risk reports", "Document generation & chat", "24-month validity"]
+                : [`${plan.credits} tender analyses`, "Eligibility & risk reports", "Document generation & chat", "24-month validity", `Only ₹${perCredit.toLocaleString('en-IN')} per analysis`];
 
               return (
                 <div
@@ -383,16 +394,11 @@ export default function LandingPage() {
                     {plan.label}
                   </div>
                   <div className="mt-2 text-4xl font-extrabold text-slate-900">
-                    ₹{plan.amountRupees.toLocaleString('en-IN')}{' '}
-                    <span className={`text-sm font-semibold ${featured ? "text-slate-400" : "text-slate-400"}`}>
-                      / {plan.duration}
-                    </span>
+                    ₹{plan.amountRupees.toLocaleString('en-IN')}
                   </div>
-                  {featured && (
-                    <div className="text-xs font-bold text-emerald-600 mt-1">
-                      Save ~₹{annualSaving.toLocaleString('en-IN')} vs. quarterly
-                    </div>
-                  )}
+                  <div className={`text-sm mt-1 ${featured ? "text-indigo-600 font-semibold" : "text-slate-500"}`}>
+                    {plan.credits} credits · ₹{perCredit.toLocaleString('en-IN')} each
+                  </div>
                   <div className="my-5 h-px bg-slate-100" />
                   <ul className="space-y-2.5 text-sm text-slate-700 flex-1 leading-relaxed">
                     {features.map(f => <li key={f}>✓ {f}</li>)}
@@ -405,12 +411,11 @@ export default function LandingPage() {
                         : "border border-slate-300 text-slate-700 hover:bg-slate-50"
                     }`}
                   >
-                    Choose {plan.label} <ArrowRight className="w-4 h-4" />
+                    Buy {plan.credits} Credits <ArrowRight className="w-4 h-4" />
                   </button>
                 </div>
               );
             })}
-
           </div>
         </div>
       </section>

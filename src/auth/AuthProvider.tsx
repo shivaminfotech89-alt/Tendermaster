@@ -2,11 +2,19 @@ import { createContext, useContext, useEffect, useState } from "react";
 import { User, onAuthStateChanged, signInWithPopup, signOut, signInWithEmailAndPassword, createUserWithEmailAndPassword } from "firebase/auth";
 import { doc, getDoc, setDoc, onSnapshot } from "firebase/firestore";
 import { auth, db, googleProvider } from "../lib/firebase";
+import { fetchWithAuth } from "../lib/api";
+
+export interface UserCredits {
+  total: number;
+  used: number;
+  expiry: Date | null;
+  hasCredits: boolean;
+}
 
 interface AuthContextType {
   user: User | null;
   role: "free" | "premium" | "admin" | "superadmin" | null;
-  subscriptionExpiry: Date | null;
+  credits: UserCredits;
   loading: boolean;
   loginWithGoogle: () => Promise<void>;
   loginWithEmail: (email: string, pass: string) => Promise<void>;
@@ -14,10 +22,12 @@ interface AuthContextType {
   logout: () => Promise<void>;
 }
 
+const DEFAULT_CREDITS: UserCredits = { total: 0, used: 0, expiry: null, hasCredits: false };
+
 const AuthContext = createContext<AuthContextType>({
   user: null,
   role: null,
-  subscriptionExpiry: null,
+  credits: DEFAULT_CREDITS,
   loading: true,
   loginWithGoogle: async () => {},
   loginWithEmail: async () => {},
@@ -27,17 +37,25 @@ const AuthContext = createContext<AuthContextType>({
 
 export const useAuth = () => useContext(AuthContext);
 
+async function claimTrial() {
+  try {
+    await fetchWithAuth("/api/claim-trial", { method: "POST" });
+  } catch {
+    // non-fatal — trial grant is idempotent, will succeed on next load
+  }
+}
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [role, setRole] = useState<"free" | "premium" | "admin" | "superadmin" | null>(null);
-  const [subscriptionExpiry, setSubscriptionExpiry] = useState<Date | null>(null);
+  const [credits, setCredits] = useState<UserCredits>(DEFAULT_CREDITS);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     let unsubscribeSnapshot: (() => void) | null = null;
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       setLoading(true);
-      
+
       if (unsubscribeSnapshot) {
         unsubscribeSnapshot();
         unsubscribeSnapshot = null;
@@ -48,8 +66,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         try {
           const userDocRef = doc(db, "users", firebaseUser.uid);
           const userDoc = await getDoc(userDocRef);
-          
+
+          let isNewUser = false;
           if (!userDoc.exists()) {
+            isNewUser = true;
             try {
               await setDoc(userDocRef, {
                 email: firebaseUser.email,
@@ -62,46 +82,49 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             }
           }
 
-          
-
-          
-          // Use Firestore user document for role mapping
           unsubscribeSnapshot = onSnapshot(userDocRef, (snap) => {
             if (snap.exists()) {
               const data = snap.data();
               let docRole = data.role || "free";
-              let docExpiry = data.subscriptionExpiry ? data.subscriptionExpiry.toDate() : null;
-              
-              // Hardcoded superadmin email check
+
               if (firebaseUser.email === "shivaminfotech89@gmail.com") {
                 docRole = "superadmin";
               }
-              
-              if (docRole === "premium" && docExpiry && docExpiry < new Date()) {
-                 docRole = "free";
-              }
               setRole(docRole);
-              setSubscriptionExpiry(docExpiry);
+
+              // Credits
+              const total: number = data.creditsTotal ?? 0;
+              const used: number = data.creditsUsed ?? 0;
+              const expiry: Date | null = data.creditsExpiry ? data.creditsExpiry.toDate() : null;
+              const isAdmin = docRole === "admin" || docRole === "superadmin";
+              const hasCredits = isAdmin || (used < total && !!expiry && expiry > new Date());
+              setCredits({ total, used, expiry, hasCredits });
             } else {
-               if (firebaseUser.email === "shivaminfotech89@gmail.com") {
-                  setRole("superadmin");
-               } else {
-                  setRole("free");
-               }
-               setSubscriptionExpiry(null);
+              if (firebaseUser.email === "shivaminfotech89@gmail.com") {
+                setRole("superadmin");
+              } else {
+                setRole("free");
+              }
+              setCredits(DEFAULT_CREDITS);
             }
           });
+
+          // Grant trial credits for brand-new users (idempotent server-side)
+          if (isNewUser) {
+            claimTrial();
+          }
+
           setLoading(false);
         } catch (error) {
           console.error("Error fetching user claims", error);
           setRole("free");
-          setSubscriptionExpiry(null);
+          setCredits(DEFAULT_CREDITS);
           setLoading(false);
         }
       } else {
         setUser(null);
         setRole(null);
-        setSubscriptionExpiry(null);
+        setCredits(DEFAULT_CREDITS);
         setLoading(false);
       }
     });
@@ -145,6 +168,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       role: "free",
       createdAt: new Date()
     });
+    // Grant trial credits after signup
+    claimTrial();
   };
 
   const logout = async () => {
@@ -156,7 +181,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, role, loading, subscriptionExpiry, loginWithGoogle, loginWithEmail, signupWithEmail, logout }}>
+    <AuthContext.Provider value={{ user, role, credits, loading, loginWithGoogle, loginWithEmail, signupWithEmail, logout }}>
       {children}
     </AuthContext.Provider>
   );

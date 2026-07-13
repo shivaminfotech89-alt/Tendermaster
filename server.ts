@@ -13,14 +13,14 @@ import crypto from "crypto";
 import dns from "dns";
 import { promisify } from "util";
 // Bundled by esbuild (--bundle inlines local files; --packages=external only skips npm deps).
-import { PLANS, PLAN_DAYS_FALLBACK } from './src/lib/plans';
+import { PLANS, TRIAL_CREDITS, CREDIT_VALIDITY_MONTHS } from './src/lib/plans';
 
 const lookupPromise = promisify(dns.lookup);
 
 // Derived from shared PLANS constant (bundled by esbuild --bundle; local files are inlined).
-const PLAN_DAYS: Record<number, number> = Object.fromEntries(
-  PLANS.map(p => [p.amountPaise, p.days])
-) as Record<number, number>;
+const PLAN_CREDITS_MAP: Record<number, { credits: number; adminOnly: boolean; id: string }> = Object.fromEntries(
+  PLANS.map(p => [p.amountPaise, { credits: p.credits, adminOnly: p.adminOnly, id: p.id }])
+) as Record<number, { credits: number; adminOnly: boolean; id: string }>;
 const VALID_PAISE = new Set<number>(PLANS.map(p => p.amountPaise));
 
 let firebaseConfig: any = {};
@@ -202,53 +202,67 @@ const verifyFirebaseToken = async (
 };
 
 // ---------------------------------------------------------------------------
-// Phase 4: requireActiveEntitlement — reads role via Admin SDK (authoritative).
-// Fails closed: any error → 500, not a pass-through.
+// requireCredits — credit-based gate (replaces requireActiveEntitlement).
+// Admins/superadmins bypass. Lazy-migrates legacy premium users to 10 credits.
 // ---------------------------------------------------------------------------
-const requireActiveEntitlement = async (
+const requireCredits = async (
   req: AuthenticatedRequest,
   res: express.Response,
   next: express.NextFunction
 ) => {
-  if (!req.user?.uid) {
+  const uid = req.user?.uid;
+  if (!uid) {
     return res.status(401).json({ error: "Unauthorized: Authenticated user context required" });
   }
 
   try {
     const db = getFirestore();
-    const snap = await db.collection("users").doc(req.user.uid).get();
+    const snap = await db.collection("users").doc(uid).get();
 
     let role = "free";
-    let expiryDate: Date | null = null;
+    let creditsTotal = 0;
+    let creditsUsed = 0;
+    let creditsExpiry: Date | null = null;
 
     if (snap.exists) {
-      const data = snap.data() || {};
+      const data = snap.data()!;
       role = data.role || "free";
-      if (data.subscriptionExpiry) {
-        expiryDate = data.subscriptionExpiry.toDate();
+      if (req.user!.email === "shivaminfotech89@gmail.com") role = "superadmin";
+      if (role === "admin" || role === "superadmin") return next();
+
+      if (data.creditsTotal !== undefined) {
+        creditsTotal = data.creditsTotal ?? 0;
+        creditsUsed = data.creditsUsed ?? 0;
+        creditsExpiry = data.creditsExpiry ? data.creditsExpiry.toDate() : null;
+      } else if (data.subscriptionExpiry && data.subscriptionExpiry.toDate() > new Date()) {
+        // Legacy migration: active premium user has no credit fields yet — grant 10 credits.
+        const expiry = new Date();
+        expiry.setMonth(expiry.getMonth() + CREDIT_VALIDITY_MONTHS);
+        await db.collection("users").doc(uid).update({
+          creditsTotal: 10,
+          creditsUsed: 0,
+          creditsExpiry: Timestamp.fromDate(expiry),
+        });
+        console.log(`[Migration] Granted 10 legacy credits to uid=${uid}`);
+        creditsTotal = 10;
+        creditsUsed = 0;
+        creditsExpiry = expiry;
       }
+    } else {
+      if (req.user!.email === "shivaminfotech89@gmail.com") return next();
     }
 
-    // Hardcoded superadmin override
-    if (req.user.email === "shivaminfotech89@gmail.com") role = "superadmin";
-
-    if (role === "admin" || role === "superadmin") return next();
-
-    if (role === "premium") {
-      if (expiryDate && expiryDate <= new Date()) {
-        return res
-          .status(403)
-          .json({ error: "Your Premium subscription has expired. Please renew to continue using advanced features." });
-      }
+    const now = new Date();
+    if (creditsUsed < creditsTotal && creditsExpiry && creditsExpiry > now) {
       return next();
     }
 
-    return res
-      .status(403)
-      .json({ error: "This feature requires an active Premium subscription. Please upgrade your account." });
+    return res.status(403).json({
+      error: "You've used all your credits. Purchase more to run new analyses. Your existing projects and documents remain accessible.",
+    });
   } catch (err) {
-    console.error("[Entitlement] requireActiveEntitlement failed:", err);
-    return res.status(500).json({ error: "Failed to verify user entitlements." });
+    console.error("[Credits] requireCredits failed:", err);
+    return res.status(500).json({ error: "Failed to verify user credits." });
   }
 };
 
@@ -467,6 +481,15 @@ app.post("/api/create-payment-link", verifyFirebaseToken, async (req: Authentica
     if (!amount || !VALID_PAISE.has(Number(amount))) {
       return res.status(400).json({ error: "Invalid plan amount" });
     }
+    const planMeta = PLAN_CREDITS_MAP[Number(amount)];
+    if (planMeta?.adminOnly) {
+      const db = getFirestore();
+      const snap = await db.collection("users").doc(req.user!.uid).get();
+      const userRole = snap.data()?.role || "free";
+      if (userRole !== "admin" && userRole !== "superadmin" && req.user!.email !== "shivaminfotech89@gmail.com") {
+        return res.status(403).json({ error: "This plan is not available" });
+      }
+    }
     const rzp = getRazorpay();
     const paymentLink = await rzp.paymentLink.create({
       amount,
@@ -491,6 +514,15 @@ app.post("/api/create-order", verifyFirebaseToken, async (req: AuthenticatedRequ
     const { amount, currency = "INR", receipt } = req.body;
     if (!amount || !VALID_PAISE.has(Number(amount))) {
       return res.status(400).json({ error: "Invalid plan amount" });
+    }
+    const planMetaOrder = PLAN_CREDITS_MAP[Number(amount)];
+    if (planMetaOrder?.adminOnly) {
+      const db = getFirestore();
+      const snap = await db.collection("users").doc(req.user!.uid).get();
+      const userRole = snap.data()?.role || "free";
+      if (userRole !== "admin" && userRole !== "superadmin" && req.user!.email !== "shivaminfotech89@gmail.com") {
+        return res.status(403).json({ error: "This plan is not available" });
+      }
     }
     const rzp = getRazorpay();
     const order = await rzp.orders.create({ amount, currency, receipt });
@@ -569,31 +601,34 @@ app.post("/api/verify-payment", verifyFirebaseToken, async (req: AuthenticatedRe
       });
     }
 
-    // Map authoritative amount (paise) → subscription days
+    // Map authoritative amount (paise) → credits
     const authorizedAmountPaise = Number(payment.amount);
-    const days = PLAN_DAYS[authorizedAmountPaise] ?? (
-      console.error(`[verify-payment] Unrecognised amount ${authorizedAmountPaise} paise — falling back to ${PLAN_DAYS_FALLBACK} days`),
-      PLAN_DAYS_FALLBACK
-    );
+    const planMeta = PLAN_CREDITS_MAP[authorizedAmountPaise];
+    if (!planMeta) {
+      console.error(`[verify-payment] Unrecognised amount ${authorizedAmountPaise} paise for uid=${uid} — granting nothing`);
+      return res.status(400).json({ success: false, error: "Unrecognised payment amount. Please contact support." });
+    }
 
-    const newExpiry = new Date();
-    newExpiry.setDate(newExpiry.getDate() + days);
+    // Admin-only plan: verify the paying user is admin/superadmin
+    if (planMeta.adminOnly) {
+      const db = getFirestore();
+      const userSnap = await db.collection("users").doc(uid).get();
+      const userRole = userSnap.data()?.role || "free";
+      if (userRole !== "admin" && userRole !== "superadmin" && req.user!.email !== "shivaminfotech89@gmail.com") {
+        console.error(`[verify-payment] Non-admin uid=${uid} attempted admin_test plan — granting nothing`);
+        return res.status(403).json({ success: false, error: "This plan is not available." });
+      }
+    }
 
-    const granted = await setEntitlementClaims(uid, {
-      role: "premium",
-      subscriptionExpiry: newExpiry.toISOString(),
-    });
+    const granted = await grantCredits(uid, planMeta.credits, razorpay_payment_id);
     if (!granted) {
-      return res
-        .status(500)
-        .json({ success: false, error: "Failed to upgrade account privileges server-side." });
+      return res.status(500).json({ success: false, error: "Failed to grant credits. Please contact support." });
     }
 
     return res.json({
       success: true,
-      message: "Payment verified successfully. Account upgraded to Premium.",
-      days,
-      newExpiry: newExpiry.toISOString(),
+      message: `Payment verified. ${planMeta.credits} credit${planMeta.credits !== 1 ? "s" : ""} added to your account.`,
+      credits: planMeta.credits,
       paymentId: razorpay_payment_id,
     });
   } catch (error: any) {
@@ -732,26 +767,33 @@ app.post("/api/razorpay-webhook", async (req, res) => {
       // Amount comes from the verified webhook payload — trusted source
       const amountPaise = Number(entity?.amount || 0);
 
-      if (email) {
+      const paymentId: string = entity?.id || "";
+      if (email && paymentId) {
         try {
-          const userRecord = await getAuth().getUserByEmail(email);
-          if (userRecord?.uid) {
-            const days = PLAN_DAYS[amountPaise] ?? (
-              console.error(`[webhook] Unrecognised amount ${amountPaise} paise for ${email} — falling back to ${PLAN_DAYS_FALLBACK} days`),
-              PLAN_DAYS_FALLBACK
-            );
-
-            const newExpiry = new Date();
-            newExpiry.setDate(newExpiry.getDate() + days);
-
-            await setEntitlementClaims(userRecord.uid, {
-              role: "premium",
-              subscriptionExpiry: newExpiry.toISOString(),
-            });
-            console.log(`[Webhook] Upgraded ${email} → premium (${days} days)`);
+          const planMeta = PLAN_CREDITS_MAP[amountPaise];
+          if (!planMeta) {
+            console.error(`[Webhook] Unrecognised amount ${amountPaise} paise for ${email} — granting nothing`);
+          } else {
+            const userRecord = await getAuth().getUserByEmail(email);
+            if (userRecord?.uid) {
+              if (planMeta.adminOnly) {
+                const db = getFirestore();
+                const snap = await db.collection("users").doc(userRecord.uid).get();
+                const userRole = snap.data()?.role || "free";
+                if (userRole !== "admin" && userRole !== "superadmin" && userRecord.email !== "shivaminfotech89@gmail.com") {
+                  console.error(`[Webhook] Non-admin ${email} attempted admin_test plan — granting nothing`);
+                } else {
+                  await grantCredits(userRecord.uid, planMeta.credits, paymentId);
+                  console.log(`[Webhook] Granted ${planMeta.credits} credits to ${email} (admin_test)`);
+                }
+              } else {
+                await grantCredits(userRecord.uid, planMeta.credits, paymentId);
+                console.log(`[Webhook] Granted ${planMeta.credits} credits to ${email}`);
+              }
+            }
           }
         } catch (e) {
-          console.error(`[Webhook] Failed to upgrade user ${email}:`, e);
+          console.error(`[Webhook] Failed to grant credits for ${email}:`, e);
         }
       }
     }
@@ -882,8 +924,95 @@ function detectLowConfidence(parsed: any): LowConfidenceResult {
 }
 
 // ---------------------------------------------------------------------------
+// Credit helpers
+// ---------------------------------------------------------------------------
+
+async function grantCredits(uid: string, credits: number, paymentId: string): Promise<boolean> {
+  const db = getFirestore();
+  const processedRef = db.collection("processed_payments").doc(paymentId);
+  const userRef = db.collection("users").doc(uid);
+  try {
+    await db.runTransaction(async (tx) => {
+      const processedSnap = await tx.get(processedRef);
+      if (processedSnap.exists) {
+        console.log(`[Credits] Payment ${paymentId} already processed — skipping double-grant`);
+        return;
+      }
+      const userSnap = await tx.get(userRef);
+      const userData = userSnap.data() || {};
+      const now = new Date();
+      const candidateExpiry = new Date(now);
+      candidateExpiry.setMonth(candidateExpiry.getMonth() + CREDIT_VALIDITY_MONTHS);
+      let finalExpiry = candidateExpiry;
+      if (userData.creditsExpiry) {
+        const existing: Date = userData.creditsExpiry.toDate();
+        if (existing > candidateExpiry) finalExpiry = existing;
+      }
+      tx.set(processedRef, { uid, credits, paymentId, processedAt: Timestamp.now() });
+      tx.set(userRef, {
+        creditsTotal: FieldValue.increment(credits),
+        creditsExpiry: Timestamp.fromDate(finalExpiry),
+      }, { merge: true });
+    });
+    console.log(`[Credits] Granted ${credits} credits to uid=${uid} (payment=${paymentId})`);
+    return true;
+  } catch (err) {
+    console.error(`[Credits] grantCredits failed uid=${uid} payment=${paymentId}:`, err);
+    return false;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // API routes
 // ---------------------------------------------------------------------------
+
+app.post("/api/claim-trial", verifyFirebaseToken, async (req: AuthenticatedRequest, res) => {
+  const uid = req.user!.uid;
+  try {
+    const db = getFirestore();
+    const userRef = db.collection("users").doc(uid);
+    await db.runTransaction(async (tx) => {
+      const snap = await tx.get(userRef);
+      if (snap.exists && snap.data()?.trialClaimed === true) return; // idempotent
+      const expiry = new Date();
+      expiry.setMonth(expiry.getMonth() + CREDIT_VALIDITY_MONTHS);
+      tx.set(userRef, {
+        creditsTotal: FieldValue.increment(TRIAL_CREDITS),
+        creditsUsed: 0,
+        creditsExpiry: Timestamp.fromDate(expiry),
+        trialClaimed: true,
+      }, { merge: true });
+    });
+    return res.json({ success: true });
+  } catch (err: any) {
+    console.error("[Trial] claim-trial failed:", err);
+    return res.status(500).json({ error: "Failed to claim trial credits" });
+  }
+});
+
+app.post("/api/admin/grant-credits", verifyFirebaseToken, async (req: AuthenticatedRequest, res) => {
+  const callerUid = req.user!.uid;
+  const { uid: targetUid, credits } = req.body;
+  if (!targetUid || typeof credits !== "number" || credits < 1) {
+    return res.status(400).json({ error: "uid and credits (positive integer) are required" });
+  }
+  try {
+    const db = getFirestore();
+    const callerSnap = await db.collection("users").doc(callerUid).get();
+    let callerRole = callerSnap.exists ? (callerSnap.data()?.role || "free") : "free";
+    if (req.user!.email === "shivaminfotech89@gmail.com") callerRole = "superadmin";
+    if (callerRole !== "admin" && callerRole !== "superadmin") {
+      return res.status(403).json({ error: "Admin access required" });
+    }
+    const paymentId = `admin_grant_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+    await grantCredits(targetUid, credits, paymentId);
+    console.log(`[Admin] ${callerUid} granted ${credits} credits to ${targetUid}`);
+    return res.json({ success: true, credits });
+  } catch (err: any) {
+    console.error("[Admin] grant-credits failed:", err);
+    return res.status(500).json({ error: "Failed to grant credits" });
+  }
+});
 
 app.post("/api/parse-profile", verifyFirebaseToken, async (req: AuthenticatedRequest, res) => {
   try {
@@ -962,7 +1091,7 @@ Provide ONLY the enhanced text, nothing else.`;
 app.post(
   "/api/extract-profile-data",
   verifyFirebaseToken,
-  requireActiveEntitlement,
+  requireCredits,
   async (req: AuthenticatedRequest, res) => {
     try {
       const { fileBase64, fileMimeType } = req.body;
@@ -1057,19 +1186,64 @@ app.post(
   }
 );
 
-app.post("/api/analyze-tender", verifyFirebaseToken, requireActiveEntitlement, async (req: AuthenticatedRequest, res) => {
+app.post("/api/analyze-tender", verifyFirebaseToken, async (req: AuthenticatedRequest, res) => {
   try {
-    const { tenderDocument, tenderType = "text", tenderContent, userProfile, language } = req.body;
+    const { tenderDocument, tenderType = "text", tenderContent, userProfile, language,
+            projectId: existingProjectId, fileNames } = req.body;
     const actualContent = tenderContent || tenderDocument;
+    const isReanalysis = !!existingProjectId;
 
     if (!actualContent || !userProfile) {
       return res.status(400).json({ error: "tender content and userProfile are required" });
     }
 
     const uid = req.user!.uid;
+    const db = getFirestore();
     const aiClient = getAI();
     let docContents: any[];
     let remarks: any = null;
+
+    // ── Credit / run-count gate ──────────────────────────────────────────────
+    if (isReanalysis) {
+      // Re-analysis: verify project ownership + enforce 5-run cap
+      const projectSnap = await db.collection("saved_tenders").doc(existingProjectId).get();
+      if (!projectSnap.exists || projectSnap.data()?.userId !== uid) {
+        return res.status(403).json({ error: "Project not found or access denied" });
+      }
+      const runsDone: number = projectSnap.data()?.analysisRuns ?? 0;
+      const userSnapRA = await db.collection("users").doc(uid).get();
+      const userRoleRA: string = userSnapRA.data()?.role || "free";
+      const isAdminRA = userRoleRA === "admin" || userRoleRA === "superadmin" || req.user!.email === "shivaminfotech89@gmail.com";
+      if (!isAdminRA && runsDone >= 5) {
+        return res.status(429).json({ error: "This project has reached the 5 re-analysis limit. Start a new project to analyze updated documents." });
+      }
+    } else {
+      // New analysis: check credits, including lazy legacy migration
+      const userSnap = await db.collection("users").doc(uid).get();
+      const userData = userSnap.data() || {};
+      let creditsTotal: number = userData.creditsTotal ?? 0;
+      let creditsUsed: number = userData.creditsUsed ?? 0;
+      let creditsExpiry: Date | null = userData.creditsExpiry ? userData.creditsExpiry.toDate() : null;
+      const userRole: string = userData.role || "free";
+      const isAdmin = userRole === "admin" || userRole === "superadmin" || req.user!.email === "shivaminfotech89@gmail.com";
+
+      if (!isAdmin) {
+        if (creditsTotal === 0 && userData.subscriptionExpiry && userData.subscriptionExpiry.toDate() > new Date()) {
+          // Legacy migration
+          const expiry = new Date();
+          expiry.setMonth(expiry.getMonth() + CREDIT_VALIDITY_MONTHS);
+          await db.collection("users").doc(uid).update({ creditsTotal: 10, creditsUsed: 0, creditsExpiry: Timestamp.fromDate(expiry) });
+          console.log(`[Migration] Granted 10 legacy credits to uid=${uid}`);
+          creditsTotal = 10; creditsUsed = 0; creditsExpiry = expiry;
+        }
+        const now = new Date();
+        if (creditsUsed >= creditsTotal || !creditsExpiry || creditsExpiry <= now) {
+          return res.status(403).json({
+            error: "You've used all your credits. Purchase more to run new analyses. Your existing projects and documents remain accessible.",
+          });
+        }
+      }
+    }
 
     const extraContextStr = req.body.extraContext
       ? `\n\n--- EXTRA CONTEXT / RE-ANALYSIS UPDATE ---\n${req.body.extraContext}\n`
@@ -1517,7 +1691,75 @@ MODE 1: CONTRACT PROFILE ANALYSIS & MATCHING
       );
     }
 
-    res.json({ analysis: parsedData, remarks, lowConfidence: isLow });
+    if (isReanalysis) {
+      // Increment analysis run count on the existing project
+      try {
+        await db.collection("saved_tenders").doc(existingProjectId).update({
+          details: parsedData,
+          remarks,
+          lowConfidence: isLow,
+          lastReanalyzedAt: Timestamp.now(),
+          analysisRuns: FieldValue.increment(1),
+        });
+      } catch (saveErr) {
+        console.error("[analyze-tender] Failed to update re-analysis run count:", saveErr);
+      }
+      return res.json({ analysis: parsedData, remarks, lowConfidence: isLow, projectId: existingProjectId });
+    }
+
+    // New analysis: atomically deduct 1 credit and auto-save the project
+    const userRef = db.collection("users").doc(uid);
+    const projectRef = db.collection("saved_tenders").doc();
+    const newProjectId = projectRef.id;
+
+    // Determine payloadRef for the saved project
+    const payloadRef = tenderType === "storage_urls" || tenderType === "url"
+      ? actualContent
+      : tenderType === "text"
+        ? String(actualContent).slice(0, 2000)
+        : "Document";
+
+    try {
+      await db.runTransaction(async (tx) => {
+        const userSnap = await tx.get(userRef);
+        const userData = userSnap.data() || {};
+        const creditsTotal: number = userData.creditsTotal ?? 0;
+        const creditsUsed: number = userData.creditsUsed ?? 0;
+        const creditsExpiry: Date | null = userData.creditsExpiry ? userData.creditsExpiry.toDate() : null;
+        const userRole: string = userData.role || "free";
+        const isAdmin = userRole === "admin" || userRole === "superadmin" || req.user!.email === "shivaminfotech89@gmail.com";
+
+        if (!isAdmin) {
+          const now = new Date();
+          if (creditsUsed >= creditsTotal || !creditsExpiry || creditsExpiry <= now) {
+            throw new Error("CREDITS_EXHAUSTED");
+          }
+          tx.set(userRef, { creditsUsed: FieldValue.increment(1) }, { merge: true });
+        }
+
+        tx.set(projectRef, {
+          userId: uid,
+          projectName: parsedData?.tender_simplified?.tender_name || "Untitled Tender",
+          tenderId: Date.now().toString(),
+          details: parsedData,
+          payloadRef,
+          ...(Array.isArray(fileNames) && fileNames.length > 0 ? { payloadRefNames: fileNames } : {}),
+          remarks,
+          lowConfidence: isLow,
+          savedAt: Timestamp.now(),
+          analysisRuns: 1,
+        });
+      });
+    } catch (txErr: any) {
+      if (txErr.message === "CREDITS_EXHAUSTED") {
+        return res.status(403).json({
+          error: "You've used all your credits. Purchase more to run new analyses. Your existing projects and documents remain accessible.",
+        });
+      }
+      throw txErr; // re-throw to outer catch → recordFailedAttempt
+    }
+
+    return res.json({ analysis: parsedData, remarks, lowConfidence: isLow, projectId: newProjectId });
   } catch (err: any) {
     console.error("Analyze Tender Error:", err);
     const uid = (req as AuthenticatedRequest).user?.uid;
@@ -1604,7 +1846,7 @@ app.post("/api/compare-tender", verifyFirebaseToken, async (req: AuthenticatedRe
 app.post(
   "/api/chat-tender",
   verifyFirebaseToken,
-  requireActiveEntitlement,
+  requireCredits,
   async (req: AuthenticatedRequest, res) => {
     try {
       const { tenderDocument, analysisResult, messages, language, paymentRecords } = req.body;
@@ -1726,7 +1968,7 @@ Total Paid: ₹${paymentRecords.reduce((s: number, p: any) => s + (Number(p.amou
 app.post(
   "/api/extract-receipt",
   verifyFirebaseToken,
-  requireActiveEntitlement,
+  requireCredits,
   async (req: AuthenticatedRequest, res) => {
     try {
       const { receiptBase64, mimeType } = req.body;
@@ -1775,7 +2017,7 @@ Rules:
 app.post(
   "/api/generate-doc",
   verifyFirebaseToken,
-  requireActiveEntitlement,
+  requireCredits,
   async (req: AuthenticatedRequest, res) => {
     try {
       const { docType, tenderDetails, userProfile, financialData, extraInstructions, language,
@@ -1963,7 +2205,7 @@ ${JSON.stringify(tenderDetails)}${financialContext}${extraContext}`;
 app.post(
   "/api/generate-pdf",
   verifyFirebaseToken,
-  requireActiveEntitlement,
+  requireCredits,
   async (req: AuthenticatedRequest, res) => {
     try {
       const {
@@ -2111,7 +2353,7 @@ app.post(
 app.post(
   "/api/generate-docx",
   verifyFirebaseToken,
-  requireActiveEntitlement,
+  requireCredits,
   async (req: AuthenticatedRequest, res) => {
     try {
       const { html, filename, isMarkdown } = req.body as {

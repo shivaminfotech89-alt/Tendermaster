@@ -13,7 +13,7 @@ const LANG_NAMES: Record<string, string> = {
 };
 
 export default function Layout() {
-  const { user, role, logout } = useAuth();
+  const { user, role, credits, logout } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
   const { analyzing, progress, analysisResult, reanalyzing, reanalyzeProgress, clearAnalysis } = useAnalyzerStore();
@@ -95,10 +95,16 @@ export default function Layout() {
         </nav>
 
         <div className="p-4 border-t border-slate-100 flex flex-col gap-2">
-          {role !== "premium" && (
-            <Link to="/dashboard/settings?tab=subscription" className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white py-2 rounded-lg text-sm font-bold shadow-md transition-all mb-2 animate-pulse hover:animate-none">
+          {role !== "admin" && role !== "superadmin" && !credits.hasCredits && (
+            <Link to="/dashboard/settings?tab=subscription" className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-rose-500 to-orange-500 hover:from-rose-600 hover:to-orange-600 text-white py-2 rounded-lg text-sm font-bold shadow-md transition-all mb-2">
               <ShieldCheck className="w-4 h-4" />
-              Subscribe Now
+              Buy Credits
+            </Link>
+          )}
+          {role !== "admin" && role !== "superadmin" && credits.hasCredits && (credits.total - credits.used) <= Math.max(1, Math.floor(credits.total * 0.2)) && (
+            <Link to="/dashboard/settings?tab=subscription" className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-amber-500 to-orange-400 hover:from-amber-600 hover:to-orange-500 text-white py-2 rounded-lg text-sm font-bold shadow-md transition-all mb-2">
+              <ShieldCheck className="w-4 h-4" />
+              {credits.total - credits.used} credit{(credits.total - credits.used) !== 1 ? "s" : ""} left — top up
             </Link>
           )}
           <div className="flex items-center gap-2 px-2 pb-2 border-b border-slate-100">
@@ -139,10 +145,10 @@ export default function Layout() {
             <img src="/tendermaster-logo-lockup.png" alt="TenderMaster AI" className="h-10" />
           </div>
           <div className="flex items-center gap-2">
-            {role !== "premium" && (
-              <Link to="/dashboard/settings?tab=subscription" className="flex items-center justify-center bg-gradient-to-r from-amber-500 to-orange-500 text-white p-1.5 rounded text-xs font-bold shadow-md animate-pulse">
+            {role !== "admin" && role !== "superadmin" && !credits.hasCredits && (
+              <Link to="/dashboard/settings?tab=subscription" className="flex items-center justify-center bg-gradient-to-r from-rose-500 to-orange-500 text-white p-1.5 rounded text-xs font-bold shadow-md">
                 <ShieldCheck className="w-4 h-4 mr-1" />
-                UPGRADE
+                BUY CREDITS
               </Link>
             )}
             <select

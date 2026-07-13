@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from "react";
 import { useAuth } from "../auth/AuthProvider";
 import { useAnalyzerStore } from "../context/AnalyzerContext";
 import { Upload, X, Loader2, Sparkles, AlertCircle, FileText, CheckCircle2, ChevronRight, Activity, CalendarDays, Link as LinkIcon, File, MessageSquare, Send, Calculator, Building, Target, Download, Edit2, Trash2, Plus, Minus, ArrowLeft, Info } from "lucide-react";
-import { doc, setDoc, collection, addDoc, getDocs, query } from "firebase/firestore";
+import { collection, getDocs, query } from "firebase/firestore";
 import { db } from "../lib/firebase";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -83,9 +83,8 @@ export default function TenderAnalyzer() {
   const [error, setError] = useState("");
   const [projectName, setProjectName] = useState("");
   
-  const [saving, setSaving] = useState(false);
+  const [savedProjectId, setSavedProjectId] = useState<string | null>(null);
   const [analyzedPayload, setAnalyzedPayload] = useState<any>(null);
-  const [hasSaved, setHasSaved] = useState(false);
   
   // Chat state
   const [activeTab, setActiveTab] = useState<'overview'|'docs'|'calculator'|'chat'|'notes'>('overview');
@@ -144,7 +143,7 @@ export default function TenderAnalyzer() {
 
   useEffect(() => {
     const handleBeforeUnload = (e: BeforeUnloadEvent) => {
-      if (analysisResult && !hasSaved) {
+      if (analysisResult && !savedProjectId) {
         e.preventDefault();
         e.returnValue = "You have unsaved analysis. Are you sure you want to leave without saving?";
         return e.returnValue;
@@ -152,7 +151,7 @@ export default function TenderAnalyzer() {
     };
     window.addEventListener("beforeunload", handleBeforeUnload);
     return () => window.removeEventListener("beforeunload", handleBeforeUnload);
-  }, [analysisResult, hasSaved]);
+  }, [analysisResult, savedProjectId]);
 
   const handlePdfUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
@@ -337,6 +336,7 @@ export default function TenderAnalyzer() {
 
     setAnalyzing(true);
     setAnalysisResult(null);
+    setSavedProjectId(null);
 
     try {
       const { doc: firestoreDoc, getDoc: fGetDoc } = await import("firebase/firestore");
@@ -374,17 +374,19 @@ export default function TenderAnalyzer() {
       
       setAnalyzedPayload(processedPayload);
 
+      const nameSource = inputType === 'pdf' ? pdfFileNames : inputType === 'zip' ? zipFileNames : [];
+
       const response = await fetchWithAuth("/api/analyze-tender", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ 
+        body: JSON.stringify({
           tenderType: finalTenderType,
           tenderContent: processedPayload,
           userProfile: JSON.stringify(profile),
-          language: i18n.language
+          language: i18n.language,
+          fileNames: nameSource,
         })
       });
-
 
       let data;
       const responseText = await response.text();
@@ -401,6 +403,10 @@ export default function TenderAnalyzer() {
       setAnalysisResult(data.analysis);
       setAnalysisRemarks(data.remarks || null);
       setPayloadContext(payload);
+      if (data.projectId) {
+        setSavedProjectId(data.projectId);
+        toast.success("Analysis complete — saved to your pipeline!");
+      }
 
     } catch (err: any) {
       setError(friendlyAnalysisError(err.message));
@@ -409,37 +415,6 @@ export default function TenderAnalyzer() {
     }
   };
 
-  const handleSaveToPipeline = async () => {
-    if (!analysisResult || !user) return;
-    setSaving(true);
-    try {
-       await addDoc(collection(db, "saved_tenders"), {
-         userId: user.uid,
-         projectName: projectName || analysisResult.tender_title || "Unnamed Project",
-         tenderId: Date.now().toString(),
-         details: analysisResult,
-         payloadRef: inputType === 'url' ? tenderUrl : (analyzedPayload ? analyzedPayload : 'Text/PDF Document'),
-         ...(analyzedPayloadNames.length > 0 ? { payloadRefNames: analyzedPayloadNames } : {}),
-         ...(analysisRemarks ? { remarks: analysisRemarks } : {}),
-         savedAt: new Date()
-       });
-
-       await addDoc(collection(db, "notifications"), {
-         userId: user.uid,
-         message: "New project saved to your pipeline.",
-         read: false,
-         createdAt: new Date()
-       });
-       
-       setHasSaved(true);
-       toast.success("Project saved to your pipeline successfully!");
-    } catch (err) {
-      console.error(err);
-      toast.error("Failed to save project.");
-    } finally {
-      setSaving(false);
-    }
-  };
 
   const generateDocument = async () => {
     if (!analysisResult) return;
@@ -812,19 +787,16 @@ export default function TenderAnalyzer() {
                  <ArrowLeft className="w-4 h-4" /> New Analysis
                </button>
                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full md:w-auto">
-                 <button className="bg-slate-100 hover:bg-slate-200 text-slate-700 px-4 py-2 rounded-lg font-bold text-sm flex items-center justify-center gap-2 shrink-0 print:hidden border border-slate-200 shadow-sm transition-colors disabled:opacity-50">
-                   Export PDF Report
-                 </button>
-                 <input 
-                   type="text" 
-                   value={projectName}
-                   onChange={e => setProjectName(e.target.value)}
-                   placeholder="Enter Workspace / Project Name..." 
-                   className="flex-1 md:w-64 px-3 py-2 border border-slate-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500"
-                 />
-                 <button onClick={handleSaveToPipeline} disabled={saving} className="text-white bg-gradient-to-br from-indigo-600 to-blue-600 hover:from-indigo-700 hover:to-blue-700 px-4 py-2 rounded-lg font-bold text-sm flex items-center justify-center gap-2 shrink-0 transition-all shadow-sm">
-                   {saving ? "Saving..." : "Save Project"}
-                 </button>
+                 {savedProjectId ? (
+                   <a
+                     href={`/dashboard/projects/${savedProjectId}`}
+                     className="text-white bg-gradient-to-br from-emerald-600 to-green-600 hover:from-emerald-700 hover:to-green-700 px-4 py-2 rounded-lg font-bold text-sm flex items-center justify-center gap-2 shrink-0 transition-all shadow-sm"
+                   >
+                     <CheckCircle2 className="w-4 h-4" /> View Saved Project
+                   </a>
+                 ) : (
+                   <span className="text-xs text-slate-400 italic">Saving project…</span>
+                 )}
                </div>
             </div>
           </div>

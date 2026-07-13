@@ -9,7 +9,7 @@ import { fetchWithAuth } from "../lib/api";
 import { PLANS } from "../lib/plans";
 
 export default function Settings() {
-  const { user, role, subscriptionExpiry } = useAuth();
+  const { user, role, credits } = useAuth();
   const [loading, setLoading] = useState(false);
   const location = useLocation();
   const [activeTab, setActiveTab] = useState(() => {
@@ -34,10 +34,12 @@ export default function Settings() {
       if(snap.exists()) setUpiId(snap.data().upi_id || "");
     });
   }, []);
-  
-  const [premiumFeatures, setPremiumFeatures] = useState(["Unlimited Tender Analysis", "Automated Document Generation", "Dedicated Tender Chat AI", "PDF Exports & Competitor Analysis"]);
 
-  const daysRemaining = subscriptionExpiry ? Math.max(0, Math.ceil((subscriptionExpiry.getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24))) : 0;
+  const creditsLeft = credits.total - credits.used;
+  const creditsExpiryStr = credits.expiry
+    ? credits.expiry.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })
+    : null;
+  const isAdmin = role === "admin" || role === "superadmin";
 
   useEffect(() => {
     // Load Razorpay Script
@@ -257,124 +259,131 @@ export default function Settings() {
            )}
 
            {activeTab === "subscription" && (
-             <div className="max-w-md space-y-6">
+             <div className="max-w-lg space-y-6">
                 <div>
-                   <h2 className="text-xl font-bold text-slate-900">Plan & Billing</h2>
-                   <p className="text-sm text-slate-500 mt-1">Manage your current subscription and limits.</p>
+                   <h2 className="text-xl font-bold text-slate-900">Credits & Billing</h2>
+                   <p className="text-sm text-slate-500 mt-1">Each credit = 1 tender analysis. Credits never expire for 24 months from purchase.</p>
                 </div>
 
-                <div className="bg-slate-50 border border-slate-200 p-4 rounded-xl flex items-center justify-between">
-                   <div>
-                      <p className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-1">Current Plan</p>
-                      <h3 className="text-2xl font-black text-indigo-900 uppercase">{role || "FREE"}</h3>
-                   </div>
-                   {role !== 'premium' && role !== 'admin' && role !== 'superadmin' ? (
-                     <div className="text-right">
-                        <span className="bg-indigo-100 text-indigo-800 text-xs font-bold px-2 py-1 rounded">UPGRADE AVAILABLE</span>
-                     </div>
-                   ) : (
-                     <div className="text-right">
-                        <span className="bg-emerald-100 text-emerald-800 text-xs font-bold px-2 py-1 rounded mb-1 inline-block">ACTIVE</span>
-                        {role === 'premium' && <div className="text-xs text-slate-500 font-semibold">{daysRemaining} days remaining</div>}
-                     </div>
-                   )}
-                </div>
-
-                 {role !== "premium" && (
-                  <div className="mt-8 space-y-8">
-                     
-                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                       {PLANS.map((plan, i) => {
-                         const featured = i === 1;
-                         return (
-                           <div
-                             key={plan.amountPaise}
-                             className={`rounded-2xl p-6 text-white shadow-xl relative overflow-hidden flex flex-col ${
-                               featured
-                                 ? "bg-gradient-to-br from-indigo-900 to-purple-900 border border-indigo-500/30"
-                                 : "bg-gradient-to-br from-slate-900 to-slate-800"
-                             }`}
-                           >
-                             <div className={`absolute top-0 right-0 p-4 ${featured ? "opacity-10" : "opacity-5"}`}>
-                               <Shield className="w-32 h-32" />
-                             </div>
-                             <div className="relative z-10 flex-1">
-                               {featured && (
-                                 <span className="bg-indigo-500/30 text-indigo-100 text-xs font-bold px-2 py-1 rounded inline-block mb-3">
-                                   BEST VALUE
-                                 </span>
-                               )}
-                               <h3 className={`text-xl font-bold mb-1 ${featured ? "text-indigo-100" : "text-slate-200"}`}>
-                                 {plan.label} Plan
-                               </h3>
-                               <div className="text-3xl font-extrabold mb-4 flex items-baseline gap-1">
-                                 ₹{plan.amountRupees.toLocaleString('en-IN')}{' '}
-                                 <span className={`text-sm font-medium ${featured ? "text-indigo-300" : "text-slate-400"}`}>
-                                   / {plan.duration}
-                                 </span>
-                               </div>
-                               <ul className={`space-y-2 mb-6 text-sm ${featured ? "text-indigo-100" : "text-slate-300"}`}>
-                                 {premiumFeatures.map((feat, fi) => (
-                                   <li key={fi} className="flex items-start gap-2">
-                                     <div className={`mt-1 w-1.5 h-1.5 rounded-full shrink-0 ${featured ? "bg-emerald-400" : "bg-blue-400"}`} />
-                                     {feat}
-                                   </li>
-                                 ))}
-                               </ul>
-                             </div>
-                             <div className="relative z-10">
-                               <button
-                                 onClick={() => handleCheckout(plan.amountRupees)}
-                                 disabled={checkingOut === plan.amountRupees}
-                                 className={`w-full font-bold py-3 px-4 rounded-xl transition-colors flex items-center justify-center gap-2 ${
-                                   featured
-                                     ? "bg-indigo-500 hover:bg-indigo-400 disabled:bg-indigo-300 shadow-lg shadow-indigo-900/50"
-                                     : "bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400"
-                                 } text-white`}
-                               >
-                                 {checkingOut === plan.amountRupees
-                                   ? <Loader2 className="w-5 h-5 animate-spin" />
-                                   : "Subscribe Now"}
-                               </button>
-                             </div>
-                           </div>
-                         );
-                       })}
-                     </div>
+                {/* Credits balance card */}
+                {isAdmin ? (
+                  <div className="bg-indigo-50 border border-indigo-200 p-4 rounded-xl">
+                    <p className="text-xs font-bold text-indigo-500 uppercase tracking-widest mb-1">Account Type</p>
+                    <h3 className="text-2xl font-black text-indigo-900 uppercase">{role}</h3>
+                    <p className="text-sm text-indigo-700 mt-1">Unlimited access — credits not consumed</p>
+                  </div>
+                ) : (
+                  <div className={`border p-4 rounded-xl ${credits.hasCredits ? "bg-emerald-50 border-emerald-200" : "bg-rose-50 border-rose-200"}`}>
+                    <p className="text-xs font-bold uppercase tracking-widest mb-1 ${credits.hasCredits ? 'text-emerald-600' : 'text-rose-600'}">Credits Remaining</p>
+                    <div className="flex items-end gap-2">
+                      <span className={`text-4xl font-black ${credits.hasCredits ? "text-emerald-700" : "text-rose-700"}`}>{creditsLeft}</span>
+                      <span className="text-slate-500 text-sm mb-1">of {credits.total} total</span>
+                    </div>
+                    {credits.total > 0 && (
+                      <div className="mt-2 bg-white/60 rounded-full h-2 overflow-hidden">
+                        <div
+                          className={`h-2 rounded-full ${credits.hasCredits ? "bg-emerald-500" : "bg-rose-400"}`}
+                          style={{ width: `${Math.max(0, Math.min(100, (creditsLeft / credits.total) * 100))}%` }}
+                        />
+                      </div>
+                    )}
+                    {creditsExpiryStr && (
+                      <p className="text-xs text-slate-500 mt-2">Valid until {creditsExpiryStr}</p>
+                    )}
+                    {!credits.hasCredits && (
+                      <p className="text-xs font-semibold text-rose-600 mt-2">Purchase credits below to run new analyses. Your existing data stays accessible.</p>
+                    )}
                   </div>
                 )}
-                
-                {role !== "premium" && (
-                  <div className="mt-8 bg-white border border-slate-200 p-6 rounded-2xl shadow-sm">
-                    <h3 className="text-lg font-bold text-slate-900 mb-2">Alternative: Manual Payment</h3>
-                    {upiId ? (
-                      <p className="text-sm text-slate-600 mb-4">
-                        If you are facing issues with Razorpay, you can send the payment via UPI to <strong className="text-slate-900">{upiId}</strong> and request an activation code from support.
-                      </p>
-                    ) : (
-                      <p className="text-sm text-slate-600 mb-4">
-                        If you have purchased a subscription through offline channels, you can redeem your activation code here.
-                      </p>
-                    )}
-                    
-                    <div className="flex gap-3">
-                      <input 
-                        type="text" 
-                        value={activationCode}
-                        onChange={(e) => setActivationCode(e.target.value)}
-                        placeholder="Enter 16-digit activation code"
-                        className="flex-1 bg-slate-50 border border-slate-200 text-slate-900 text-sm rounded-lg px-4 py-2.5 outline-none focus:ring-2 focus:ring-blue-500"
-                      />
-                      <button 
-                        onClick={handleActivate}
-                        disabled={!activationCode || activating}
-                        className="bg-slate-900 hover:bg-slate-800 text-white px-6 py-2.5 rounded-lg font-semibold transition-colors disabled:opacity-50 whitespace-nowrap flex items-center gap-2"
-                      >
-                        {activating ? <Loader2 className="w-4 h-4 animate-spin" /> : "Redeem Code"}
-                      </button>
+
+                {/* Buy credits */}
+                {!isAdmin && (
+                  <div className="space-y-4">
+                    <p className="text-sm font-semibold text-slate-700">Top up credits — stacks with existing balance</p>
+                    <div className="grid grid-cols-1 gap-4">
+                      {PLANS.filter(p => !p.adminOnly).map((plan, i) => {
+                        const featured = i === 1;
+                        const features = i === 0
+                          ? ["10 tender analyses", "All AI features", "24-month validity"]
+                          : ["20 tender analyses", "All AI features", "24-month validity", "Best value per analysis"];
+                        return (
+                          <div
+                            key={plan.amountPaise}
+                            className={`rounded-2xl p-5 text-white shadow-lg relative overflow-hidden flex flex-col md:flex-row md:items-center gap-4 ${
+                              featured
+                                ? "bg-gradient-to-br from-indigo-900 to-purple-900"
+                                : "bg-gradient-to-br from-slate-900 to-slate-800"
+                            }`}
+                          >
+                            {featured && (
+                              <span className="absolute top-3 right-4 bg-indigo-500/40 text-indigo-100 text-xs font-bold px-2 py-0.5 rounded">BEST VALUE</span>
+                            )}
+                            <div className="flex-1">
+                              <div className="font-bold text-lg">{plan.label}</div>
+                              <div className="text-3xl font-extrabold">₹{plan.amountRupees.toLocaleString('en-IN')}</div>
+                              <div className={`text-sm mt-1 ${featured ? "text-indigo-300" : "text-slate-400"}`}>{plan.credits} credits · 24-month validity</div>
+                              <ul className={`mt-2 space-y-1 text-sm ${featured ? "text-indigo-100" : "text-slate-300"}`}>
+                                {features.map(f => <li key={f}>✓ {f}</li>)}
+                              </ul>
+                            </div>
+                            <button
+                              onClick={() => handleCheckout(plan.amountRupees)}
+                              disabled={checkingOut === plan.amountRupees}
+                              className={`shrink-0 font-bold py-3 px-6 rounded-xl transition-colors flex items-center justify-center gap-2 ${
+                                featured ? "bg-indigo-500 hover:bg-indigo-400" : "bg-blue-600 hover:bg-blue-700"
+                              } text-white disabled:opacity-60`}
+                            >
+                              {checkingOut === plan.amountRupees ? <Loader2 className="w-5 h-5 animate-spin" /> : "Buy Credits"}
+                            </button>
+                          </div>
+                        );
+                      })}
+
+                      {/* Admin test plan — only for admins */}
+                      {isAdmin && PLANS.filter(p => p.adminOnly).map(plan => (
+                        <div key={plan.amountPaise} className="rounded-2xl p-5 bg-amber-50 border-2 border-amber-300 flex flex-col md:flex-row md:items-center gap-4">
+                          <div className="flex-1">
+                            <div className="font-bold text-amber-800">₹1 Admin Test</div>
+                            <div className="text-sm text-amber-700">Verifies the live payment cycle · 1 credit</div>
+                          </div>
+                          <button
+                            onClick={() => handleCheckout(plan.amountRupees)}
+                            disabled={checkingOut === plan.amountRupees}
+                            className="shrink-0 bg-amber-500 hover:bg-amber-600 text-white font-bold py-2 px-5 rounded-xl disabled:opacity-60 flex items-center gap-2"
+                          >
+                            {checkingOut === plan.amountRupees ? <Loader2 className="w-4 h-4 animate-spin" /> : "Test Payment"}
+                          </button>
+                        </div>
+                      ))}
                     </div>
                   </div>
                 )}
+
+                {/* Manual payment / activation code */}
+                <div className="bg-white border border-slate-200 p-5 rounded-2xl shadow-sm">
+                  <h3 className="text-base font-bold text-slate-900 mb-2">Redeem Activation Code</h3>
+                  {upiId && (
+                    <p className="text-sm text-slate-600 mb-3">
+                      Paid via UPI to <strong>{upiId}</strong>? Request a code from support and redeem it here.
+                    </p>
+                  )}
+                  <div className="flex gap-3">
+                    <input
+                      type="text"
+                      value={activationCode}
+                      onChange={(e) => setActivationCode(e.target.value)}
+                      placeholder="Enter activation code"
+                      className="flex-1 bg-slate-50 border border-slate-200 text-slate-900 text-sm rounded-lg px-4 py-2.5 outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                    <button
+                      onClick={handleActivate}
+                      disabled={!activationCode || activating}
+                      className="bg-slate-900 hover:bg-slate-800 text-white px-5 py-2.5 rounded-lg font-semibold transition-colors disabled:opacity-50 whitespace-nowrap flex items-center gap-2"
+                    >
+                      {activating ? <Loader2 className="w-4 h-4 animate-spin" /> : "Redeem"}
+                    </button>
+                  </div>
+                </div>
              </div>
            )}
 

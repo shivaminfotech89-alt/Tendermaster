@@ -61,25 +61,31 @@ export default function AdminPanel() {
     fetchUsers();
   }, []);
 
-  const updateRole = async (userId: string, newRole: string, days?: number) => {
+  const updateRole = async (userId: string, newRole: string) => {
     try {
-      if (newRole === 'premium' && days) {
-        const newExpiry = new Date();
-        newExpiry.setDate(newExpiry.getDate() + days);
-        await updateDoc(doc(db, "users", userId), { role: newRole, subscriptionExpiry: newExpiry });
-        setUsers(users.map(u => u.id === userId ? { ...u, role: newRole, subscriptionExpiry: { toDate: () => newExpiry } } : u));
-        toast.success(`User activated for ${days} days`);
-      } else if (newRole === 'free') {
-        await updateDoc(doc(db, "users", userId), { role: newRole, subscriptionExpiry: null });
-        setUsers(users.map(u => u.id === userId ? { ...u, role: newRole, subscriptionExpiry: null } : u));
-        toast.success("User downgraded to free plan");
-      } else {
-        await updateDoc(doc(db, "users", userId), { role: newRole });
-        setUsers(users.map(u => u.id === userId ? { ...u, role: newRole } : u));
-        toast.success(`User granted ${newRole} role`);
-      }
+      await updateDoc(doc(db, "users", userId), { role: newRole });
+      setUsers(users.map(u => u.id === userId ? { ...u, role: newRole } : u));
+      toast.success(`User role set to ${newRole}`);
     } catch (error: any) {
       toast.error("Failed to update user: " + error.message);
+    }
+  };
+
+  const grantCreditsToUser = async (userId: string, credits: number) => {
+    try {
+      const res = await fetchWithAuth("/api/admin/grant-credits", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ uid: userId, credits }),
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || "Failed");
+      }
+      setUsers(users.map(u => u.id === userId ? { ...u, creditsTotal: (u.creditsTotal || 0) + credits } : u));
+      toast.success(`Granted ${credits} credit${credits !== 1 ? "s" : ""}`);
+    } catch (error: any) {
+      toast.error("Failed to grant credits: " + error.message);
     }
   };
 
@@ -156,10 +162,11 @@ export default function AdminPanel() {
   }, []);
 
   const activeSubscriptions = users.filter(u => {
-    const isPremium = u.role === 'premium' || u.role === 'superadmin';
-    const expiry = u.subscriptionExpiry?.toDate ? u.subscriptionExpiry.toDate() : null;
-    const notExpired = expiry ? expiry > new Date() : u.role === 'superadmin';
-    return isPremium && notExpired;
+    if (u.role === 'admin' || u.role === 'superadmin') return true;
+    const total = u.creditsTotal || 0;
+    const used = u.creditsUsed || 0;
+    const expiry = u.creditsExpiry?.toDate ? u.creditsExpiry.toDate() : null;
+    return total > used && (!expiry || expiry > new Date());
   }).length;
 
   return (
@@ -372,10 +379,10 @@ export default function AdminPanel() {
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {users.map(u => {
-                    const isPremium = u.role === 'premium' || u.role === 'superadmin';
-                    const expiryDate = u.subscriptionExpiry?.toDate ? u.subscriptionExpiry.toDate() : null;
-                    const isExpired = expiryDate && expiryDate < new Date();
-                    
+                    const isAdmin = u.role === 'admin' || u.role === 'superadmin';
+                    const creditsLeft = (u.creditsTotal || 0) - (u.creditsUsed || 0);
+                    const hasCredits = isAdmin || creditsLeft > 0;
+
                     return (
                       <tr key={u.id} className="text-sm hover:bg-slate-50 transition-colors">
                         <td className="p-3">
@@ -387,12 +394,12 @@ export default function AdminPanel() {
                         </td>
                         <td className="p-3">
                           <div className="flex flex-col items-start gap-1">
-                            <span className={`px-2 py-1 rounded text-xs font-bold ${isPremium && !isExpired ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-600'}`}>
+                            <span className={`px-2 py-1 rounded text-xs font-bold ${isAdmin ? 'bg-blue-100 text-blue-700' : hasCredits ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-600'}`}>
                               {(u.role || 'free').toUpperCase()}
                             </span>
-                            {expiryDate && (
-                              <span className={`text-xs ${isExpired ? 'text-red-500' : 'text-slate-500'}`}>
-                                Exp: {expiryDate.toLocaleDateString()}
+                            {u.creditsTotal !== undefined && !isAdmin && (
+                              <span className="text-xs text-slate-500">
+                                {u.creditsUsed || 0}/{u.creditsTotal} credits used
                               </span>
                             )}
                           </div>
@@ -404,12 +411,8 @@ export default function AdminPanel() {
                           <div className="flex flex-wrap justify-end gap-2">
                             {u.role !== 'admin' && <button onClick={() => updateRole(u.id, 'admin')} className="px-3 py-1 bg-blue-100 text-blue-700 text-xs font-bold rounded hover:bg-blue-200">Make Admin</button>}
                             {u.role !== 'free' && <button onClick={() => updateRole(u.id, 'free')} className="px-3 py-1 bg-slate-100 text-slate-700 text-xs font-bold rounded hover:bg-slate-200">Make Free</button>}
-                            {u.role !== 'premium' && (
-                               <>
-                                 <button onClick={() => updateRole(u.id, 'premium', 90)} className="px-3 py-1 bg-emerald-100 text-emerald-700 text-xs font-bold rounded hover:bg-emerald-200">3 Months</button>
-                                 <button onClick={() => updateRole(u.id, 'premium', 365)} className="px-3 py-1 bg-indigo-100 text-indigo-700 text-xs font-bold rounded hover:bg-indigo-200">1 Year</button>
-                               </>
-                            )}
+                            <button onClick={() => grantCreditsToUser(u.id, 10)} className="px-3 py-1 bg-emerald-100 text-emerald-700 text-xs font-bold rounded hover:bg-emerald-200">+10 Credits</button>
+                            <button onClick={() => grantCreditsToUser(u.id, 20)} className="px-3 py-1 bg-indigo-100 text-indigo-700 text-xs font-bold rounded hover:bg-indigo-200">+20 Credits</button>
                           </div>
                         </td>
                       </tr>

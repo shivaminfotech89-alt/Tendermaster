@@ -105,30 +105,38 @@ export default function SuperAdminPanel() {
     }
   };
 
-  const updateRole = async (userId: string, newRole: string, days?: number) => {
+  const updateRole = async (userId: string, newRole: string) => {
     try {
-      if (newRole === 'premium' && days) {
-        const newExpiry = new Date();
-        newExpiry.setDate(newExpiry.getDate() + days);
-        await updateDoc(doc(db, "users", userId), { role: newRole, subscriptionExpiry: newExpiry });
-      } else if (newRole === 'free') {
-        await updateDoc(doc(db, "users", userId), { role: newRole, subscriptionExpiry: null });
-      } else {
-        await updateDoc(doc(db, "users", userId), { role: newRole });
-      }
+      await updateDoc(doc(db, "users", userId), { role: newRole });
       toast.success("Role updated!");
       fetchUsers();
-      // write log
       await setDoc(doc(collection(db, "activity_logs")), {
         action: "UPDATE_ROLE",
         targetUserId: userId,
         newRole,
-        days: days || 0,
         by: user?.email,
         timestamp: new Date()
       });
     } catch (e: any) {
       toast.error("Failed: " + e.message);
+    }
+  };
+
+  const grantCreditsToUser = async (userId: string, credits: number) => {
+    try {
+      const res = await fetchWithAuth("/api/admin/grant-credits", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ uid: userId, credits }),
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || "Failed");
+      }
+      toast.success(`Granted ${credits} credit${credits !== 1 ? "s" : ""}`);
+      fetchUsers();
+    } catch (e: any) {
+      toast.error("Failed to grant credits: " + e.message);
     }
   };
 
@@ -187,15 +195,11 @@ export default function SuperAdminPanel() {
                        <tr key={u.id} className="border-b border-slate-50 hover:bg-slate-50/50">
                          <td className="p-4">{u.email}</td>
                          <td className="p-4"><span className="uppercase tracking-wider font-bold text-xs bg-slate-100 px-2 py-1 rounded">{u.role}</span></td>
-                         <td className="p-4 flex gap-2">
+                         <td className="p-4 flex flex-wrap gap-2">
                            {u.role !== 'admin' && <button onClick={() => updateRole(u.id, 'admin')} className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded font-medium hover:bg-blue-200">Make Admin</button>}
                            {u.role !== 'free' && <button onClick={() => updateRole(u.id, 'free')} className="text-xs bg-slate-200 text-slate-700 px-2 py-1 rounded font-medium hover:bg-slate-300">Make Free</button>}
-                           {u.role !== 'premium' && (
-                             <>
-                               <button onClick={() => updateRole(u.id, 'premium', 90)} className="text-xs bg-emerald-100 text-emerald-700 px-2 py-1 rounded font-medium hover:bg-emerald-200">3 Months</button>
-                               <button onClick={() => updateRole(u.id, 'premium', 365)} className="text-xs bg-indigo-100 text-indigo-700 px-2 py-1 rounded font-medium hover:bg-indigo-200">1 Year</button>
-                             </>
-                           )}
+                           <button onClick={() => grantCreditsToUser(u.id, 10)} className="text-xs bg-emerald-100 text-emerald-700 px-2 py-1 rounded font-medium hover:bg-emerald-200">+10 Credits</button>
+                           <button onClick={() => grantCreditsToUser(u.id, 20)} className="text-xs bg-indigo-100 text-indigo-700 px-2 py-1 rounded font-medium hover:bg-indigo-200">+20 Credits</button>
                          </td>
                        </tr>
                      ))}
@@ -213,8 +217,9 @@ export default function SuperAdminPanel() {
              <div className="bg-slate-50 p-3 rounded text-sm text-slate-600 mb-4">
                 <strong>Current Active Plans (Razorpay Integration):</strong>
                 <ul className="list-disc pl-5 mt-1">
-                   <li>3 Months Plan (₹999)</li>
-                   <li>1 Year Plan (₹1999)</li>
+                   <li>Starter — ₹9,999 / 10 credits</li>
+                   <li>Pro — ₹14,999 / 20 credits</li>
+                   <li>Admin Test — ₹1 / 1 credit (admin only)</li>
                 </ul>
              </div>
              <div>

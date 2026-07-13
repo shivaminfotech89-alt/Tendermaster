@@ -296,7 +296,7 @@ export default function Settings() {
                   </div>
                 )}
 
-                {/* Buy credits */}
+                {/* Regular plans — non-admins only */}
                 {!isAdmin && (
                   <div className="space-y-4">
                     <p className="text-sm font-semibold text-slate-700">Get more analyses — stacks with your current balance</p>
@@ -338,26 +338,26 @@ export default function Settings() {
                           </div>
                         );
                       })}
-
-                      {/* Admin test plan — only for admins */}
-                      {isAdmin && PLANS.filter(p => p.adminOnly).map(plan => (
-                        <div key={plan.amountPaise} className="rounded-2xl p-5 bg-amber-50 border-2 border-amber-300 flex flex-col md:flex-row md:items-center gap-4">
-                          <div className="flex-1">
-                            <div className="font-bold text-amber-800">₹1 Admin Test</div>
-                            <div className="text-sm text-amber-700">Verifies the live payment cycle · 1 analysis</div>
-                          </div>
-                          <button
-                            onClick={() => handleCheckout(plan.amountRupees)}
-                            disabled={checkingOut === plan.amountRupees}
-                            className="shrink-0 bg-amber-500 hover:bg-amber-600 text-white font-bold py-2 px-5 rounded-xl disabled:opacity-60 flex items-center gap-2"
-                          >
-                            {checkingOut === plan.amountRupees ? <Loader2 className="w-4 h-4 animate-spin" /> : "Test Payment"}
-                          </button>
-                        </div>
-                      ))}
                     </div>
                   </div>
                 )}
+
+                {/* Admin test plan — admins only, outside the non-admin branch */}
+                {isAdmin && PLANS.filter(p => p.adminOnly).map(plan => (
+                  <div key={plan.amountPaise} className="rounded-2xl p-5 bg-amber-50 border-2 border-amber-300 flex flex-col md:flex-row md:items-center gap-4">
+                    <div className="flex-1">
+                      <div className="font-bold text-amber-800">₹1 Admin Test</div>
+                      <div className="text-sm text-amber-700">Verifies the live payment cycle · 1 analysis</div>
+                    </div>
+                    <button
+                      onClick={() => handleCheckout(plan.amountRupees)}
+                      disabled={checkingOut === plan.amountRupees}
+                      className="shrink-0 bg-amber-500 hover:bg-amber-600 text-white font-bold py-2 px-5 rounded-xl disabled:opacity-60 flex items-center gap-2"
+                    >
+                      {checkingOut === plan.amountRupees ? <Loader2 className="w-4 h-4 animate-spin" /> : "Test Payment"}
+                    </button>
+                  </div>
+                ))}
 
                 {/* Manual payment / activation code */}
                 <div className="bg-white border border-slate-200 p-5 rounded-2xl shadow-sm">

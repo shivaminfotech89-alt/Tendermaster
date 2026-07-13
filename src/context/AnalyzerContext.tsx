@@ -7,12 +7,14 @@ interface AnalyzerState {
   reanalyzeProgress: number;
   analysisResult: any;
   payloadContext: string | string[];
+  savedProjectId: string | null;
   setAnalyzing: (v: boolean) => void;
   setProgress: (v: number) => void;
   setReanalyzing: (v: boolean) => void;
   setReanalyzeProgress: (v: number) => void;
   setAnalysisResult: (v: any) => void;
   setPayloadContext: (v: string | string[]) => void;
+  setSavedProjectId: (v: string | null) => void;
   clearAnalysis: () => void;
 }
 
@@ -31,6 +33,7 @@ export const AnalyzerProvider = ({ children }: { children: React.ReactNode }) =>
   const [reanalyzeProgress, setReanalyzeProgress] = useState(0);
   const [analysisResult, setAnalysisResult] = useState<any>(null);
   const [payloadContext, setPayloadContext] = useState<string | string[]>("");
+  const [savedProjectId, setSavedProjectId] = useState<string | null>(null);
 
   // Simulated progress immune to background throttling
   useEffect(() => {
@@ -73,12 +76,13 @@ export const AnalyzerProvider = ({ children }: { children: React.ReactNode }) =>
     setReanalyzeProgress(0);
     setAnalysisResult(null);
     setPayloadContext("");
+    setSavedProjectId(null);
   };
 
   return (
     <Context.Provider value={{
-      analyzing, progress, reanalyzing, reanalyzeProgress, analysisResult, payloadContext,
-      setAnalyzing, setProgress, setReanalyzing, setReanalyzeProgress, setAnalysisResult, setPayloadContext, clearAnalysis
+      analyzing, progress, reanalyzing, reanalyzeProgress, analysisResult, payloadContext, savedProjectId,
+      setAnalyzing, setProgress, setReanalyzing, setReanalyzeProgress, setAnalysisResult, setPayloadContext, setSavedProjectId, clearAnalysis
     }}>
       {children}
     </Context.Provider>

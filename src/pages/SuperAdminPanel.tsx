@@ -133,7 +133,7 @@ export default function SuperAdminPanel() {
         const err = await res.json();
         throw new Error(err.error || "Failed");
       }
-      toast.success(`Granted ${credits} credit${credits !== 1 ? "s" : ""}`);
+      toast.success(`Added ${credits} ${credits !== 1 ? "analyses" : "analysis"}`);
       fetchUsers();
     } catch (e: any) {
       toast.error("Failed to grant credits: " + e.message);
@@ -198,8 +198,8 @@ export default function SuperAdminPanel() {
                          <td className="p-4 flex flex-wrap gap-2">
                            {u.role !== 'admin' && <button onClick={() => updateRole(u.id, 'admin')} className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded font-medium hover:bg-blue-200">Make Admin</button>}
                            {u.role !== 'free' && <button onClick={() => updateRole(u.id, 'free')} className="text-xs bg-slate-200 text-slate-700 px-2 py-1 rounded font-medium hover:bg-slate-300">Make Free</button>}
-                           <button onClick={() => grantCreditsToUser(u.id, 10)} className="text-xs bg-emerald-100 text-emerald-700 px-2 py-1 rounded font-medium hover:bg-emerald-200">+10 Credits</button>
-                           <button onClick={() => grantCreditsToUser(u.id, 20)} className="text-xs bg-indigo-100 text-indigo-700 px-2 py-1 rounded font-medium hover:bg-indigo-200">+20 Credits</button>
+                           <button onClick={() => grantCreditsToUser(u.id, 10)} className="text-xs bg-emerald-100 text-emerald-700 px-2 py-1 rounded font-medium hover:bg-emerald-200">+10 Analyses</button>
+                           <button onClick={() => grantCreditsToUser(u.id, 20)} className="text-xs bg-indigo-100 text-indigo-700 px-2 py-1 rounded font-medium hover:bg-indigo-200">+20 Analyses</button>
                          </td>
                        </tr>
                      ))}
@@ -217,9 +217,9 @@ export default function SuperAdminPanel() {
              <div className="bg-slate-50 p-3 rounded text-sm text-slate-600 mb-4">
                 <strong>Current Active Plans (Razorpay Integration):</strong>
                 <ul className="list-disc pl-5 mt-1">
-                   <li>Starter — ₹9,999 / 10 credits</li>
-                   <li>Pro — ₹14,999 / 20 credits</li>
-                   <li>Admin Test — ₹1 / 1 credit (admin only)</li>
+                   <li>Starter — ₹9,999 / 10 analyses</li>
+                   <li>Pro — ₹14,999 / 20 analyses</li>
+                   <li>Admin Test — ₹1 / 1 analysis (admin only)</li>
                 </ul>
              </div>
              <div>

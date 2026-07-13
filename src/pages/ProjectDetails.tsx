@@ -34,7 +34,7 @@ function friendlyAnalysisError(raw: string): string {
     return "Your documents are too large to analyze together. Please analyze fewer or smaller documents at a time.";
   if (/exceeds the supported page limit/i.test(raw))
     return "Your documents have too many pages to analyze at once. Please analyze the key documents separately.";
-  if (/RESOURCE_EXHAUSTED|credits|quota/i.test(raw))
+  if (/RESOURCE_EXHAUSTED|credits|analyses|quota/i.test(raw))
     return "Analysis is temporarily unavailable. Please try again in a few minutes.";
   if (/too long|timed? ?out/i.test(raw))
     return "The analysis took too long. Please try with fewer or smaller documents.";

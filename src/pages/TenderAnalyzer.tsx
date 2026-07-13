@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { useAuth } from "../auth/AuthProvider";
 import { useAnalyzerStore } from "../context/AnalyzerContext";
 import { Upload, X, Loader2, Sparkles, AlertCircle, FileText, CheckCircle2, ChevronRight, Activity, CalendarDays, Link as LinkIcon, File, MessageSquare, Send, Calculator, Building, Target, Download, Edit2, Trash2, Plus, Minus, ArrowLeft, Info } from "lucide-react";
@@ -11,6 +11,8 @@ import * as XLSX from "xlsx";
 import { toast } from "react-hot-toast";
 import { useTranslation } from "react-i18next";
 import { fetchWithAuth } from "../lib/api";
+import { useNavigationGuard } from "../hooks/useNavigationGuard";
+import { UnsavedChangesModal } from "../components/UnsavedChangesModal";
 import { countPdfPages, extractPdfText, textToBase64, arrayBufferToBase64 } from "../lib/pdfToImage";
 
 const CollapsibleSection = ({ title, defaultOpen = true, children }: { title: string, defaultOpen?: boolean, children: React.ReactNode }) => {
@@ -56,7 +58,7 @@ function friendlyAnalysisError(raw: string): string {
     return "Your documents are too large to analyze together. Please analyze fewer or smaller documents at a time.";
   if (/exceeds the supported page limit/i.test(raw))
     return "Your documents have too many pages to analyze at once. Please analyze the key documents separately.";
-  if (/RESOURCE_EXHAUSTED|credits|quota/i.test(raw))
+  if (/RESOURCE_EXHAUSTED|credits|analyses|quota/i.test(raw))
     return "Analysis is temporarily unavailable. Please try again in a few minutes.";
   if (/too long|timed? ?out/i.test(raw))
     return "The analysis took too long. Please try with fewer or smaller documents.";
@@ -67,7 +69,7 @@ export default function TenderAnalyzer() {
   const { user, role } = useAuth();
   const { t, i18n } = useTranslation();
   
-  const { analyzing, progress, analysisResult, payloadContext, setAnalyzing, setProgress, setAnalysisResult, setPayloadContext, clearAnalysis } = useAnalyzerStore();
+  const { analyzing, progress, analysisResult, payloadContext, savedProjectId, setAnalyzing, setProgress, setAnalysisResult, setPayloadContext, setSavedProjectId, clearAnalysis } = useAnalyzerStore();
 
   const [inputType, setInputType] = useState<'url' | 'pdf' | 'zip'>('pdf');
   const [tenderUrl, setTenderUrl] = useState("");
@@ -83,8 +85,8 @@ export default function TenderAnalyzer() {
   const [error, setError] = useState("");
   const [projectName, setProjectName] = useState("");
   
-  const [savedProjectId, setSavedProjectId] = useState<string | null>(null);
   const [analyzedPayload, setAnalyzedPayload] = useState<any>(null);
+  const [docExported, setDocExported] = useState(false);
   
   // Chat state
   const [activeTab, setActiveTab] = useState<'overview'|'docs'|'calculator'|'chat'|'notes'>('overview');
@@ -141,17 +143,13 @@ export default function TenderAnalyzer() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const chatBottomRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
-      if (analysisResult && !savedProjectId) {
-        e.preventDefault();
-        e.returnValue = "You have unsaved analysis. Are you sure you want to leave without saving?";
-        return e.returnValue;
-      }
-    };
-    window.addEventListener("beforeunload", handleBeforeUnload);
-    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
-  }, [analysisResult, savedProjectId]);
+  // Navigation guards — analysis (credit spent, not yet persisted) and unsaved generated doc
+  const analysisDirty = !!analysisResult && !savedProjectId;
+  const docDirty = !!generatedDoc && generatedDoc !== "Generating..." && !docExported;
+  const navBlocker = useNavigationGuard(analysisDirty || docDirty);
+
+  // Callback to mark a generated doc as exported (downloaded or copied)
+  const markDocExported = useCallback(() => setDocExported(true), []);
 
   const handlePdfUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
@@ -337,6 +335,7 @@ export default function TenderAnalyzer() {
     setAnalyzing(true);
     setAnalysisResult(null);
     setSavedProjectId(null);
+    setDocExported(false);
 
     try {
       const { doc: firestoreDoc, getDoc: fGetDoc } = await import("firebase/firestore");
@@ -405,7 +404,6 @@ export default function TenderAnalyzer() {
       setPayloadContext(payload);
       if (data.projectId) {
         setSavedProjectId(data.projectId);
-        toast.success("Analysis complete — saved to your pipeline!");
       }
 
     } catch (err: any) {
@@ -426,6 +424,7 @@ export default function TenderAnalyzer() {
     setGeneratedDoc("Generating...");
     setGeneratedDocIsHtml(false);
     setIsEditingDoc(false);
+    setDocExported(false);
     try {
       let exactFormUrl: string | undefined;
       let exactFormMimeType: string | undefined;
@@ -502,6 +501,7 @@ export default function TenderAnalyzer() {
       a.download = docType.replace(/\s+/g, "_") + ".pdf";
       a.click();
       URL.revokeObjectURL(url);
+      markDocExported();
     } catch (e: any) {
       toast.error("PDF generation failed: " + e.message);
     } finally {
@@ -533,6 +533,7 @@ export default function TenderAnalyzer() {
       a.download = docType.replace(/\s+/g, "_") + ".docx";
       a.click();
       URL.revokeObjectURL(url);
+      markDocExported();
     } catch (e: any) {
       toast.error("Word generation failed: " + e.message);
     } finally {
@@ -623,7 +624,21 @@ export default function TenderAnalyzer() {
     </div>
   );
 
+  const navModalTitle = analysisDirty ? "Unsaved analysis" : "Leave without saving your document?";
+  const navModalMessage = analysisDirty
+    ? "This analysis hasn't been saved to your projects yet. Leave without saving?"
+    : "You have a generated document that hasn't been downloaded or copied yet.";
+  const navModalStayLabel = analysisDirty ? "Stay on Page" : "Stay & Download";
+
   return (
+    <>
+    <UnsavedChangesModal
+      blocker={navBlocker}
+      title={navModalTitle}
+      message={navModalMessage}
+      stayLabel={navModalStayLabel}
+      leaveLabel="Discard"
+    />
     <div className="p-6 md:p-8 max-w-6xl mx-auto pb-24 relative">
       <div className="mb-6 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
@@ -1447,10 +1462,11 @@ export default function TenderAnalyzer() {
                                a.href = url;
                                a.download = docType.replace(/\s+/g, "_") + ".txt";
                                a.click();
+                               markDocExported();
                              }} className="text-xs flex items-center gap-1 text-slate-500 hover:text-slate-700 font-medium transition-colors">
                                <Download className="w-3 h-3" /> .txt
                              </button>
-                           <button onClick={() => { navigator.clipboard.writeText(generatedDoc); toast.success("Copied to clipboard!"); }}
+                           <button onClick={() => { navigator.clipboard.writeText(generatedDoc); toast.success("Copied to clipboard!"); markDocExported(); }}
                                className="text-xs flex items-center gap-1 text-indigo-600 hover:text-indigo-800 font-medium">
                                <FileText className="w-3 h-3" /> Copy
                              </button>
@@ -1648,5 +1664,6 @@ export default function TenderAnalyzer() {
         </div>
       )}
     </div>
+    </>
   );
 }

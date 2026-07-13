@@ -485,26 +485,25 @@ export default function BusinessProfile() {
                 {isAdminRole
                   ? t("superadmin_access")
                   : credits.hasCredits
-                  ? `${creditsLeft} Credit${creditsLeft !== 1 ? "s" : ""} Remaining`
-                  : "No Credits Remaining"}
+                  ? `${creditsLeft} of ${credits.total} ${creditsLeft !== 1 ? "analyses" : "analysis"} remaining`
+                  : `All ${credits.total > 0 ? credits.total + " " : ""}analyses used`}
               </h2>
             </div>
             {!isAdminRole && credits.hasCredits && (
               <p className="text-amber-800 text-sm font-medium">
-                {credits.used} of {credits.total} used
-                {credits.expiry && ` — valid until ${credits.expiry.toLocaleDateString()}`}
+                {credits.expiry && `Valid until ${credits.expiry.toLocaleDateString()}`}
               </p>
             )}
             {!isAdminRole && !credits.hasCredits && (
               <div className="mt-2">
                 <p className="text-rose-700 text-sm mb-3">
-                  You have no credits remaining. Purchase credits to run new analyses and generate documents.
+                  You've used all your analyses. Add more to continue running new analyses and generating documents.
                 </p>
                 <Link
                   to="/dashboard/settings?tab=subscription"
                   className="inline-flex items-center gap-2 bg-rose-600 hover:bg-rose-700 text-white px-4 py-2 rounded-lg text-sm font-semibold transition-colors"
                 >
-                  Buy Credits
+                  Add more analyses
                 </Link>
               </div>
             )}

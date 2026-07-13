@@ -206,8 +206,8 @@ export default function Dashboard() {
             <div className="flex-1 min-w-0">
               <p className={`text-sm font-bold ${!credits.hasCredits ? "text-rose-700" : warn ? "text-amber-700" : "text-indigo-700"}`}>
                 {!credits.hasCredits
-                  ? "Credits exhausted — buy more to analyse new tenders"
-                  : `${creditsLeft} of ${credits.total} credit${credits.total !== 1 ? "s" : ""} remaining${expiryStr ? ` · valid until ${expiryStr}` : ""}`}
+                  ? `You've used all ${credits.total > 0 ? credits.total + " of your " : "your "}analyses. Add more to continue.`
+                  : `${creditsLeft} of ${credits.total} ${credits.total !== 1 ? "analyses" : "analysis"} remaining${expiryStr ? ` · Valid until ${expiryStr}` : ""}`}
               </p>
               {credits.total > 0 && (
                 <div className="mt-1.5 bg-white/70 rounded-full h-1.5 overflow-hidden w-full max-w-xs">
@@ -217,7 +217,7 @@ export default function Dashboard() {
             </div>
             {!credits.hasCredits && (
               <Link to="/dashboard/settings?tab=subscription" className="shrink-0 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold px-4 py-2 rounded-lg whitespace-nowrap">
-                Buy Credits
+                Add more analyses
               </Link>
             )}
           </div>

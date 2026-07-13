@@ -261,8 +261,8 @@ export default function Settings() {
            {activeTab === "subscription" && (
              <div className="max-w-lg space-y-6">
                 <div>
-                   <h2 className="text-xl font-bold text-slate-900">Credits & Billing</h2>
-                   <p className="text-sm text-slate-500 mt-1">Each credit = 1 tender analysis. Credits never expire for 24 months from purchase.</p>
+                   <h2 className="text-xl font-bold text-slate-900">Analyses & Billing</h2>
+                   <p className="text-sm text-slate-500 mt-1">Each purchase adds tender analyses valid for 24 months from the purchase date.</p>
                 </div>
 
                 {/* Credits balance card */}
@@ -270,14 +270,14 @@ export default function Settings() {
                   <div className="bg-indigo-50 border border-indigo-200 p-4 rounded-xl">
                     <p className="text-xs font-bold text-indigo-500 uppercase tracking-widest mb-1">Account Type</p>
                     <h3 className="text-2xl font-black text-indigo-900 uppercase">{role}</h3>
-                    <p className="text-sm text-indigo-700 mt-1">Unlimited access — credits not consumed</p>
+                    <p className="text-sm text-indigo-700 mt-1">Unlimited access</p>
                   </div>
                 ) : (
                   <div className={`border p-4 rounded-xl ${credits.hasCredits ? "bg-emerald-50 border-emerald-200" : "bg-rose-50 border-rose-200"}`}>
-                    <p className="text-xs font-bold uppercase tracking-widest mb-1 ${credits.hasCredits ? 'text-emerald-600' : 'text-rose-600'}">Credits Remaining</p>
+                    <p className={`text-xs font-bold uppercase tracking-widest mb-1 ${credits.hasCredits ? 'text-emerald-600' : 'text-rose-600'}`}>Analyses Remaining</p>
                     <div className="flex items-end gap-2">
                       <span className={`text-4xl font-black ${credits.hasCredits ? "text-emerald-700" : "text-rose-700"}`}>{creditsLeft}</span>
-                      <span className="text-slate-500 text-sm mb-1">of {credits.total} total</span>
+                      <span className="text-slate-500 text-sm mb-1">of {credits.total}</span>
                     </div>
                     {credits.total > 0 && (
                       <div className="mt-2 bg-white/60 rounded-full h-2 overflow-hidden">
@@ -291,7 +291,7 @@ export default function Settings() {
                       <p className="text-xs text-slate-500 mt-2">Valid until {creditsExpiryStr}</p>
                     )}
                     {!credits.hasCredits && (
-                      <p className="text-xs font-semibold text-rose-600 mt-2">Purchase credits below to run new analyses. Your existing data stays accessible.</p>
+                      <p className="text-xs font-semibold text-rose-600 mt-2">Add more analyses to continue. Your existing data stays accessible.</p>
                     )}
                   </div>
                 )}
@@ -299,7 +299,7 @@ export default function Settings() {
                 {/* Buy credits */}
                 {!isAdmin && (
                   <div className="space-y-4">
-                    <p className="text-sm font-semibold text-slate-700">Top up credits — stacks with existing balance</p>
+                    <p className="text-sm font-semibold text-slate-700">Get more analyses — stacks with your current balance</p>
                     <div className="grid grid-cols-1 gap-4">
                       {PLANS.filter(p => !p.adminOnly).map((plan, i) => {
                         const featured = i === 1;
@@ -321,7 +321,7 @@ export default function Settings() {
                             <div className="flex-1">
                               <div className="font-bold text-lg">{plan.label}</div>
                               <div className="text-3xl font-extrabold">₹{plan.amountRupees.toLocaleString('en-IN')}</div>
-                              <div className={`text-sm mt-1 ${featured ? "text-indigo-300" : "text-slate-400"}`}>{plan.credits} credits · 24-month validity</div>
+                              <div className={`text-sm mt-1 ${featured ? "text-indigo-300" : "text-slate-400"}`}>{plan.credits} analyses · Valid for 24 months</div>
                               <ul className={`mt-2 space-y-1 text-sm ${featured ? "text-indigo-100" : "text-slate-300"}`}>
                                 {features.map(f => <li key={f}>✓ {f}</li>)}
                               </ul>
@@ -333,7 +333,7 @@ export default function Settings() {
                                 featured ? "bg-indigo-500 hover:bg-indigo-400" : "bg-blue-600 hover:bg-blue-700"
                               } text-white disabled:opacity-60`}
                             >
-                              {checkingOut === plan.amountRupees ? <Loader2 className="w-5 h-5 animate-spin" /> : "Buy Credits"}
+                              {checkingOut === plan.amountRupees ? <Loader2 className="w-5 h-5 animate-spin" /> : "Get Analyses"}
                             </button>
                           </div>
                         );
@@ -344,7 +344,7 @@ export default function Settings() {
                         <div key={plan.amountPaise} className="rounded-2xl p-5 bg-amber-50 border-2 border-amber-300 flex flex-col md:flex-row md:items-center gap-4">
                           <div className="flex-1">
                             <div className="font-bold text-amber-800">₹1 Admin Test</div>
-                            <div className="text-sm text-amber-700">Verifies the live payment cycle · 1 credit</div>
+                            <div className="text-sm text-amber-700">Verifies the live payment cycle · 1 analysis</div>
                           </div>
                           <button
                             onClick={() => handleCheckout(plan.amountRupees)}

@@ -98,13 +98,13 @@ export default function Layout() {
           {role !== "admin" && role !== "superadmin" && !credits.hasCredits && (
             <Link to="/dashboard/settings?tab=subscription" className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-rose-500 to-orange-500 hover:from-rose-600 hover:to-orange-600 text-white py-2 rounded-lg text-sm font-bold shadow-md transition-all mb-2">
               <ShieldCheck className="w-4 h-4" />
-              Buy Credits
+              Add more analyses
             </Link>
           )}
           {role !== "admin" && role !== "superadmin" && credits.hasCredits && (credits.total - credits.used) <= Math.max(1, Math.floor(credits.total * 0.2)) && (
             <Link to="/dashboard/settings?tab=subscription" className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-amber-500 to-orange-400 hover:from-amber-600 hover:to-orange-500 text-white py-2 rounded-lg text-sm font-bold shadow-md transition-all mb-2">
               <ShieldCheck className="w-4 h-4" />
-              {credits.total - credits.used} credit{(credits.total - credits.used) !== 1 ? "s" : ""} left — top up
+              {credits.total - credits.used} of {credits.total} analyses remaining
             </Link>
           )}
           <div className="flex items-center gap-2 px-2 pb-2 border-b border-slate-100">
@@ -148,7 +148,7 @@ export default function Layout() {
             {role !== "admin" && role !== "superadmin" && !credits.hasCredits && (
               <Link to="/dashboard/settings?tab=subscription" className="flex items-center justify-center bg-gradient-to-r from-rose-500 to-orange-500 text-white p-1.5 rounded text-xs font-bold shadow-md">
                 <ShieldCheck className="w-4 h-4 mr-1" />
-                BUY CREDITS
+                ADD ANALYSES
               </Link>
             )}
             <select

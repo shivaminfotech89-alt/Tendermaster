@@ -353,14 +353,14 @@ export default function LandingPage() {
           <h2 className="text-2xl font-extrabold text-slate-900 text-center mb-2" style={{ letterSpacing: '-.02em' }}>
             Pay per tender, not per month
           </h2>
-          <p className="text-sm text-slate-500 text-center mb-2">Credits never expire — valid 24 months. Your data stays accessible forever.</p>
-          <p className="text-sm text-slate-400 text-center mb-10">1 credit = 1 tender analysis. Re-analyses on saved projects are free.</p>
+          <p className="text-sm text-slate-500 text-center mb-2">Analyses never expire — valid for 24 months from purchase. Your data stays accessible forever.</p>
+          <p className="text-sm text-slate-400 text-center mb-10">1 purchase = 1 tender analysis. Re-analyses on saved projects are free.</p>
 
           {/* Trial callout */}
           <div className="max-w-2xl mx-auto mb-8 rounded-2xl border border-indigo-100 bg-indigo-50 p-5 flex flex-col md:flex-row items-center gap-4">
             <div className="flex-1">
               <div className="text-sm font-bold text-indigo-700">Free Trial</div>
-              <div className="text-2xl font-extrabold text-slate-900 mt-0.5">1 credit — free</div>
+              <div className="text-2xl font-extrabold text-slate-900 mt-0.5">1 free analysis — no card needed</div>
               <p className="text-sm text-slate-600 mt-1">Analyse your first tender at no cost. No card required.</p>
             </div>
             <Link to="/login" className="shrink-0 bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2.5 px-6 rounded-xl text-sm flex items-center gap-2">
@@ -397,7 +397,7 @@ export default function LandingPage() {
                     ₹{plan.amountRupees.toLocaleString('en-IN')}
                   </div>
                   <div className={`text-sm mt-1 ${featured ? "text-indigo-600 font-semibold" : "text-slate-500"}`}>
-                    {plan.credits} credits · ₹{perCredit.toLocaleString('en-IN')} each
+                    {plan.credits} analyses · ₹{perCredit.toLocaleString('en-IN')} each
                   </div>
                   <div className="my-5 h-px bg-slate-100" />
                   <ul className="space-y-2.5 text-sm text-slate-700 flex-1 leading-relaxed">
@@ -411,7 +411,7 @@ export default function LandingPage() {
                         : "border border-slate-300 text-slate-700 hover:bg-slate-50"
                     }`}
                   >
-                    Buy {plan.credits} Credits <ArrowRight className="w-4 h-4" />
+                    Get {plan.credits} Analyses <ArrowRight className="w-4 h-4" />
                   </button>
                 </div>
               );

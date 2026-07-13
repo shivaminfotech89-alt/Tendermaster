@@ -258,7 +258,7 @@ const requireCredits = async (
     }
 
     return res.status(403).json({
-      error: "You've used all your credits. Purchase more to run new analyses. Your existing projects and documents remain accessible.",
+      error: "You've used all your analyses. Add more to continue — your existing projects and documents remain fully accessible.",
     });
   } catch (err) {
     console.error("[Credits] requireCredits failed:", err);
@@ -627,7 +627,7 @@ app.post("/api/verify-payment", verifyFirebaseToken, async (req: AuthenticatedRe
 
     return res.json({
       success: true,
-      message: `Payment verified. ${planMeta.credits} credit${planMeta.credits !== 1 ? "s" : ""} added to your account.`,
+      message: `Payment verified. ${planMeta.credits} ${planMeta.credits !== 1 ? "analyses" : "analysis"} added to your account.`,
       credits: planMeta.credits,
       paymentId: razorpay_payment_id,
     });
@@ -1239,7 +1239,7 @@ app.post("/api/analyze-tender", verifyFirebaseToken, async (req: AuthenticatedRe
         const now = new Date();
         if (creditsUsed >= creditsTotal || !creditsExpiry || creditsExpiry <= now) {
           return res.status(403).json({
-            error: "You've used all your credits. Purchase more to run new analyses. Your existing projects and documents remain accessible.",
+            error: "You've used all your analyses. Add more to continue — your existing projects and documents remain fully accessible.",
           });
         }
       }
@@ -1753,7 +1753,7 @@ MODE 1: CONTRACT PROFILE ANALYSIS & MATCHING
     } catch (txErr: any) {
       if (txErr.message === "CREDITS_EXHAUSTED") {
         return res.status(403).json({
-          error: "You've used all your credits. Purchase more to run new analyses. Your existing projects and documents remain accessible.",
+          error: "You've used all your analyses. Add more to continue — your existing projects and documents remain fully accessible.",
         });
       }
       throw txErr; // re-throw to outer catch → recordFailedAttempt

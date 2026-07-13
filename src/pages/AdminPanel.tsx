@@ -83,7 +83,7 @@ export default function AdminPanel() {
         throw new Error(err.error || "Failed");
       }
       setUsers(users.map(u => u.id === userId ? { ...u, creditsTotal: (u.creditsTotal || 0) + credits } : u));
-      toast.success(`Granted ${credits} credit${credits !== 1 ? "s" : ""}`);
+      toast.success(`Added ${credits} ${credits !== 1 ? "analyses" : "analysis"}`);
     } catch (error: any) {
       toast.error("Failed to grant credits: " + error.message);
     }
@@ -399,7 +399,7 @@ export default function AdminPanel() {
                             </span>
                             {u.creditsTotal !== undefined && !isAdmin && (
                               <span className="text-xs text-slate-500">
-                                {u.creditsUsed || 0}/{u.creditsTotal} credits used
+                                {u.creditsUsed || 0}/{u.creditsTotal} analyses used
                               </span>
                             )}
                           </div>
@@ -411,8 +411,8 @@ export default function AdminPanel() {
                           <div className="flex flex-wrap justify-end gap-2">
                             {u.role !== 'admin' && <button onClick={() => updateRole(u.id, 'admin')} className="px-3 py-1 bg-blue-100 text-blue-700 text-xs font-bold rounded hover:bg-blue-200">Make Admin</button>}
                             {u.role !== 'free' && <button onClick={() => updateRole(u.id, 'free')} className="px-3 py-1 bg-slate-100 text-slate-700 text-xs font-bold rounded hover:bg-slate-200">Make Free</button>}
-                            <button onClick={() => grantCreditsToUser(u.id, 10)} className="px-3 py-1 bg-emerald-100 text-emerald-700 text-xs font-bold rounded hover:bg-emerald-200">+10 Credits</button>
-                            <button onClick={() => grantCreditsToUser(u.id, 20)} className="px-3 py-1 bg-indigo-100 text-indigo-700 text-xs font-bold rounded hover:bg-indigo-200">+20 Credits</button>
+                            <button onClick={() => grantCreditsToUser(u.id, 10)} className="px-3 py-1 bg-emerald-100 text-emerald-700 text-xs font-bold rounded hover:bg-emerald-200">+10 Analyses</button>
+                            <button onClick={() => grantCreditsToUser(u.id, 20)} className="px-3 py-1 bg-indigo-100 text-indigo-700 text-xs font-bold rounded hover:bg-indigo-200">+20 Analyses</button>
                           </div>
                         </td>
                       </tr>

@@ -23,6 +23,18 @@ const PLAN_CREDITS_MAP: Record<number, { credits: number; adminOnly: boolean; id
 ) as Record<number, { credits: number; adminOnly: boolean; id: string }>;
 const VALID_PAISE = new Set<number>(PLANS.map(p => p.amountPaise));
 
+// ---------------------------------------------------------------------------
+// Admin identity — single source of truth
+// ---------------------------------------------------------------------------
+const SUPERADMIN_EMAILS: string[] = (process.env.SUPERADMIN_EMAILS ?? "shivaminfotech89@gmail.com")
+  .split(",")
+  .map(e => e.trim())
+  .filter(Boolean);
+
+/** True when the user holds an admin/superadmin role OR matches the email fallback list. */
+const isAdminRole = (role: string, email?: string): boolean =>
+  role === "admin" || role === "superadmin" || SUPERADMIN_EMAILS.includes(email ?? "");
+
 let firebaseConfig: any = {};
 try {
   const configPath = path.join(process.cwd(), "firebase-applet-config.json");
@@ -227,8 +239,7 @@ const requireCredits = async (
     if (snap.exists) {
       const data = snap.data()!;
       role = data.role || "free";
-      if (req.user!.email === "shivaminfotech89@gmail.com") role = "superadmin";
-      if (role === "admin" || role === "superadmin") return next();
+      if (isAdminRole(role, req.user!.email)) return next();
 
       if (data.creditsTotal !== undefined) {
         creditsTotal = data.creditsTotal ?? 0;
@@ -249,7 +260,7 @@ const requireCredits = async (
         creditsExpiry = expiry;
       }
     } else {
-      if (req.user!.email === "shivaminfotech89@gmail.com") return next();
+      if (isAdminRole("", req.user!.email)) return next();
     }
 
     const now = new Date();
@@ -486,7 +497,7 @@ app.post("/api/create-payment-link", verifyFirebaseToken, async (req: Authentica
       const db = getFirestore();
       const snap = await db.collection("users").doc(req.user!.uid).get();
       const userRole = snap.data()?.role || "free";
-      if (userRole !== "admin" && userRole !== "superadmin" && req.user!.email !== "shivaminfotech89@gmail.com") {
+      if (!isAdminRole(userRole, req.user!.email)) {
         return res.status(403).json({ error: "This plan is not available" });
       }
     }
@@ -520,7 +531,7 @@ app.post("/api/create-order", verifyFirebaseToken, async (req: AuthenticatedRequ
       const db = getFirestore();
       const snap = await db.collection("users").doc(req.user!.uid).get();
       const userRole = snap.data()?.role || "free";
-      if (userRole !== "admin" && userRole !== "superadmin" && req.user!.email !== "shivaminfotech89@gmail.com") {
+      if (!isAdminRole(userRole, req.user!.email)) {
         return res.status(403).json({ error: "This plan is not available" });
       }
     }
@@ -614,7 +625,7 @@ app.post("/api/verify-payment", verifyFirebaseToken, async (req: AuthenticatedRe
       const db = getFirestore();
       const userSnap = await db.collection("users").doc(uid).get();
       const userRole = userSnap.data()?.role || "free";
-      if (userRole !== "admin" && userRole !== "superadmin" && req.user!.email !== "shivaminfotech89@gmail.com") {
+      if (!isAdminRole(userRole, req.user!.email)) {
         console.error(`[verify-payment] Non-admin uid=${uid} attempted admin_test plan — granting nothing`);
         return res.status(403).json({ success: false, error: "This plan is not available." });
       }
@@ -780,7 +791,7 @@ app.post("/api/razorpay-webhook", async (req, res) => {
                 const db = getFirestore();
                 const snap = await db.collection("users").doc(userRecord.uid).get();
                 const userRole = snap.data()?.role || "free";
-                if (userRole !== "admin" && userRole !== "superadmin" && userRecord.email !== "shivaminfotech89@gmail.com") {
+                if (!isAdminRole(userRole, userRecord.email)) {
                   console.error(`[Webhook] Non-admin ${email} attempted admin_test plan — granting nothing`);
                 } else {
                   await grantCredits(userRecord.uid, planMeta.credits, paymentId);
@@ -999,9 +1010,8 @@ app.post("/api/admin/grant-credits", verifyFirebaseToken, async (req: Authentica
   try {
     const db = getFirestore();
     const callerSnap = await db.collection("users").doc(callerUid).get();
-    let callerRole = callerSnap.exists ? (callerSnap.data()?.role || "free") : "free";
-    if (req.user!.email === "shivaminfotech89@gmail.com") callerRole = "superadmin";
-    if (callerRole !== "admin" && callerRole !== "superadmin") {
+    const callerRole = callerSnap.exists ? (callerSnap.data()?.role || "free") : "free";
+    if (!isAdminRole(callerRole, req.user!.email)) {
       return res.status(403).json({ error: "Admin access required" });
     }
     const paymentId = `admin_grant_${Date.now()}_${Math.random().toString(36).slice(2)}`;
@@ -1213,7 +1223,7 @@ app.post("/api/analyze-tender", verifyFirebaseToken, async (req: AuthenticatedRe
       const runsDone: number = projectSnap.data()?.analysisRuns ?? 0;
       const userSnapRA = await db.collection("users").doc(uid).get();
       const userRoleRA: string = userSnapRA.data()?.role || "free";
-      const isAdminRA = userRoleRA === "admin" || userRoleRA === "superadmin" || req.user!.email === "shivaminfotech89@gmail.com";
+      const isAdminRA = isAdminRole(userRoleRA, req.user!.email);
       if (!isAdminRA && runsDone >= 5) {
         return res.status(429).json({ error: "This project has reached the 5 re-analysis limit. Start a new project to analyze updated documents." });
       }
@@ -1225,7 +1235,7 @@ app.post("/api/analyze-tender", verifyFirebaseToken, async (req: AuthenticatedRe
       let creditsUsed: number = userData.creditsUsed ?? 0;
       let creditsExpiry: Date | null = userData.creditsExpiry ? userData.creditsExpiry.toDate() : null;
       const userRole: string = userData.role || "free";
-      const isAdmin = userRole === "admin" || userRole === "superadmin" || req.user!.email === "shivaminfotech89@gmail.com";
+      const isAdmin = isAdminRole(userRole, req.user!.email);
 
       if (!isAdmin) {
         if (creditsTotal === 0 && userData.subscriptionExpiry && userData.subscriptionExpiry.toDate() > new Date()) {
@@ -1727,7 +1737,7 @@ MODE 1: CONTRACT PROFILE ANALYSIS & MATCHING
         const creditsUsed: number = userData.creditsUsed ?? 0;
         const creditsExpiry: Date | null = userData.creditsExpiry ? userData.creditsExpiry.toDate() : null;
         const userRole: string = userData.role || "free";
-        const isAdmin = userRole === "admin" || userRole === "superadmin" || req.user!.email === "shivaminfotech89@gmail.com";
+        const isAdmin = isAdminRole(userRole, req.user!.email);
 
         if (!isAdmin) {
           const now = new Date();
@@ -2411,6 +2421,29 @@ app.post(
 );
 
 // ---------------------------------------------------------------------------
+// Startup: sync Firestore roles for SUPERADMIN_EMAILS (makes DB the authority)
+// ---------------------------------------------------------------------------
+async function ensureSuperadminRoles() {
+  const db = getFirestore();
+  const auth = getAuth();
+  for (const email of SUPERADMIN_EMAILS) {
+    try {
+      const userRecord = await auth.getUserByEmail(email);
+      const ref = db.collection("users").doc(userRecord.uid);
+      const snap = await ref.get();
+      if (!snap.exists || snap.data()?.role !== "superadmin") {
+        await ref.set({ role: "superadmin" }, { merge: true });
+        console.log(`[Startup] Set superadmin role for ${email} (uid=${userRecord.uid})`);
+      }
+    } catch (e: any) {
+      if (e.code !== "auth/user-not-found") {
+        console.warn(`[Startup] Could not set superadmin role for ${email}:`, e.message);
+      }
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Dev server + static serving
 // ---------------------------------------------------------------------------
 async function startServer() {
@@ -2429,6 +2462,8 @@ async function startServer() {
     });
   }
 
+  ensureSuperadminRoles().catch(e => console.warn("[Startup] ensureSuperadminRoles:", e.message));
+
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`Server running on http://localhost:${PORT}`);
   });
@@ -2436,6 +2471,9 @@ async function startServer() {
 
 if (!process.env.VERCEL) {
   startServer();
+} else {
+  // Vercel: fire-and-forget on cold start so Firestore role is synced
+  ensureSuperadminRoles().catch(e => console.warn("[Startup] ensureSuperadminRoles:", e.message));
 }
 
 export default app;

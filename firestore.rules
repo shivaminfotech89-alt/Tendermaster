@@ -100,5 +100,9 @@ service cloud.firestore {
       allow read, update, delete: if isSignedIn() && resource.data.userId == request.auth.uid;
       allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
     }
+
+    match /analysis_rate_limits/{uid} {
+      allow read, write: if false;
+    }
   }
 }

@@ -6,7 +6,7 @@ import { GoogleGenAI } from "@google/genai";
 import admin from "firebase-admin";
 import { getApp } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
-import { getFirestore as adminGetFirestore, Timestamp } from "firebase-admin/firestore";
+import { getFirestore as adminGetFirestore, Timestamp, FieldValue } from "firebase-admin/firestore";
 import { GoogleAuth } from "google-auth-library";
 import Razorpay from "razorpay";
 import crypto from "crypto";
@@ -824,6 +824,64 @@ async function generateContentWithRetry(client: GoogleGenAI, options: any, retri
 }
 
 // ---------------------------------------------------------------------------
+// Analysis safety helpers
+// ---------------------------------------------------------------------------
+
+async function checkRateLimit(uid: string): Promise<{ blocked: boolean; minutesUntilReset: number }> {
+  try {
+    const snap = await getFirestore().collection("analysis_rate_limits").doc(uid).get();
+    if (!snap.exists) return { blocked: false, minutesUntilReset: 0 };
+    const data = snap.data()!;
+    const windowStart: number = data.windowStart?.toMillis?.() ?? 0;
+    const count: number = data.count ?? 0;
+    const elapsed = Date.now() - windowStart;
+    if (elapsed >= 3_600_000) return { blocked: false, minutesUntilReset: 0 };
+    if (count >= 5) {
+      const minutesUntilReset = Math.ceil((3_600_000 - elapsed) / 60_000);
+      return { blocked: true, minutesUntilReset };
+    }
+    return { blocked: false, minutesUntilReset: 0 };
+  } catch (err) {
+    console.error("[RateLimit] checkRateLimit error:", err);
+    return { blocked: false, minutesUntilReset: 0 }; // fail open — don't block on read error
+  }
+}
+
+async function recordFailedAttempt(uid: string): Promise<void> {
+  try {
+    const ref = getFirestore().collection("analysis_rate_limits").doc(uid);
+    const snap = await ref.get();
+    const now = new Date();
+    if (!snap.exists) {
+      await ref.set({ count: 1, windowStart: Timestamp.fromDate(now) });
+      return;
+    }
+    const windowStart: number = snap.data()!.windowStart?.toMillis?.() ?? 0;
+    if (Date.now() - windowStart >= 3_600_000) {
+      await ref.set({ count: 1, windowStart: Timestamp.fromDate(now) });
+    } else {
+      await ref.update({ count: FieldValue.increment(1) });
+    }
+    console.log(`[RateLimit] Recorded failed attempt for ${uid}`);
+  } catch (err) {
+    console.error("[RateLimit] recordFailedAttempt error:", err);
+  }
+}
+
+interface LowConfidenceResult { isLow: boolean; missing: string[] }
+
+function detectLowConfidence(parsed: any): LowConfidenceResult {
+  const missing: string[] = [];
+  const deadline = parsed?.timeline_and_milestones?.submission_deadline;
+  if (!deadline || !String(deadline).trim()) missing.push("submission deadline");
+  const emd = parsed?.emd_details?.amount;
+  if (!emd || !String(emd).trim() || emd === "Not specified") missing.push("EMD amount");
+  const matrix = parsed?.compliance_matrix;
+  if (!Array.isArray(matrix) || matrix.length === 0) missing.push("compliance matrix");
+  return { isLow: missing.length > 0, missing };
+}
+
+// ---------------------------------------------------------------------------
 // API routes
 // ---------------------------------------------------------------------------
 
@@ -999,7 +1057,7 @@ app.post(
   }
 );
 
-app.post("/api/analyze-tender", verifyFirebaseToken, async (req: AuthenticatedRequest, res) => {
+app.post("/api/analyze-tender", verifyFirebaseToken, requireActiveEntitlement, async (req: AuthenticatedRequest, res) => {
   try {
     const { tenderDocument, tenderType = "text", tenderContent, userProfile, language } = req.body;
     const actualContent = tenderContent || tenderDocument;
@@ -1008,6 +1066,7 @@ app.post("/api/analyze-tender", verifyFirebaseToken, async (req: AuthenticatedRe
       return res.status(400).json({ error: "tender content and userProfile are required" });
     }
 
+    const uid = req.user!.uid;
     const aiClient = getAI();
     let docContents: any[];
     let remarks: any = null;
@@ -1131,6 +1190,56 @@ app.post("/api/analyze-tender", verifyFirebaseToken, async (req: AuthenticatedRe
       ];
     }
 
+    // ── Stats pass: scan assembled docContents (free — no Gemini call) ───────
+    let totalTextChars = 0;
+    let totalPdfBytes = 0;
+    let hasPdfItems = false;
+    for (const part of docContents) {
+      if (typeof part === "string") {
+        totalTextChars += part.length;
+      } else if (part?.inlineData?.data) {
+        // base64 length × 3/4 ≈ binary bytes
+        const bytes = Math.floor((part.inlineData.data as string).length * 3 / 4);
+        if ((part.inlineData.mimeType as string)?.includes("text/plain")) {
+          totalTextChars += bytes;
+        } else {
+          totalPdfBytes += bytes;
+          hasPdfItems = true;
+        }
+      }
+    }
+
+    // ── Pre-checks (reject before any Gemini call) ───────────────────────────
+    // (a) Rate limit: max 5 failed attempts per user per rolling hour
+    const rateLimit = await checkRateLimit(uid);
+    if (rateLimit.blocked) {
+      return res.status(429).json({
+        error: `Too many failed analysis attempts. Please wait ${rateLimit.minutesUntilReset} minute${rateLimit.minutesUntilReset !== 1 ? "s" : ""} before trying again.`,
+      });
+    }
+
+    // (b) Unreadable: no text AND no PDF images → nothing to analyse
+    if (totalTextChars < 50 && !hasPdfItems) {
+      return res.status(422).json({
+        error: "No readable content found in the uploaded document. If this is a scanned PDF, please upload the original PDF file directly.",
+      });
+    }
+
+    // (c) Token estimate for text content (chars ÷ 4, 10 % headroom below 1 M limit)
+    const estimatedTokens = Math.round(totalTextChars / 4);
+    if (estimatedTokens > 900_000) {
+      return res.status(413).json({
+        error: `Document is too large for a single analysis (~${Math.round(estimatedTokens / 1000)}k estimated tokens). Please split it into key documents (main conditions, eligibility, BOQ) and analyse each separately.`,
+      });
+    }
+
+    // (d) PDF size safety net for image-path files (no pdfjs server-side)
+    if (totalPdfBytes > 100 * 1024 * 1024) {
+      return res.status(413).json({
+        error: "PDF files total more than 100 MB. Please compress or split them before uploading.",
+      });
+    }
+
     const systemInstruction = `IMPORTANT: Keep your analysis extremely concise (under 800 words total) to ensure fast processing times and prevent timeouts. Use short bullet points and skip unnecessary pleasantries. \n\nYou are "Tender MasterAI", the premier strategic procurement intelligence engine for Indian entrepreneurs and enterprises. Your role is to decode dense bureaucratic tender documents (from GeM, nProcure, CPPP, and private entities), match them ruthlessly against an Indian businessman's profile, and provide a clear, risk-managed path to winning the bid. BE EXTREMELY IN-DEPTH AND DETAILED in your rationales, lists, and steps. Elaborate heavily.
 ${
   language && language !== "en"
@@ -1143,7 +1252,7 @@ You switch between three operational modes based on input.
 ---
 MODE 1: CONTRACT PROFILE ANALYSIS & MATCHING
 - Trigger: Input contains a Tender Document and a User Business Profile JSON.
-- Task: Compare technical eligibility, turnover requirements, and location preferences. Calculate an objective compatibility score out of 100. Translate complex terms into professional plain English that a local businessman easily understands.
+- Task: Compare technical eligibility, turnover requirements, and location preferences. Calculate an objective compatibility score out of 100. Translate complex terms into professional plain English that a local businessman easily understands. Also extract EMD details into the emd_details field — the required deposit amount (use "Not specified" if the document does not state an EMD requirement), accepted payment modes, and whether MSME certificate holders are exempted.
 - Required Output Format: Valid JSON matching this layout:
 {
   "compatibility": {
@@ -1207,6 +1316,11 @@ MODE 1: CONTRACT PROFILE ANALYSIS & MATCHING
     "margin_range": "8% to 15%",
     "risk_level": "Medium",
     "rationale": "Based on historical bids and material cost inflation"
+  },
+  "emd_details": {
+    "amount": "₹50,000 (use 'Not specified' if the document does not state an EMD requirement)",
+    "mode": "DD / Bank Guarantee / Online / Exempted for MSME",
+    "msme_exemption": false
   }
 }`;
 
@@ -1366,6 +1480,15 @@ MODE 1: CONTRACT PROFILE ANALYSIS & MATCHING
                 required: ["requirement", "status", "notes"],
               },
             },
+            emd_details: {
+              type: "object",
+              properties: {
+                amount: { type: "string" },
+                mode: { type: "string" },
+                msme_exemption: { type: "boolean" },
+              },
+              required: ["amount", "mode", "msme_exemption"],
+            },
           },
           required: [
             "compatibility",
@@ -1378,6 +1501,7 @@ MODE 1: CONTRACT PROFILE ANALYSIS & MATCHING
             "bid_recommendation",
             "winning_probability",
             "compliance_matrix",
+            "emd_details",
           ],
         },
       },
@@ -1385,18 +1509,19 @@ MODE 1: CONTRACT PROFILE ANALYSIS & MATCHING
 
     const parsedData = robustJsonParse(response.text);
 
-    if (remarks) {
-      if (!parsedData?.bid_recommendation) {
-        remarks.notes.push("Bid recommendation could not be determined — tender document may be incomplete or ambiguous.");
-      }
-      if (!parsedData?.timeline_and_milestones?.submission_deadline) {
-        remarks.notes.push("Submission deadline was not found in the document — verify manually before bidding.");
-      }
+    if (!remarks) remarks = { notes: [] };
+    const { isLow, missing } = detectLowConfidence(parsedData);
+    if (isLow) {
+      remarks.notes.push(
+        `LOW CONFIDENCE — The following critical fields could not be determined: ${missing.join(", ")}. Please verify these details in the source tender document before bidding.`
+      );
     }
 
-    res.json({ analysis: parsedData, remarks });
+    res.json({ analysis: parsedData, remarks, lowConfidence: isLow });
   } catch (err: any) {
     console.error("Analyze Tender Error:", err);
+    const uid = (req as AuthenticatedRequest).user?.uid;
+    if (uid) await recordFailedAttempt(uid);
     res.status(400).json({ error: err.message });
   }
 });

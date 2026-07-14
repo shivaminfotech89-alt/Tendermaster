@@ -138,10 +138,10 @@ export default function LandingPage() {
           className="text-4xl md:text-5xl font-extrabold text-slate-900 leading-tight max-w-3xl mx-auto"
           style={{ letterSpacing: '-.03em' }}
         >
-          Stop losing tenders to paperwork.
+          Everything you need to win a tender — in one place.
         </h1>
         <p className="mt-5 text-lg text-slate-500 max-w-2xl mx-auto leading-relaxed">
-          AI-powered tender analysis with auto-filled annexures — know if you qualify, and get your forms ready to submit.
+          Analysis, eligibility, risks, filled annexures, and answers to every question — in your language.
         </p>
         <div className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-3.5">
           {user ? (

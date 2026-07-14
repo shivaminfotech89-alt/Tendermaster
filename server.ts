@@ -617,6 +617,7 @@ app.post("/api/verify-payment", verifyFirebaseToken, async (req: AuthenticatedRe
     const planMeta = PLAN_CREDITS_MAP[authorizedAmountPaise];
     if (!planMeta) {
       console.error(`[verify-payment] Unrecognised amount ${authorizedAmountPaise} paise for uid=${uid} — granting nothing`);
+      logUsageEvent({ uid, type: 'payment_error', success: false, failureReason: `Unrecognised amount: ${authorizedAmountPaise} paise (verify-payment)`, amountPaise: authorizedAmountPaise });
       return res.status(400).json({ success: false, error: "Unrecognised payment amount. Please contact support." });
     }
 
@@ -784,6 +785,7 @@ app.post("/api/razorpay-webhook", async (req, res) => {
           const planMeta = PLAN_CREDITS_MAP[amountPaise];
           if (!planMeta) {
             console.error(`[Webhook] Unrecognised amount ${amountPaise} paise for ${email} — granting nothing`);
+            logUsageEvent({ uid: '', type: 'payment_error', success: false, failureReason: `Unrecognised amount: ${amountPaise} paise (webhook)`, amountPaise, email });
           } else {
             const userRecord = await getAuth().getUserByEmail(email);
             if (userRecord?.uid) {
@@ -974,6 +976,25 @@ async function grantCredits(uid: string, credits: number, paymentId: string): Pr
 }
 
 // ---------------------------------------------------------------------------
+// Usage event logging — fire-and-forget; Admin SDK bypasses Firestore rules.
+// ---------------------------------------------------------------------------
+function logUsageEvent(event: {
+  uid: string;
+  type: 'analysis' | 'reanalysis' | 'document' | 'chat' | 'extraction' | 'payment_error';
+  projectId?: string;
+  success: boolean;
+  failureReason?: string;
+  lowConfidence?: boolean;
+  amountPaise?: number;
+  email?: string;
+}): void {
+  getFirestore()
+    .collection('usage_events')
+    .add({ ...event, timestamp: Timestamp.now() })
+    .catch(err => console.warn('[UsageEvent] Failed to log:', err.message));
+}
+
+// ---------------------------------------------------------------------------
 // API routes
 // ---------------------------------------------------------------------------
 
@@ -1021,6 +1042,213 @@ app.post("/api/admin/grant-credits", verifyFirebaseToken, async (req: Authentica
   } catch (err: any) {
     console.error("[Admin] grant-credits failed:", err);
     return res.status(500).json({ error: "Failed to grant credits" });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Admin read-only stats endpoints (Admin SDK reads bypass Firestore rules)
+// ---------------------------------------------------------------------------
+
+app.get("/api/admin/revenue-stats", verifyFirebaseToken, async (req: AuthenticatedRequest, res) => {
+  try {
+    const db = getFirestore();
+    const callerSnap = await db.collection("users").doc(req.user!.uid).get();
+    if (!isAdminRole(callerSnap.data()?.role || "free", req.user!.email)) {
+      return res.status(403).json({ error: "Admin access required" });
+    }
+
+    const paymentsSnap = await db.collection("processed_payments").orderBy("processedAt", "desc").get();
+
+    const monthStart = new Date();
+    monthStart.setDate(1);
+    monthStart.setHours(0, 0, 0, 0);
+
+    let allTimePaise = 0;
+    let thisMonthPaise = 0;
+    let thisMonthCount = 0;
+    const byPlan: Record<string, { count: number; revenuePaise: number }> = {
+      starter: { count: 0, revenuePaise: 0 },
+      pro: { count: 0, revenuePaise: 0 },
+      admin_test: { count: 0, revenuePaise: 0 },
+      admin_grant: { count: 0, revenuePaise: 0 },
+    };
+    const payingUserUids = new Set<string>();
+    const recentPayments: any[] = [];
+
+    for (const d of paymentsSnap.docs) {
+      const p = d.data();
+      const paymentId: string = p.paymentId || "";
+      const credits: number = p.credits || 0;
+      const uid: string = p.uid || "";
+      const processedAt: admin.firestore.Timestamp = p.processedAt;
+
+      const isAdminGrant = paymentId.startsWith("admin_grant_");
+
+      if (recentPayments.length < 25) {
+        recentPayments.push({
+          uid, credits, paymentId,
+          processedAt: processedAt?.toDate?.() || null,
+          isAdminGrant,
+        });
+      }
+
+      if (isAdminGrant) {
+        byPlan.admin_grant.count++;
+        continue;
+      }
+
+      const plan = PLANS.find(pl => pl.credits === credits);
+      if (!plan) continue;
+
+      const planKey = plan.id === "admin_test" ? "admin_test" : plan.id;
+      byPlan[planKey] = byPlan[planKey] || { count: 0, revenuePaise: 0 };
+      byPlan[planKey].count++;
+      byPlan[planKey].revenuePaise += plan.amountPaise;
+      allTimePaise += plan.amountPaise;
+      payingUserUids.add(uid);
+
+      if (processedAt?.toDate && processedAt.toDate() >= monthStart) {
+        thisMonthPaise += plan.amountPaise;
+        thisMonthCount++;
+      }
+    }
+
+    const payingUsersCount = payingUserUids.size;
+    return res.json({
+      allTime: {
+        totalRevenuePaise: allTimePaise,
+        payingUsersCount,
+        avgRevenuePaise: payingUsersCount > 0 ? Math.round(allTimePaise / payingUsersCount) : 0,
+        byPlan,
+      },
+      thisMonth: { totalRevenuePaise: thisMonthPaise, transactionCount: thisMonthCount },
+      recentPayments,
+    });
+  } catch (err: any) {
+    console.error("[Admin] revenue-stats failed:", err);
+    return res.status(500).json({ error: "Failed to fetch revenue stats" });
+  }
+});
+
+app.get("/api/admin/usage-stats", verifyFirebaseToken, async (req: AuthenticatedRequest, res) => {
+  try {
+    const db = getFirestore();
+    const callerSnap = await db.collection("users").doc(req.user!.uid).get();
+    if (!isAdminRole(callerSnap.data()?.role || "free", req.user!.email)) {
+      return res.status(403).json({ error: "Admin access required" });
+    }
+
+    const days = Math.min(90, Math.max(7, parseInt(String(req.query.days || "30"))));
+    const since = new Date();
+    since.setDate(since.getDate() - days);
+
+    const eventsSnap = await db.collection("usage_events")
+      .where("timestamp", ">=", Timestamp.fromDate(since))
+      .orderBy("timestamp", "desc")
+      .get();
+
+    // Initialise daily buckets
+    const dailyMap: Record<string, { analyses: number; reanalyses: number; documents: number; chats: number; extractions: number; failures: number }> = {};
+    for (let i = 0; i < days; i++) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      dailyMap[d.toISOString().slice(0, 10)] = { analyses: 0, reanalyses: 0, documents: 0, chats: 0, extractions: 0, failures: 0 };
+    }
+
+    const totals = { analyses: 0, reanalyses: 0, documents: 0, chats: 0, extractions: 0 };
+    const consumerMap: Record<string, number> = {};
+    const failedEvents: any[] = [];
+    const paymentErrors: any[] = [];
+    let lowConfidenceCount = 0;
+
+    for (const doc of eventsSnap.docs) {
+      const ev = doc.data();
+      const ts: admin.firestore.Timestamp = ev.timestamp;
+      const date = ts?.toDate ? ts.toDate().toISOString().slice(0, 10) : null;
+      const type: string = ev.type;
+      const success: boolean = ev.success;
+      const uid: string = ev.uid || "";
+
+      if (type === "payment_error") {
+        paymentErrors.push({ amountPaise: ev.amountPaise, email: ev.email, failureReason: ev.failureReason, timestamp: ts?.toDate?.() || null });
+        continue;
+      }
+
+      if (!success) failedEvents.push({ uid, type, failureReason: ev.failureReason, timestamp: ts?.toDate?.() || null });
+      if (ev.lowConfidence) lowConfidenceCount++;
+
+      if (date && dailyMap[date]) {
+        if (!success) { dailyMap[date].failures++; continue; }
+        if (type === "analysis")   { dailyMap[date].analyses++;    totals.analyses++;   }
+        if (type === "reanalysis") { dailyMap[date].reanalyses++;  totals.reanalyses++; }
+        if (type === "document")   { dailyMap[date].documents++;   totals.documents++;  }
+        if (type === "chat")       { dailyMap[date].chats++;       totals.chats++;      }
+        if (type === "extraction") { dailyMap[date].extractions++; totals.extractions++; }
+      }
+
+      if (uid && success) consumerMap[uid] = (consumerMap[uid] || 0) + 1;
+    }
+
+    const daily = Object.entries(dailyMap)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([date, counts]) => ({ date, ...counts }));
+
+    const topUids = Object.entries(consumerMap)
+      .sort(([, a], [, b]) => b - a)
+      .slice(0, 15);
+
+    const topConsumers = await Promise.all(
+      topUids.map(async ([uid, count]) => {
+        try {
+          const snap = await db.collection("users").doc(uid).get();
+          return { uid, count, email: snap.data()?.email || uid };
+        } catch { return { uid, count, email: uid }; }
+      })
+    );
+
+    return res.json({
+      daily, totals, topConsumers,
+      health: {
+        failedEvents: failedEvents.slice(0, 50),
+        paymentErrors: paymentErrors.slice(0, 20),
+        failedCount: failedEvents.length,
+        lowConfidenceCount,
+      },
+    });
+  } catch (err: any) {
+    console.error("[Admin] usage-stats failed:", err);
+    return res.status(500).json({ error: "Failed to fetch usage stats" });
+  }
+});
+
+app.get("/api/admin/user-payments", verifyFirebaseToken, async (req: AuthenticatedRequest, res) => {
+  try {
+    const db = getFirestore();
+    const callerSnap = await db.collection("users").doc(req.user!.uid).get();
+    if (!isAdminRole(callerSnap.data()?.role || "free", req.user!.email)) {
+      return res.status(403).json({ error: "Admin access required" });
+    }
+
+    const targetUid = String(req.query.uid || "");
+    if (!targetUid) return res.status(400).json({ error: "uid is required" });
+
+    const paymentsSnap = await db.collection("processed_payments").where("uid", "==", targetUid).get();
+    const payments = paymentsSnap.docs
+      .map(d => {
+        const p = d.data();
+        return {
+          paymentId: p.paymentId,
+          credits: p.credits,
+          processedAt: p.processedAt?.toDate?.() || null,
+          isAdminGrant: (p.paymentId || "").startsWith("admin_grant_"),
+        };
+      })
+      .sort((a, b) => (b.processedAt?.getTime() || 0) - (a.processedAt?.getTime() || 0));
+
+    return res.json({ payments });
+  } catch (err: any) {
+    console.error("[Admin] user-payments failed:", err);
+    return res.status(500).json({ error: "Failed to fetch user payments" });
   }
 });
 
@@ -1187,9 +1415,11 @@ app.post(
           extracted[k] = v.trim();
         }
       }
+      logUsageEvent({ uid: req.user!.uid, type: 'extraction', success: true });
       res.json({ extracted });
     } catch (err: any) {
       console.error("Extract Profile Data Error:", err);
+      logUsageEvent({ uid: req.user!.uid, type: 'extraction', success: false, failureReason: err.message.slice(0, 300) });
       // Return empty extraction rather than an error — the UI handles the "nothing found" case
       res.json({ extracted: {} });
     }
@@ -1714,6 +1944,7 @@ MODE 1: CONTRACT PROFILE ANALYSIS & MATCHING
       } catch (saveErr) {
         console.error("[analyze-tender] Failed to update re-analysis run count:", saveErr);
       }
+      logUsageEvent({ uid, type: 'reanalysis', projectId: existingProjectId, success: true, lowConfidence: isLow });
       return res.json({ analysis: parsedData, remarks, lowConfidence: isLow, projectId: existingProjectId });
     }
 
@@ -1769,11 +2000,15 @@ MODE 1: CONTRACT PROFILE ANALYSIS & MATCHING
       throw txErr; // re-throw to outer catch → recordFailedAttempt
     }
 
+    logUsageEvent({ uid, type: 'analysis', projectId: newProjectId, success: true, lowConfidence: isLow });
     return res.json({ analysis: parsedData, remarks, lowConfidence: isLow, projectId: newProjectId });
   } catch (err: any) {
     console.error("Analyze Tender Error:", err);
     const uid = (req as AuthenticatedRequest).user?.uid;
-    if (uid) await recordFailedAttempt(uid);
+    if (uid) {
+      await recordFailedAttempt(uid);
+      logUsageEvent({ uid, type: !!(req as any).body?.projectId ? 'reanalysis' : 'analysis', success: false, failureReason: err.message.slice(0, 300) });
+    }
     res.status(400).json({ error: err.message });
   }
 });
@@ -1967,9 +2202,11 @@ Total Paid: ₹${paymentRecords.reduce((s: number, p: any) => s + (Number(p.amou
         config: { systemInstruction: { parts: [{ text: instructionText }] } },
       });
 
+      logUsageEvent({ uid: req.user!.uid, type: 'chat', success: true });
       res.json({ answer: response.text });
     } catch (err: any) {
       console.error("Chat Tender Error:", err);
+      logUsageEvent({ uid: req.user!.uid, type: 'chat', success: false, failureReason: err.message.slice(0, 300) });
       res.status(400).json({ error: err.message });
     }
   }
@@ -2016,9 +2253,11 @@ Rules:
       } catch {
         // parsing failure is non-fatal — client handles empty gracefully
       }
+      logUsageEvent({ uid: req.user!.uid, type: 'extraction', success: true });
       res.json(extracted);
     } catch (err: any) {
       console.error("Extract receipt error:", err);
+      logUsageEvent({ uid: req.user!.uid, type: 'extraction', success: false, failureReason: err.message.slice(0, 300) });
       res.status(400).json({ error: err.message });
     }
   }
@@ -2182,6 +2421,7 @@ ${JSON.stringify(tenderDetails)}${financialContext}${extraContext}`;
           config: { systemInstruction: exactFormSystemInstruction },
         });
         const fragment = response.text || "<p>Empty response from AI.</p>";
+        logUsageEvent({ uid: req.user!.uid, type: 'document', success: true });
         return res.json({ document: buildFormDocHtml(fragment), format: "html" });
       } else {
         // ── Standard mode: generate from tender data analysis ──
@@ -2201,9 +2441,11 @@ ${JSON.stringify(tenderDetails)}${financialContext}${extraContext}`;
         });
       }
 
+      logUsageEvent({ uid: req.user!.uid, type: 'document', success: true });
       res.json({ document: response.text || "Empty response from AI.", format: "markdown" });
     } catch (err: any) {
       console.error("Generate Doc Error:", err);
+      logUsageEvent({ uid: req.user!.uid, type: 'document', success: false, failureReason: err.message.slice(0, 300) });
       res.status(400).json({ error: err.message });
     }
   }
@@ -2412,9 +2654,11 @@ app.post(
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
       );
       res.setHeader("Content-Disposition", `attachment; filename="${safeName}.docx"`);
+      logUsageEvent({ uid: req.user!.uid, type: 'document', success: true });
       res.send(Buffer.from(buffer as ArrayBuffer));
     } catch (err: any) {
       console.error("Generate DOCX Error:", err);
+      logUsageEvent({ uid: req.user!.uid, type: 'document', success: false, failureReason: err.message.slice(0, 300) });
       res.status(500).json({ error: err.message || "Word generation failed" });
     }
   }

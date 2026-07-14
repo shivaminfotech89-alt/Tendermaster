@@ -108,5 +108,9 @@ service cloud.firestore {
     match /processed_payments/{paymentId} {
       allow read, write: if false;
     }
+
+    match /usage_events/{eventId} {
+      allow read, write: if false;
+    }
   }
 }

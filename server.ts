@@ -1121,7 +1121,7 @@ app.get("/api/admin/revenue-stats", verifyFirebaseToken, async (req: Authenticat
         avgRevenuePaise: payingUsersCount > 0 ? Math.round(allTimePaise / payingUsersCount) : 0,
         byPlan,
       },
-      thisMonth: { totalRevenuePaise: thisMonthPaise, transactionCount: thisMonthCount },
+      thisMonth: { totalRevenuePaise: thisMonthPaise, count: thisMonthCount },
       recentPayments,
     });
   } catch (err: any) {
@@ -1147,15 +1147,15 @@ app.get("/api/admin/usage-stats", verifyFirebaseToken, async (req: Authenticated
       .orderBy("timestamp", "desc")
       .get();
 
-    // Initialise daily buckets
-    const dailyMap: Record<string, { analyses: number; reanalyses: number; documents: number; chats: number; extractions: number; failures: number }> = {};
+    // Initialise daily buckets — keys match client's day.totals.* access pattern
+    const dailyMap: Record<string, Record<string, number>> = {};
     for (let i = 0; i < days; i++) {
       const d = new Date();
       d.setDate(d.getDate() - i);
-      dailyMap[d.toISOString().slice(0, 10)] = { analyses: 0, reanalyses: 0, documents: 0, chats: 0, extractions: 0, failures: 0 };
+      dailyMap[d.toISOString().slice(0, 10)] = { analysis: 0, reanalysis: 0, document: 0, chat: 0, extraction: 0, failed: 0 };
     }
 
-    const totals = { analyses: 0, reanalyses: 0, documents: 0, chats: 0, extractions: 0 };
+    const totals: Record<string, number> = { analysis: 0, reanalysis: 0, document: 0, chat: 0, extraction: 0 };
     const consumerMap: Record<string, number> = {};
     const failedEvents: any[] = [];
     const paymentErrors: any[] = [];
@@ -1178,20 +1178,21 @@ app.get("/api/admin/usage-stats", verifyFirebaseToken, async (req: Authenticated
       if (ev.lowConfidence) lowConfidenceCount++;
 
       if (date && dailyMap[date]) {
-        if (!success) { dailyMap[date].failures++; continue; }
-        if (type === "analysis")   { dailyMap[date].analyses++;    totals.analyses++;   }
-        if (type === "reanalysis") { dailyMap[date].reanalyses++;  totals.reanalyses++; }
-        if (type === "document")   { dailyMap[date].documents++;   totals.documents++;  }
-        if (type === "chat")       { dailyMap[date].chats++;       totals.chats++;      }
-        if (type === "extraction") { dailyMap[date].extractions++; totals.extractions++; }
+        if (!success) { dailyMap[date].failed++; continue; }
+        if (type === "analysis")   { dailyMap[date].analysis++;   totals.analysis++;   }
+        if (type === "reanalysis") { dailyMap[date].reanalysis++; totals.reanalysis++; }
+        if (type === "document")   { dailyMap[date].document++;   totals.document++;   }
+        if (type === "chat")       { dailyMap[date].chat++;       totals.chat++;       }
+        if (type === "extraction") { dailyMap[date].extraction++; totals.extraction++; }
       }
 
       if (uid && success) consumerMap[uid] = (consumerMap[uid] || 0) + 1;
     }
 
+    // Wrap counts in totals: {} so client can do day.totals.analysis
     const daily = Object.entries(dailyMap)
       .sort(([a], [b]) => a.localeCompare(b))
-      .map(([date, counts]) => ({ date, ...counts }));
+      .map(([date, counts]) => ({ date, totals: counts }));
 
     const topUids = Object.entries(consumerMap)
       .sort(([, a], [, b]) => b - a)

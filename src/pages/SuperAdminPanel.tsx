@@ -431,19 +431,22 @@ export default function SuperAdminPanel() {
       {activeTab === "revenue" && (
         <div className="space-y-6">
           {revLoading && <div className="py-12 flex justify-center"><Loader2 className="w-6 h-6 animate-spin text-purple-600" /></div>}
+          {!revLoading && !rev && (
+            <p className="text-sm text-slate-400 text-center py-10">No revenue data yet — this will populate as payments are processed.</p>
+          )}
           {rev && (
             <>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                <StatCard label="Total Revenue" value={fmt(rev.allTime.totalRevenuePaise)} accent="text-emerald-400" />
-                <StatCard label="This Month" value={fmt(rev.thisMonth.totalRevenuePaise)} sub={`${rev.thisMonth.count} payments`} accent="text-blue-400" />
-                <StatCard label="Paying Customers" value={String(rev.allTime.payingUsersCount)} accent="text-amber-400" />
-                <StatCard label="Avg / Customer" value={rev.allTime.payingUsersCount > 0 ? fmt(rev.allTime.avgRevenuePaise) : "—"} accent="text-purple-400" />
+                <StatCard label="Total Revenue" value={fmt(rev.allTime?.totalRevenuePaise ?? 0)} accent="text-emerald-400" />
+                <StatCard label="This Month" value={fmt(rev.thisMonth?.totalRevenuePaise ?? 0)} sub={`${rev.thisMonth?.count ?? 0} payments`} accent="text-blue-400" />
+                <StatCard label="Paying Customers" value={String(rev.allTime?.payingUsersCount ?? 0)} accent="text-amber-400" />
+                <StatCard label="Avg / Customer" value={(rev.allTime?.payingUsersCount ?? 0) > 0 ? fmt(rev.allTime.avgRevenuePaise) : "—"} accent="text-purple-400" />
               </div>
 
               <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
                 <div className="p-4 border-b border-slate-100"><h3 className="font-bold text-slate-800">Revenue by Plan</h3></div>
                 <div className="divide-y divide-slate-100">
-                  {Object.entries(rev.allTime.byPlan).map(([plan, data]) => (
+                  {Object.entries(rev.allTime?.byPlan ?? {}).map(([plan, data]) => (
                     <div key={plan} className="flex items-center justify-between px-4 py-3">
                       <div>
                         <span className="font-semibold text-slate-700 capitalize">{plan.replace(/_/g, " ")}</span>
@@ -452,14 +455,14 @@ export default function SuperAdminPanel() {
                       <span className="font-bold text-emerald-700">{fmt(data.revenuePaise)}</span>
                     </div>
                   ))}
-                  {Object.keys(rev.allTime.byPlan).length === 0 && <p className="text-sm text-slate-400 p-4 text-center">No payments yet.</p>}
+                  {Object.keys(rev.allTime?.byPlan ?? {}).length === 0 && <p className="text-sm text-slate-400 p-4 text-center">No payments yet — this will populate as plans are purchased.</p>}
                 </div>
               </div>
 
               <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
                 <div className="p-4 border-b border-slate-100"><h3 className="font-bold text-slate-800">Recent Payments</h3></div>
                 <div className="divide-y divide-slate-100">
-                  {rev.recentPayments.slice(0, 20).map((p, i) => (
+                  {(rev.recentPayments ?? []).slice(0, 20).map((p, i) => (
                     <div key={i} className="flex items-center justify-between px-4 py-3 text-sm">
                       <div className="min-w-0 mr-4">
                         <div className="text-slate-700 font-medium truncate">{p.email || p.uid}</div>
@@ -471,7 +474,7 @@ export default function SuperAdminPanel() {
                       </div>
                     </div>
                   ))}
-                  {rev.recentPayments.length === 0 && <p className="text-sm text-slate-400 p-4 text-center">No payments yet.</p>}
+                  {(rev.recentPayments ?? []).length === 0 && <p className="text-sm text-slate-400 p-4 text-center">No payments yet — this will populate as plans are purchased.</p>}
                 </div>
               </div>
             </>
@@ -490,19 +493,22 @@ export default function SuperAdminPanel() {
             {usageLoading && <Loader2 className="w-4 h-4 animate-spin text-slate-400" />}
           </div>
 
+          {!usageLoading && !usage && (
+            <p className="text-sm text-slate-400 text-center py-10">No usage data yet — this will populate as analyses and documents are generated.</p>
+          )}
           {usage && (
             <>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                <StatCard label="Total Analyses" value={String((usage.totals.analysis || 0) + (usage.totals.reanalysis || 0))} accent="text-blue-400" />
-                <StatCard label="Documents Generated" value={String((usage.totals.document || 0) + (usage.totals.extraction || 0))} accent="text-purple-400" />
-                <StatCard label="Chat Messages" value={String(usage.totals.chat || 0)} accent="text-emerald-400" />
-                <StatCard label="Failed Events" value={String(usage.health.failedCount)} accent={usage.health.failedCount > 0 ? "text-red-400" : "text-slate-400"} />
+                <StatCard label="Total Analyses" value={String((usage.totals?.analysis ?? 0) + (usage.totals?.reanalysis ?? 0))} accent="text-blue-400" />
+                <StatCard label="Documents Generated" value={String((usage.totals?.document ?? 0) + (usage.totals?.extraction ?? 0))} accent="text-purple-400" />
+                <StatCard label="Chat Messages" value={String(usage.totals?.chat ?? 0)} accent="text-emerald-400" />
+                <StatCard label="Failed Events" value={String(usage.health?.failedCount ?? 0)} accent={(usage.health?.failedCount ?? 0) > 0 ? "text-red-400" : "text-slate-400"} />
               </div>
 
               <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
                 <div className="p-4 border-b border-slate-100"><h3 className="font-bold text-slate-800">Daily Breakdown — last {usageDays} days</h3></div>
-                {usage.daily.length === 0 ? (
-                  <p className="text-sm text-slate-400 p-6 text-center">No events in this period.</p>
+                {(usage.daily ?? []).length === 0 ? (
+                  <p className="text-sm text-slate-400 p-6 text-center">No usage events in this period — this will populate as analyses and documents are generated.</p>
                 ) : (
                   <div className="overflow-x-auto">
                     <table className="w-full text-xs">
@@ -518,18 +524,18 @@ export default function SuperAdminPanel() {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-50">
-                        {usage.daily.map(day => {
-                          const t = day.totals;
-                          const failed = Object.entries(t).filter(([k]) => k.endsWith("_fail")).reduce((s, [, v]) => s + v, 0);
+                        {(usage.daily ?? []).map(day => {
+                          const t = day.totals ?? {};
+                          const failed = t.failed ?? 0;
                           return (
                             <tr key={day.date} className="hover:bg-slate-50">
                               <td className="px-4 py-2 font-medium text-slate-700">{day.date}</td>
-                              <td className="px-4 py-2 text-right text-slate-600">{t.analysis || 0}</td>
-                              <td className="px-4 py-2 text-right text-slate-600">{t.reanalysis || 0}</td>
-                              <td className="px-4 py-2 text-right text-slate-600">{t.document || 0}</td>
-                              <td className="px-4 py-2 text-right text-slate-600">{t.chat || 0}</td>
-                              <td className="px-4 py-2 text-right text-slate-600">{t.extraction || 0}</td>
-                              <td className={`px-4 py-2 text-right font-semibold ${failed > 0 ? "text-red-500" : "text-slate-300"}`}>{failed || 0}</td>
+                              <td className="px-4 py-2 text-right text-slate-600">{t.analysis ?? 0}</td>
+                              <td className="px-4 py-2 text-right text-slate-600">{t.reanalysis ?? 0}</td>
+                              <td className="px-4 py-2 text-right text-slate-600">{t.document ?? 0}</td>
+                              <td className="px-4 py-2 text-right text-slate-600">{t.chat ?? 0}</td>
+                              <td className="px-4 py-2 text-right text-slate-600">{t.extraction ?? 0}</td>
+                              <td className={`px-4 py-2 text-right font-semibold ${failed > 0 ? "text-red-500" : "text-slate-300"}`}>{failed}</td>
                             </tr>
                           );
                         })}
@@ -545,8 +551,8 @@ export default function SuperAdminPanel() {
                   <p className="text-xs text-slate-400 mt-0.5">Ranked by total events. Flag users running disproportionately many analyses.</p>
                 </div>
                 <div className="divide-y divide-slate-100">
-                  {usage.topConsumers.slice(0, 10).map((c, i) => {
-                    const totalAll = (usage.totals.analysis || 0) + (usage.totals.reanalysis || 0);
+                  {(usage.topConsumers ?? []).slice(0, 10).map((c, i) => {
+                    const totalAll = (usage.totals?.analysis ?? 0) + (usage.totals?.reanalysis ?? 0);
                     const isHighUsage = totalAll > 0 && c.count / totalAll > 0.3;
                     return (
                       <div key={c.uid} className="flex items-center justify-between px-4 py-3">
@@ -559,7 +565,7 @@ export default function SuperAdminPanel() {
                       </div>
                     );
                   })}
-                  {usage.topConsumers.length === 0 && <p className="text-sm text-slate-400 p-4 text-center">No events.</p>}
+                  {(usage.topConsumers ?? []).length === 0 && <p className="text-sm text-slate-400 p-4 text-center">No usage data yet — this will populate as analyses and documents are generated.</p>}
                 </div>
               </div>
 
@@ -598,7 +604,7 @@ export default function SuperAdminPanel() {
 
           {rev && usage ? (
             (() => {
-              const totalAnalyses = (usage.totals.analysis || 0) + (usage.totals.reanalysis || 0);
+              const totalAnalyses = (usage.totals?.analysis ?? 0) + (usage.totals?.reanalysis ?? 0);
               const cpa = parseFloat(costPerAnalysis);
               const bill = parseFloat(actualBillRs);
               const revRs = rev.thisMonth.totalRevenuePaise / 100;
@@ -677,21 +683,24 @@ export default function SuperAdminPanel() {
             {usageLoading && <Loader2 className="w-4 h-4 animate-spin text-slate-400" />}
           </div>
 
+          {!usageLoading && !usage && (
+            <p className="text-sm text-slate-400 text-center py-10">No usage data yet — this will populate as analyses and documents are generated.</p>
+          )}
           {usage && (
             <>
               <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-                <StatCard label="Failed Events" value={String(usage.health.failedCount)} accent={usage.health.failedCount > 0 ? "text-red-400" : "text-emerald-400"} />
-                <StatCard label="Low-Confidence Results" value={String(usage.health.lowConfidenceCount)} accent={usage.health.lowConfidenceCount > 0 ? "text-amber-400" : "text-emerald-400"} />
-                <StatCard label="Payment Errors" value={String(usage.health.paymentErrors.length)} accent={usage.health.paymentErrors.length > 0 ? "text-red-400" : "text-emerald-400"} sub={usage.health.paymentErrors.length === 0 ? "Zero unrecognised amounts — good" : undefined} />
+                <StatCard label="Failed Events" value={String(usage.health?.failedCount ?? 0)} accent={(usage.health?.failedCount ?? 0) > 0 ? "text-red-400" : "text-emerald-400"} />
+                <StatCard label="Low-Confidence Results" value={String(usage.health?.lowConfidenceCount ?? 0)} accent={(usage.health?.lowConfidenceCount ?? 0) > 0 ? "text-amber-400" : "text-emerald-400"} />
+                <StatCard label="Payment Errors" value={String((usage.health?.paymentErrors ?? []).length)} accent={(usage.health?.paymentErrors ?? []).length > 0 ? "text-red-400" : "text-emerald-400"} sub={(usage.health?.paymentErrors ?? []).length === 0 ? "Zero unrecognised amounts — good" : undefined} />
               </div>
 
               <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
                 <div className="p-4 border-b border-slate-100"><h3 className="font-bold text-slate-800">Failed Events <span className="text-slate-400 font-normal text-sm">— last {usageDays} days</span></h3></div>
-                {usage.health.failedEvents.length === 0 ? (
+                {(usage.health?.failedEvents ?? []).length === 0 ? (
                   <div className="p-6 flex items-center gap-2 text-emerald-600"><CheckCircle2 className="w-5 h-5" /><span className="text-sm font-medium">No failures in this period.</span></div>
                 ) : (
                   <div className="divide-y divide-slate-100">
-                    {usage.health.failedEvents.slice(0, 50).map((e, i) => (
+                    {(usage.health?.failedEvents ?? []).slice(0, 50).map((e, i) => (
                       <div key={i} className="px-4 py-3 flex items-start gap-3">
                         <div className="w-2 h-2 rounded-full bg-red-400 mt-1.5 shrink-0" />
                         <div className="flex-1 min-w-0">
@@ -703,7 +712,7 @@ export default function SuperAdminPanel() {
                         </div>
                       </div>
                     ))}
-                    {usage.health.failedEvents.length > 50 && <p className="text-xs text-slate-400 p-3 text-center">Showing 50 of {usage.health.failedEvents.length}</p>}
+                    {(usage.health?.failedEvents ?? []).length > 50 && <p className="text-xs text-slate-400 p-3 text-center">Showing 50 of {usage.health.failedEvents.length}</p>}
                   </div>
                 )}
               </div>
@@ -712,15 +721,15 @@ export default function SuperAdminPanel() {
                 <div className="p-4 border-b border-slate-100">
                   <h3 className="font-bold text-slate-800 flex items-center gap-2">
                     Payment Errors
-                    {usage.health.paymentErrors.length === 0 && <span className="text-xs font-normal text-emerald-600 flex items-center gap-1"><CheckCircle2 className="w-3.5 h-3.5" /> All clear</span>}
+                    {(usage.health?.paymentErrors ?? []).length === 0 && <span className="text-xs font-normal text-emerald-600 flex items-center gap-1"><CheckCircle2 className="w-3.5 h-3.5" /> All clear</span>}
                   </h3>
                   <p className="text-xs text-slate-400 mt-0.5">Unrecognised payment amounts — any entry here signals a pricing bug.</p>
                 </div>
-                {usage.health.paymentErrors.length === 0 ? (
+                {(usage.health?.paymentErrors ?? []).length === 0 ? (
                   <p className="text-sm text-emerald-600 p-4 font-medium">No unrecognised amounts.</p>
                 ) : (
                   <div className="divide-y divide-slate-100">
-                    {usage.health.paymentErrors.map((e, i) => (
+                    {(usage.health?.paymentErrors ?? []).map((e, i) => (
                       <div key={i} className="px-4 py-3 flex items-center justify-between">
                         <div>
                           <span className="text-sm font-bold text-red-600">{e.amountPaise != null ? fmt(e.amountPaise) : "unknown amount"}</span>

@@ -138,10 +138,10 @@ export default function LandingPage() {
           className="text-4xl md:text-5xl font-extrabold text-slate-900 leading-tight max-w-3xl mx-auto"
           style={{ letterSpacing: '-.03em' }}
         >
-          Upload a tender. Know in 60 seconds whether to bid. Get every annexure filled and submission-ready.
+          Stop losing tenders to paperwork.
         </h1>
         <p className="mt-5 text-lg text-slate-500 max-w-2xl mx-auto leading-relaxed">
-          And never lose track of your EMD again. TenderMaster AI reads the document, checks it against your business profile, and hands you a bid decision — plus the paperwork.
+          AI-powered tender analysis with auto-filled annexures — know if you qualify, and get your forms ready to submit.
         </p>
         <div className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-3.5">
           {user ? (

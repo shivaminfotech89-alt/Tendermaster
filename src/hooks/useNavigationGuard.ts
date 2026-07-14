@@ -1,5 +1,4 @@
 import { useEffect } from "react";
-import { useBlocker } from "react-router-dom";
 
 export function useNavigationGuard(isDirty: boolean) {
   useEffect(() => {
@@ -11,6 +10,4 @@ export function useNavigationGuard(isDirty: boolean) {
     window.addEventListener("beforeunload", handler);
     return () => window.removeEventListener("beforeunload", handler);
   }, [isDirty]);
-
-  return useBlocker(isDirty);
 }

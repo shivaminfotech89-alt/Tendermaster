@@ -146,7 +146,19 @@ export default function TenderAnalyzer() {
   // Navigation guards — analysis (credit spent, not yet persisted) and unsaved generated doc
   const analysisDirty = !!analysisResult && !savedProjectId;
   const docDirty = !!generatedDoc && generatedDoc !== "Generating..." && !docExported;
-  const navBlocker = useNavigationGuard(analysisDirty || docDirty);
+  useNavigationGuard(analysisDirty || docDirty); // beforeunload guard for tab/browser close
+
+  const [showNavModal, setShowNavModal] = useState(false);
+  const pendingActionRef = useRef<(() => void) | null>(null);
+
+  const guardedAction = (action: () => void) => {
+    if (analysisDirty || docDirty) {
+      pendingActionRef.current = action;
+      setShowNavModal(true);
+    } else {
+      action();
+    }
+  };
 
   // Callback to mark a generated doc as exported (downloaded or copied)
   const markDocExported = useCallback(() => setDocExported(true), []);
@@ -633,11 +645,13 @@ export default function TenderAnalyzer() {
   return (
     <>
     <UnsavedChangesModal
-      blocker={navBlocker}
+      isOpen={showNavModal}
       title={navModalTitle}
       message={navModalMessage}
       stayLabel={navModalStayLabel}
       leaveLabel="Discard"
+      onLeave={() => { pendingActionRef.current?.(); pendingActionRef.current = null; setShowNavModal(false); }}
+      onStay={() => { pendingActionRef.current = null; setShowNavModal(false); }}
     />
     <div className="p-6 md:p-8 max-w-6xl mx-auto pb-24 relative">
       <div className="mb-6 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
@@ -798,7 +812,7 @@ export default function TenderAnalyzer() {
                <p className="text-sm text-slate-500 mt-1">Review the AI generated breakdown below.</p>
             </div>
             <div className="flex flex-col md:flex-row items-center gap-3 w-full md:w-auto">
-               <button onClick={clearAnalysis} className="text-slate-500 hover:text-slate-800 font-semibold text-sm flex items-center gap-2">
+               <button onClick={() => guardedAction(clearAnalysis)} className="text-slate-500 hover:text-slate-800 font-semibold text-sm flex items-center gap-2">
                  <ArrowLeft className="w-4 h-4" /> New Analysis
                </button>
                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full md:w-auto">

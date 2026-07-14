@@ -16,7 +16,8 @@ export default function Layout() {
   const { user, role, credits, logout } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
-  const { analyzing, progress, analysisResult, reanalyzing, reanalyzeProgress, clearAnalysis } = useAnalyzerStore();
+  const { analyzing, progress, analysisResult, savedProjectId, reanalyzing, reanalyzeProgress, clearAnalysis } = useAnalyzerStore();
+  const analyzerDirty = !!analysisResult && !savedProjectId;
   const [hidePopup, setHidePopup] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
   useEffect(() => { if (analyzing || reanalyzing) setHidePopup(false); }, [analyzing, reanalyzing]);
@@ -84,6 +85,14 @@ export default function Layout() {
             <Link
               key={item.id}
               to={item.path}
+              onClick={(e) => {
+                if (analyzerDirty && !isActive(item)) {
+                  e.preventDefault();
+                  if (window.confirm("You have an unsaved analysis that will be lost. Leave anyway?")) {
+                    navigate(item.path);
+                  }
+                }
+              }}
               className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
                 isActive(item) ? "bg-blue-50 text-blue-700" : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"
               }`}
@@ -179,6 +188,14 @@ export default function Layout() {
           <Link
             key={item.id}
             to={item.path}
+            onClick={(e) => {
+              if (analyzerDirty && !isActive(item)) {
+                e.preventDefault();
+                if (window.confirm("You have an unsaved analysis that will be lost. Leave anyway?")) {
+                  navigate(item.path);
+                }
+              }
+            }}
             className={`flex flex-col items-center justify-center flex-1 py-2 min-w-0 gap-0.5 ${
               isActive(item) ? "text-blue-600" : "text-slate-400"
             }`}
@@ -227,6 +244,17 @@ export default function Layout() {
                 <Link
                   key={item.id}
                   to={item.path}
+                  onClick={(e) => {
+                    if (analyzerDirty && !isActive(item)) {
+                      e.preventDefault();
+                      setMoreOpen(false);
+                      if (window.confirm("You have an unsaved analysis that will be lost. Leave anyway?")) {
+                        navigate(item.path);
+                      }
+                    } else {
+                      setMoreOpen(false);
+                    }
+                  }}
                   className={`flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-colors ${
                     isActive(item) ? "bg-blue-50 text-blue-700" : "text-slate-600 hover:bg-slate-50"
                   }`}

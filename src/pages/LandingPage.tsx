@@ -162,7 +162,7 @@ export default function LandingPage() {
 
       {/* ── How it Works ── */}
       <section id="how" className="max-w-5xl mx-auto px-6 lg:px-14 pb-16">
-        <p className="text-xs font-bold text-slate-400 uppercase tracking-widest text-center mb-11">How it works</p>
+        <h2 className="text-xs font-bold text-slate-400 uppercase tracking-widest text-center mb-11">How it works</h2>
         <div className="grid md:grid-cols-3 gap-9">
           {[
             { n: '1', title: 'Upload the tender', desc: 'PDF, a ZIP of documents, or a GeM / CPPP link.' },
@@ -171,8 +171,8 @@ export default function LandingPage() {
           ].map(({ n, title, desc }) => (
             <div key={n} className="text-center">
               <div className="w-14 h-14 mx-auto rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center text-xl font-extrabold mb-5">{n}</div>
-              <div className="text-base font-bold text-slate-900 mb-1.5">{title}</div>
-              <div className="text-sm text-slate-500 leading-relaxed">{desc}</div>
+              <h3 className="text-base font-bold text-slate-900 mb-1.5">{title}</h3>
+              <p className="text-sm text-slate-500 leading-relaxed">{desc}</p>
             </div>
           ))}
         </div>
@@ -253,72 +253,72 @@ export default function LandingPage() {
               <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center mb-4">
                 <CheckCircle2 className="w-5 h-5" />
               </div>
-              <div className="font-bold text-slate-900 text-sm mb-1.5">Tender analysis</div>
-              <div className="text-sm text-slate-500 leading-relaxed">Match score, eligibility, compliance matrix, win probability and risk flags from the full document.</div>
+              <h3 className="font-bold text-slate-900 text-sm mb-1.5">Tender analysis</h3>
+              <p className="text-sm text-slate-500 leading-relaxed">Match score, eligibility, compliance matrix, win probability and risk flags from the full document.</p>
             </div>
 
             <div className="bg-white border border-slate-100 rounded-2xl p-6">
               <div className="w-10 h-10 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center mb-4">
                 <Building2 className="w-5 h-5" />
               </div>
-              <div className="font-bold text-slate-900 text-sm mb-1.5">Business profile</div>
-              <div className="text-sm text-slate-500 leading-relaxed">Fill your statutory details once — GST, PAN, Udyam, turnover, directors — auto-filled from certificates.</div>
+              <h3 className="font-bold text-slate-900 text-sm mb-1.5">Business profile</h3>
+              <p className="text-sm text-slate-500 leading-relaxed">Fill your statutory details once — GST, PAN, Udyam, turnover, directors — auto-filled from certificates.</p>
             </div>
 
             <div className="bg-white border border-slate-100 rounded-2xl p-6">
               <div className="w-10 h-10 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center mb-4">
                 <TrendingUp className="w-5 h-5" />
               </div>
-              <div className="font-bold text-slate-900 text-sm mb-1.5">Bid engine &amp; profit calculator</div>
-              <div className="text-sm text-slate-500 leading-relaxed">Enter revenue, materials, labour and overheads — get margin and a recommended bid amount.</div>
+              <h3 className="font-bold text-slate-900 text-sm mb-1.5">Bid engine &amp; profit calculator</h3>
+              <p className="text-sm text-slate-500 leading-relaxed">Enter revenue, materials, labour and overheads — get margin and a recommended bid amount.</p>
             </div>
 
             <div className="bg-white border border-slate-100 rounded-2xl p-6">
               <div className="w-10 h-10 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center mb-4">
                 <MessageSquare className="w-5 h-5" />
               </div>
-              <div className="font-bold text-slate-900 text-sm mb-1.5">Tender chat</div>
-              <div className="text-sm text-slate-500 leading-relaxed">"What's the EMD? Am I eligible?" — plain-language answers instead of Ctrl+F through a PDF.</div>
+              <h3 className="font-bold text-slate-900 text-sm mb-1.5">Tender chat</h3>
+              <p className="text-sm text-slate-500 leading-relaxed">"What's the EMD? Am I eligible?" — plain-language answers instead of Ctrl+F through a PDF.</p>
             </div>
 
             <div className="bg-white border border-slate-100 rounded-2xl p-6">
               <div className="w-10 h-10 rounded-xl bg-purple-50 text-purple-700 flex items-center justify-center mb-4">
                 <Languages className="w-5 h-5" />
               </div>
-              <div className="font-bold text-slate-900 text-sm mb-1.5">Analysis in your language</div>
-              <div className="text-sm text-slate-500 leading-relaxed">Every result — English, Hindi or Gujarati. Read it the way your team actually talks.</div>
+              <h3 className="font-bold text-slate-900 text-sm mb-1.5">Analysis in your language</h3>
+              <p className="text-sm text-slate-500 leading-relaxed">Every result — English, Hindi or Gujarati. Read it the way your team actually talks.</p>
             </div>
 
             <div className="bg-white border border-slate-100 rounded-2xl p-6">
               <div className="w-10 h-10 rounded-xl bg-red-50 text-red-600 flex items-center justify-center mb-4">
                 <CreditCard className="w-5 h-5" />
               </div>
-              <div className="font-bold text-slate-900 text-sm mb-1.5">Payments tracker</div>
-              <div className="text-sm text-slate-500 leading-relaxed">Every EMD and Security Deposit tracked Paid → Pending Refund → Refunded, so your capital doesn't sit forgotten.</div>
+              <h3 className="font-bold text-slate-900 text-sm mb-1.5">Payments tracker</h3>
+              <p className="text-sm text-slate-500 leading-relaxed">Every EMD and Security Deposit tracked Paid → Pending Refund → Refunded, so your capital doesn't sit forgotten.</p>
             </div>
 
             <div className="bg-white border border-slate-100 rounded-2xl p-6">
               <div className="w-10 h-10 rounded-xl bg-cyan-50 text-cyan-600 flex items-center justify-center mb-4">
                 <Folder className="w-5 h-5" />
               </div>
-              <div className="font-bold text-slate-900 text-sm mb-1.5">Documents center</div>
-              <div className="text-sm text-slate-500 leading-relaxed">Every certificate and record, uploaded once, searchable — no hunting at 11 pm before a deadline.</div>
+              <h3 className="font-bold text-slate-900 text-sm mb-1.5">Documents center</h3>
+              <p className="text-sm text-slate-500 leading-relaxed">Every certificate and record, uploaded once, searchable — no hunting at 11 pm before a deadline.</p>
             </div>
 
             <div className="bg-white border border-slate-100 rounded-2xl p-6">
               <div className="w-10 h-10 rounded-xl bg-red-50 text-red-600 flex items-center justify-center mb-4">
                 <Calendar className="w-5 h-5" />
               </div>
-              <div className="font-bold text-slate-900 text-sm mb-1.5">Deadline notifications</div>
-              <div className="text-sm text-slate-500 leading-relaxed">Submission and pre-bid dates, extracted automatically and never missed.</div>
+              <h3 className="font-bold text-slate-900 text-sm mb-1.5">Deadline notifications</h3>
+              <p className="text-sm text-slate-500 leading-relaxed">Submission and pre-bid dates, extracted automatically and never missed.</p>
             </div>
 
             <div className="bg-white border border-slate-100 rounded-2xl p-6">
               <div className="w-10 h-10 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center mb-4">
                 <LayoutGrid className="w-5 h-5" />
               </div>
-              <div className="font-bold text-slate-900 text-sm mb-1.5">Dashboard &amp; pipeline</div>
-              <div className="text-sm text-slate-500 leading-relaxed">Active tenders, high-match count, deadlines this week and your whole bidding operation on one screen.</div>
+              <h3 className="font-bold text-slate-900 text-sm mb-1.5">Dashboard &amp; pipeline</h3>
+              <p className="text-sm text-slate-500 leading-relaxed">Active tenders, high-match count, deadlines this week and your whole bidding operation on one screen.</p>
             </div>
 
           </div>

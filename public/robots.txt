@@ -1,0 +1,9 @@
+User-agent: *
+Allow: /
+
+# Block dashboard and admin routes — authenticated, nothing to index
+Disallow: /dashboard/
+Disallow: /admin
+Disallow: /superadmin
+
+Sitemap: https://www.tendermasterai.com/sitemap.xml

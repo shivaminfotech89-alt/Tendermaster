@@ -112,5 +112,10 @@ service cloud.firestore {
     match /usage_events/{eventId} {
       allow read, write: if false;
     }
+
+    match /saved_tenders/{savedId}/generated_docs/{docId} {
+      allow read, create, delete: if isSignedIn()
+        && get(/databases/$(database)/documents/saved_tenders/$(savedId)).data.userId == request.auth.uid;
+    }
   }
 }

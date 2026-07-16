@@ -1491,7 +1491,7 @@ app.post(
 app.post("/api/analyze-tender", verifyFirebaseToken, async (req: AuthenticatedRequest, res) => {
   try {
     const { tenderDocument, tenderType = "text", tenderContent, userProfile, language,
-            projectId: existingProjectId, fileNames } = req.body;
+            projectId: existingProjectId, fileNames, projectName: userProjectName } = req.body;
     const actualContent = tenderContent || tenderDocument;
     const isReanalysis = !!existingProjectId;
 
@@ -2042,7 +2042,7 @@ MODE 1: CONTRACT PROFILE ANALYSIS & MATCHING
 
         tx.set(projectRef, {
           userId: uid,
-          projectName: parsedData?.tender_simplified?.tender_name || "Untitled Tender",
+          projectName: (typeof userProjectName === "string" && userProjectName.trim()) ? userProjectName.trim() : (parsedData?.tender_simplified?.tender_name || "Untitled Tender"),
           tenderId: Date.now().toString(),
           details: parsedData,
           payloadRef,

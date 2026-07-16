@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
-import { doc, getDoc, updateDoc, deleteDoc, addDoc, collection, query, where, getDocs, writeBatch, serverTimestamp, arrayUnion } from "firebase/firestore";
+import { doc, getDoc, updateDoc, deleteDoc, addDoc, collection, query, where, getDocs, orderBy, writeBatch, serverTimestamp, arrayUnion } from "firebase/firestore";
 import { db } from "../lib/firebase";
 import { ArrowLeft, AlertCircle, Calculator, Building, Activity, Upload, FileText, Download, Loader2, Save, Plus, Target, CheckCircle, ListTodo, Calendar, MessageSquare, Send, X, Trash2, RefreshCw, Edit2, Check, ChevronRight, Info, IndianRupee, Wallet, Receipt, CreditCard, RotateCcw, BadgeCheck, Clock, Copy, ArrowUpRight } from "lucide-react";
 import Markdown from "react-markdown";
@@ -103,6 +103,15 @@ const defaultPaymentForm: PaymentFormState = {
   expectedRefundDate: '',
 };
 
+interface SavedDoc {
+  id: string;
+  title: string;
+  mode: "standard" | "exact_form";
+  content: string;
+  isHtml: boolean;
+  savedAt: any;
+}
+
 export default function ProjectDetails() {
   const { projectId } = useParams();
   const { user } = useAuth();
@@ -135,7 +144,11 @@ export default function ProjectDetails() {
   const [downloadingPdf, setDownloadingPdf] = useState(false);
   const [downloadingDocx, setDownloadingDocx] = useState(false);
   const [printWithoutLetterhead, setPrintWithoutLetterhead] = useState(false);
-  
+  const [savedDocs, setSavedDocs] = useState<SavedDoc[]>([]);
+  const [savedDocsLoading, setSavedDocsLoading] = useState(false);
+  const [savingDoc, setSavingDoc] = useState(false);
+  const [docSaved, setDocSaved] = useState(false);
+
   // Checked items for action center
   const [checkedItems, setCheckedItems] = useState<string[]>([]);
   // Uploaded docs
@@ -609,12 +622,63 @@ export default function ProjectDetails() {
      }
   };
 
+  const loadSavedDocs = async () => {
+    if (!projectId) return;
+    setSavedDocsLoading(true);
+    try {
+      const snap = await getDocs(
+        query(collection(db, "saved_tenders", projectId, "generated_docs"), orderBy("savedAt", "desc"))
+      );
+      setSavedDocs(snap.docs.map(d => ({ id: d.id, ...d.data() } as SavedDoc)));
+    } catch (e) {
+      console.error("Failed to load saved docs", e);
+    } finally {
+      setSavedDocsLoading(false);
+    }
+  };
+
+  useEffect(() => { loadSavedDocs(); }, [projectId]);
+
+  const saveDocument = async () => {
+    if (!projectId || !generatedDoc || generatedDoc === "Generating...") return;
+    setSavingDoc(true);
+    try {
+      await addDoc(collection(db, "saved_tenders", projectId, "generated_docs"), {
+        title: exactFormMode ? "Exact Form Fill" : docType,
+        mode: exactFormMode ? "exact_form" : "standard",
+        content: generatedDoc,
+        isHtml: generatedDocIsHtml,
+        savedAt: serverTimestamp(),
+      });
+      setDocSaved(true);
+      toast.success("Document saved to project.");
+      await loadSavedDocs();
+    } catch (e: any) {
+      toast.error("Failed to save document.");
+    } finally {
+      setSavingDoc(false);
+    }
+  };
+
+  const deleteSavedDoc = async (docId: string) => {
+    if (!projectId) return;
+    try {
+      const { deleteDoc: del, doc: docRef } = await import("firebase/firestore");
+      await del(docRef(db, "saved_tenders", projectId, "generated_docs", docId));
+      setSavedDocs(prev => prev.filter(d => d.id !== docId));
+      toast.success("Saved document deleted.");
+    } catch (e) {
+      toast.error("Failed to delete.");
+    }
+  };
+
   const generateDocument = async () => {
     if (!project) return;
     if (exactFormMode && !exactFormFile) {
       toast.error("Please upload the blank form you want filled.");
       return;
     }
+    setDocSaved(false);
     setGeneratingDoc(true);
     setGeneratedDoc("Generating...");
     setGeneratedDocIsHtml(false);
@@ -1202,6 +1266,48 @@ export default function ProjectDetails() {
            {activeTab === 'docs' && (
              <div className="space-y-8">
 
+           {/* Saved Documents */}
+           {(savedDocs.length > 0 || savedDocsLoading) && (
+             <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+               <div className="p-4 border-b border-slate-100 flex items-center justify-between">
+                 <h3 className="font-semibold text-slate-800 flex items-center gap-2 text-sm">
+                   <Save className="w-4 h-4 text-slate-500" /> Saved Documents
+                 </h3>
+                 <span className="text-xs text-slate-400">{savedDocs.length} saved</span>
+               </div>
+               {savedDocsLoading ? (
+                 <div className="p-4 flex justify-center"><Loader2 className="w-5 h-5 animate-spin text-slate-400" /></div>
+               ) : (
+                 <ul className="divide-y divide-slate-100">
+                   {savedDocs.map(sd => (
+                     <li key={sd.id} className="p-4 flex items-center gap-3 group">
+                       <FileText className="w-4 h-4 text-indigo-400 shrink-0" />
+                       <div className="flex-1 min-w-0">
+                         <p className="text-sm font-medium text-slate-800 truncate">{sd.title}</p>
+                         <div className="flex items-center gap-2 mt-0.5">
+                           <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded ${sd.mode === 'exact_form' ? 'bg-violet-100 text-violet-700' : 'bg-indigo-100 text-indigo-700'}`}>
+                             {sd.mode === 'exact_form' ? 'Exact Form' : 'Standard'}
+                           </span>
+                           <span className="text-[10px] text-slate-400">{sd.savedAt?.toDate ? sd.savedAt.toDate().toLocaleDateString('en-IN', { day:'numeric', month:'short', year:'numeric' }) : ''}</span>
+                         </div>
+                       </div>
+                       <div className="flex items-center gap-2 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+                         <button
+                           onClick={() => { setGeneratedDoc(sd.content); setGeneratedDocIsHtml(sd.isHtml); setDocSaved(true); setDocType(sd.title); setIsEditingDoc(false); }}
+                           className="text-xs text-indigo-600 hover:text-indigo-800 font-medium"
+                         >Open</button>
+                         <button
+                           onClick={() => deleteSavedDoc(sd.id)}
+                           className="text-xs text-red-500 hover:text-red-700"
+                         ><Trash2 className="w-3 h-3" /></button>
+                       </div>
+                     </li>
+                   ))}
+                 </ul>
+               )}
+             </div>
+           )}
+
            {/* Generate Documents */}
            <div className="bg-gradient-to-br from-indigo-50 to-blue-50 rounded-xl border border-indigo-100 shadow-sm overflow-hidden">
              <div className="p-5 border-b border-indigo-100/50">
@@ -1212,16 +1318,16 @@ export default function ProjectDetails() {
                 {/* Mode toggle */}
                 <div className="flex rounded-lg border border-indigo-200 overflow-hidden text-sm font-medium">
                   <button
-                    onClick={() => { setExactFormMode(false); setExactFormFile(null); }}
+                    onClick={() => { setExactFormMode(false); setExactFormFile(null); setGeneratedDoc(""); setGeneratedDocIsHtml(false); setIsEditingDoc(false); }}
                     className={`flex-1 py-2 transition-colors ${!exactFormMode ? 'bg-indigo-600 text-white' : 'bg-white text-indigo-700 hover:bg-indigo-50'}`}
                   >
                     Generate from tender data
                   </button>
                   <button
-                    onClick={() => setExactFormMode(true)}
+                    onClick={() => { setExactFormMode(true); setGeneratedDoc(""); setGeneratedDocIsHtml(false); setIsEditingDoc(false); }}
                     className={`flex-1 py-2 transition-colors ${exactFormMode ? 'bg-indigo-600 text-white' : 'bg-white text-indigo-700 hover:bg-indigo-50'}`}
                   >
-                    Fill an uploaded form
+                    Fill My Exact Tender Form
                   </button>
                 </div>
 
@@ -1253,7 +1359,7 @@ export default function ProjectDetails() {
                 </select>
                 ) : (
                 <div>
-                  <p className="text-xs text-indigo-700/80 mb-2">Upload the blank form/annexure page from your tender (PDF or image). The AI will reproduce its exact structure and fill your details in.</p>
+                  <p className="text-xs text-indigo-700/80 mb-2">Upload the exact blank form or annexure issued by the tender authority (PDF or image). The AI reproduces its structure verbatim and fills your business details into every field.</p>
                   {!exactFormFile ? (
                     <label className="flex flex-col items-center justify-center w-full h-24 border-2 border-dashed border-indigo-300 rounded-lg cursor-pointer bg-white hover:bg-indigo-50 transition-colors">
                       <div className="flex flex-col items-center justify-center gap-1">
@@ -1392,6 +1498,14 @@ export default function ProjectDetails() {
                              </button>
                            <button onClick={() => setIsEditingDoc(!isEditingDoc)} className="text-xs flex items-center gap-1 text-indigo-600 hover:text-indigo-800 font-medium">
                              <Edit2 className="w-3 h-3" /> {isEditingDoc ? "Preview" : generatedDocIsHtml ? "Edit HTML" : "Edit"}
+                           </button>
+                           <button
+                             onClick={saveDocument}
+                             disabled={savingDoc || docSaved}
+                             className={`text-xs flex items-center gap-1 font-medium transition-colors disabled:opacity-50 ${docSaved ? 'text-emerald-600' : 'text-emerald-700 hover:text-emerald-900'}`}
+                           >
+                             {savingDoc ? <Loader2 className="w-3 h-3 animate-spin" /> : <Save className="w-3 h-3" />}
+                             {docSaved ? "Saved" : "Save"}
                            </button>
                         </div>
                       </div>

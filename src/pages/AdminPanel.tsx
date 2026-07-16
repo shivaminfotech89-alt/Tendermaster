@@ -140,7 +140,8 @@ export default function AdminPanel() {
         body: JSON.stringify({ uid: u.id, credits: amount }),
       });
       if (!res.ok) throw new Error((await res.json()).error || "Failed");
-      toast.success(`Granted ${amount} ${amount === 1 ? "analysis" : "analyses"} to ${u.email}`);
+      const newBalance = (u.creditsTotal || 0) + amount - (u.creditsUsed || 0);
+      toast.success(`${amount} ${amount === 1 ? "analysis" : "analyses"} added to ${u.email}. New balance: ${newBalance} ${newBalance === 1 ? "analysis" : "analyses"}.`);
       await logAction("GRANT_ANALYSES", { targetUid: u.id, targetEmail: u.email, credits: amount });
       setUsers(prev => prev.map(x => x.id === u.id ? { ...x, creditsTotal: (x.creditsTotal || 0) + amount } : x));
       setGrantInputs(prev => ({ ...prev, [u.id]: "" }));

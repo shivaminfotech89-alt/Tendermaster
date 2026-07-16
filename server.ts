@@ -13,7 +13,7 @@ import crypto from "crypto";
 import dns from "dns";
 import { promisify } from "util";
 // Bundled by esbuild (--bundle inlines local files; --packages=external only skips npm deps).
-import { PLANS, TRIAL_CREDITS, CREDIT_VALIDITY_MONTHS } from './src/lib/plans';
+import { PLANS, TRIAL_CREDITS, TRIAL_DOC_LIMIT, CREDIT_VALIDITY_MONTHS } from './src/lib/plans';
 
 const lookupPromise = promisify(dns.lookup);
 
@@ -276,6 +276,67 @@ const requireCredits = async (
     return res.status(500).json({ error: "Failed to verify user credits." });
   }
 };
+
+// ---------------------------------------------------------------------------
+// Trial-aware access middleware
+// Three variants (type: 'doc' | 'export' | 'chat') via a factory so trial
+// allowances stay separate from the analysis credit pool.
+// ---------------------------------------------------------------------------
+function incrementTrialDocUsed(uid: string) {
+  getFirestore()
+    .collection("users")
+    .doc(uid)
+    .update({ trialDocsUsed: FieldValue.increment(1) })
+    .catch(e => console.error("[Trial] incrementTrialDocUsed failed:", e));
+}
+
+const requireTrialAwareAccess = (type: "doc" | "export" | "chat") =>
+  async (req: AuthenticatedRequest, res: express.Response, next: express.NextFunction) => {
+    const uid = req.user?.uid;
+    if (!uid) return res.status(401).json({ error: "Unauthorized: Authenticated user context required" });
+    try {
+      const db = getFirestore();
+      const snap = await db.collection("users").doc(uid).get();
+      const data = snap.exists ? snap.data()! : {};
+      const role: string = data.role || "free";
+      if (isAdminRole(role, req.user!.email)) return next();
+
+      const creditsTotal: number = data.creditsTotal ?? 0;
+      const creditsUsed: number = data.creditsUsed ?? 0;
+      const creditsExpiry: Date | null = data.creditsExpiry ? data.creditsExpiry.toDate() : null;
+      const now = new Date();
+
+      if (type === "doc") {
+        // Trial users: ALWAYS route through trial doc allowance, regardless of unused analysis credit.
+        // This prevents a document request from silently consuming the analysis credit.
+        if (data.trialClaimed === true) {
+          if ((data.trialDocsUsed ?? 0) < TRIAL_DOC_LIMIT) {
+            (req as any).isTrialDocRequest = true;
+            return next();
+          }
+          // Trial doc exhausted — fall through to normal credits (for users who also bought a plan)
+        }
+      } else if (type === "export") {
+        // PDF/DOCX export is rendering-only (no AI call). Trial users always pass — the AI gate
+        // was already enforced at generate-doc time.
+        if (data.trialClaimed === true) return next();
+      } else if (type === "chat") {
+        // Chat is scoped to trial usage: passes only after the user has spent their analysis credit
+        // (creditsUsed > 0), meaning they have an analyzed project to chat about.
+        if (data.trialClaimed === true && creditsUsed > 0) return next();
+      }
+
+      // Normal credit check (paid users, or trial users who have exhausted their trial allowance)
+      if (creditsUsed < creditsTotal && creditsExpiry && creditsExpiry > now) return next();
+
+      return res.status(403).json({
+        error: "You've used all your analyses. Add more to continue — your existing projects and documents remain fully accessible.",
+      });
+    } catch (err) {
+      console.error("[Credits] requireTrialAwareAccess failed:", err);
+      return res.status(500).json({ error: "Failed to verify user access." });
+    }
+  };
 
 // ---------------------------------------------------------------------------
 // Phase 3: SSRF guard
@@ -2092,7 +2153,7 @@ app.post("/api/compare-tender", verifyFirebaseToken, async (req: AuthenticatedRe
 app.post(
   "/api/chat-tender",
   verifyFirebaseToken,
-  requireCredits,
+  requireTrialAwareAccess("chat"),
   async (req: AuthenticatedRequest, res) => {
     try {
       const { tenderDocument, analysisResult, messages, language, paymentRecords } = req.body;
@@ -2267,7 +2328,7 @@ Rules:
 app.post(
   "/api/generate-doc",
   verifyFirebaseToken,
-  requireCredits,
+  requireTrialAwareAccess("doc"),
   async (req: AuthenticatedRequest, res) => {
     try {
       const { docType, tenderDetails, userProfile, financialData, extraInstructions, language,
@@ -2423,6 +2484,7 @@ ${JSON.stringify(tenderDetails)}${financialContext}${extraContext}`;
         });
         const fragment = response.text || "<p>Empty response from AI.</p>";
         logUsageEvent({ uid: req.user!.uid, type: 'document', success: true });
+        if ((req as any).isTrialDocRequest) incrementTrialDocUsed(req.user!.uid);
         return res.json({ document: buildFormDocHtml(fragment), format: "html" });
       } else {
         // ── Standard mode: generate from tender data analysis ──
@@ -2443,6 +2505,7 @@ ${JSON.stringify(tenderDetails)}${financialContext}${extraContext}`;
       }
 
       logUsageEvent({ uid: req.user!.uid, type: 'document', success: true });
+      if ((req as any).isTrialDocRequest) incrementTrialDocUsed(req.user!.uid);
       res.json({ document: response.text || "Empty response from AI.", format: "markdown" });
     } catch (err: any) {
       console.error("Generate Doc Error:", err);
@@ -2458,7 +2521,7 @@ ${JSON.stringify(tenderDetails)}${financialContext}${extraContext}`;
 app.post(
   "/api/generate-pdf",
   verifyFirebaseToken,
-  requireCredits,
+  requireTrialAwareAccess("export"),
   async (req: AuthenticatedRequest, res) => {
     try {
       const {
@@ -2606,7 +2669,7 @@ app.post(
 app.post(
   "/api/generate-docx",
   verifyFirebaseToken,
-  requireCredits,
+  requireTrialAwareAccess("export"),
   async (req: AuthenticatedRequest, res) => {
     try {
       const { html, filename, isMarkdown } = req.body as {

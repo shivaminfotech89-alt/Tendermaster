@@ -6,4 +6,5 @@ export const PLANS = [
 
 export type Plan = typeof PLANS[number];
 export const TRIAL_CREDITS = 1;
+export const TRIAL_DOC_LIMIT = 1;
 export const CREDIT_VALIDITY_MONTHS = 24;

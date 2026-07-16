@@ -89,6 +89,27 @@ const emptyDirector = (): Director => ({
   residentialAddress: "",
 });
 
+// ── Project experience row type ───────────────────────────────────────────────
+interface ProjectExperience {
+  nameOfWork: string;
+  clientName: string;
+  contractValue: string;
+  workOrderNumber: string;
+  startDate: string;
+  completionDate: string;
+  status: "Completed" | "Ongoing";
+}
+
+const emptyProject = (): ProjectExperience => ({
+  nameOfWork: "",
+  clientName: "",
+  contractValue: "",
+  workOrderNumber: "",
+  startDate: "",
+  completionDate: "",
+  status: "Completed",
+});
+
 // ── Default profile ───────────────────────────────────────────────────────────
 const defaultProfile = {
   // existing
@@ -130,6 +151,8 @@ const defaultProfile = {
   esicNumber: "",
   epfNumber: "",
   professionalTaxNumber: "",
+  tradeLicenseNumber: "",
+  labourLicenseNumber: "",
   // new: financial
   turnoverYear1Label: "",
   turnoverYear1: "",
@@ -145,8 +168,10 @@ const defaultProfile = {
   authorizedSignatoryName: "",
   authorizedSignatoryDesignation: "",
   authorizedSignatoryDin: "",
+  authorizedSignatoryPan: "",
   // new: experience
   registrationClass: "",
+  numberOfEmployees: "",
   vendorRegistrationNumbers: "",
   experienceSummary: "",
 };
@@ -166,6 +191,7 @@ export default function BusinessProfile() {
 
   const [profile, setProfile] = useState<ProfileState>(defaultProfile);
   const [directors, setDirectors] = useState<Director[]>([]);
+  const [projects, setProjects] = useState<ProjectExperience[]>([]);
 
   // Track which sections are open (all open by default)
   const [open, setOpen] = useState<Record<string, boolean>>({
@@ -176,6 +202,7 @@ export default function BusinessProfile() {
     directors: false,
     signatory: false,
     activity: true,
+    experience: false,
     letterhead: false,
   });
   const toggle = (key: string) =>
@@ -236,6 +263,7 @@ export default function BusinessProfile() {
             majorClients: data.majorClients?.join(", ") || "",
           }));
           if (Array.isArray(data.directors)) setDirectors(data.directors);
+          if (Array.isArray(data.projects)) setProjects(data.projects);
         }
       } catch (e) {
         console.error("Failed to load profile", e);
@@ -279,6 +307,7 @@ export default function BusinessProfile() {
         turnoverUnit: profile.turnoverUnit || "Lakhs",
         experienceYears: Number(profile.experienceYears) || 0,
         directors,
+        projects,
       };
       await setDoc(doc(db, "business_profiles", user.uid), dataToSave);
       toast.success("Profile updated successfully!");
@@ -347,6 +376,12 @@ export default function BusinessProfile() {
   const updateDirector = (idx: number, field: keyof Director, value: string) =>
     setDirectors((prev) =>
       prev.map((d, i) => (i === idx ? { ...d, [field]: value } : d))
+    );
+
+  // ── Project experience helpers ─────────────────────────────────────────────
+  const updateProject = (idx: number, field: keyof ProjectExperience, value: string) =>
+    setProjects((prev) =>
+      prev.map((p, i) => (i === idx ? { ...p, [field]: value } : p))
     );
 
   // ── Extract profile data from uploaded certificates ───────────────────────
@@ -591,12 +626,16 @@ export default function BusinessProfile() {
                     ["esicNumber", "ESIC Number"],
                     ["epfNumber", "EPF / PF Number"],
                     ["professionalTaxNumber", "Professional Tax Number"],
+                    ["tradeLicenseNumber", "Trade License No."],
+                    ["labourLicenseNumber", "Labour / Works Contractor License No."],
                     ["bankName", "Bank Name"],
                     ["bankAccountNumber", "Bank Account Number"],
                     ["bankIfsc", "IFSC Code"],
                     ["authorizedSignatoryName", "Signatory Name"],
                     ["authorizedSignatoryDesignation", "Signatory Designation"],
                     ["authorizedSignatoryDin", "Signatory DIN"],
+                    ["authorizedSignatoryPan", "Signatory Personal PAN"],
+                    ["numberOfEmployees", "Total Employees"],
                   ] as [keyof ProfileState, string][]
                 )
                   .filter(([key]) => key in reviewData)
@@ -984,6 +1023,24 @@ export default function BusinessProfile() {
                 className={inputCls}
               />
             </Field>
+            <Field label="Trade License / S&E Registration No." hint="Shops & Establishments or local body trade license">
+              <input
+                name="tradeLicenseNumber"
+                value={profile.tradeLicenseNumber}
+                onChange={handleChange}
+                className={inputCls}
+                placeholder="Trade License Number"
+              />
+            </Field>
+            <Field label="Labour / Works Contractor License No." hint="Under Contract Labour (R&A) Act — required for civil/works tenders">
+              <input
+                name="labourLicenseNumber"
+                value={profile.labourLicenseNumber}
+                onChange={handleChange}
+                className={inputCls}
+                placeholder="Contractor License Number"
+              />
+            </Field>
           </div>
         </ProfileSection>
 
@@ -1196,6 +1253,15 @@ export default function BusinessProfile() {
                 placeholder="00000000"
               />
             </Field>
+            <Field label="Signatory Personal PAN" hint="Individual PAN of the authorized signatory — required on some declarations">
+              <input
+                name="authorizedSignatoryPan"
+                value={profile.authorizedSignatoryPan}
+                onChange={handleChange}
+                className={inputCls + " uppercase"}
+                placeholder="AAAAA0000A"
+              />
+            </Field>
           </div>
         </ProfileSection>
 
@@ -1284,6 +1350,18 @@ export default function BusinessProfile() {
                 />
               </Field>
               <Field
+                label="Total Employees"
+                hint="Used in capacity declarations — e.g. 45 (15 technical, 30 skilled)"
+              >
+                <input
+                  name="numberOfEmployees"
+                  value={profile.numberOfEmployees}
+                  onChange={handleChange}
+                  className={inputCls}
+                  placeholder="e.g. 45 (15 technical, 30 skilled)"
+                />
+              </Field>
+              <Field
                 label="Vendor / Contractor Registration Numbers"
                 hint="GFR, CPWD, PWD, GeM seller ID, etc."
               >
@@ -1352,9 +1430,110 @@ export default function BusinessProfile() {
           </div>
         </ProfileSection>
 
-        {/* ── 8. Letterhead Settings ────────────────────────────────────── */}
+        {/* ── 8. Project Experience (Past Works) ───────────────────────── */}
         <ProfileSection
-          title="8. Letterhead Settings"
+          title="8. Project Experience (Past Works)"
+          subtitle="Individual project references — used to auto-fill experience statement annexures"
+          open={open.experience}
+          onToggle={() => toggle("experience")}
+        >
+          <div className="space-y-4">
+            {projects.length === 0 && (
+              <p className="text-sm text-slate-400 text-center py-4">
+                No projects added yet. Add past works to fill experience annexures automatically.
+              </p>
+            )}
+            {projects.map((proj, idx) => (
+              <div
+                key={idx}
+                className="border border-slate-200 rounded-lg p-4 space-y-4 relative bg-slate-50/50"
+              >
+                <button
+                  type="button"
+                  onClick={() => setProjects((prev) => prev.filter((_, i) => i !== idx))}
+                  className="absolute top-3 right-3 text-slate-400 hover:text-red-500 transition-colors"
+                  title="Remove"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+                <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">
+                  Project {idx + 1}
+                </p>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <Field label="Name of Work / Project">
+                    <input
+                      value={proj.nameOfWork}
+                      onChange={(e) => updateProject(idx, "nameOfWork", e.target.value)}
+                      className={inputCls}
+                      placeholder="e.g. Supply of 50 Solar Street Lights"
+                    />
+                  </Field>
+                  <Field label="Client / Employer Name">
+                    <input
+                      value={proj.clientName}
+                      onChange={(e) => updateProject(idx, "clientName", e.target.value)}
+                      className={inputCls}
+                      placeholder="e.g. Surat Municipal Corporation"
+                    />
+                  </Field>
+                  <Field label="Contract Value">
+                    <input
+                      value={proj.contractValue}
+                      onChange={(e) => updateProject(idx, "contractValue", e.target.value)}
+                      className={inputCls}
+                      placeholder="e.g. ₹12,50,000"
+                    />
+                  </Field>
+                  <Field label="Work Order / PO Number">
+                    <input
+                      value={proj.workOrderNumber}
+                      onChange={(e) => updateProject(idx, "workOrderNumber", e.target.value)}
+                      className={inputCls}
+                      placeholder="WO/2023/456"
+                    />
+                  </Field>
+                  <Field label="Start Date">
+                    <input
+                      type="date"
+                      value={proj.startDate}
+                      onChange={(e) => updateProject(idx, "startDate", e.target.value)}
+                      className={inputCls}
+                    />
+                  </Field>
+                  <Field label="Completion Date">
+                    <input
+                      type="date"
+                      value={proj.completionDate}
+                      onChange={(e) => updateProject(idx, "completionDate", e.target.value)}
+                      className={inputCls}
+                    />
+                  </Field>
+                  <Field label="Status">
+                    <select
+                      value={proj.status}
+                      onChange={(e) => updateProject(idx, "status", e.target.value)}
+                      className={selectCls}
+                    >
+                      <option value="Completed">Completed</option>
+                      <option value="Ongoing">Ongoing</option>
+                    </select>
+                  </Field>
+                </div>
+              </div>
+            ))}
+            <button
+              type="button"
+              onClick={() => setProjects((prev) => [...prev, emptyProject()])}
+              className="flex items-center gap-2 text-sm font-semibold text-indigo-600 hover:text-indigo-800 border border-dashed border-indigo-300 rounded-lg px-4 py-2 w-full justify-center hover:bg-indigo-50 transition-colors"
+            >
+              <Plus className="w-4 h-4" /> Add Project
+            </button>
+          </div>
+        </ProfileSection>
+
+        {/* ── 9. Letterhead Settings ────────────────────────────────────── */}
+        <ProfileSection
+          title="9. Letterhead Settings"
           subtitle="Upload or configure the letterhead used when printing generated documents"
           open={open.letterhead}
           onToggle={() => toggle("letterhead")}

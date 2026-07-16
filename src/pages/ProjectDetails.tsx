@@ -148,6 +148,8 @@ export default function ProjectDetails() {
   const [savedDocsLoading, setSavedDocsLoading] = useState(false);
   const [savingDoc, setSavingDoc] = useState(false);
   const [docSaved, setDocSaved] = useState(false);
+  const [savedDocDownloadingId, setSavedDocDownloadingId] = useState<string | null>(null);
+  const [savedDocDownloadingType, setSavedDocDownloadingType] = useState<'pdf' | 'docx' | null>(null);
 
   // Checked items for action center
   const [checkedItems, setCheckedItems] = useState<string[]>([]);
@@ -166,7 +168,7 @@ export default function ProjectDetails() {
   const [comparisonResult, setComparisonResult] = useState<any>(null);
   const [showCompareModal, setShowCompareModal] = useState(false);
   
-  const [activeTab, setActiveTab] = useState<'overview'|'docs'|'calculator'|'account'|'chat'|'notes'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview'|'docs'|'calculator'|'account'|'chat'|'saved_docs'|'notes'>('overview');
 
   // Account tab — payments
   const [payments, setPayments] = useState<TenderPayment[]>([]);
@@ -672,6 +674,64 @@ export default function ProjectDetails() {
     }
   };
 
+  const downloadSavedDocPdf = async (sd: SavedDoc) => {
+    setSavedDocDownloadingId(sd.id);
+    setSavedDocDownloadingType('pdf');
+    try {
+      const res = await fetchWithAuth("/api/generate-pdf", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          html: sd.content,
+          filename: sd.title,
+          isMarkdown: !sd.isHtml,
+          useUserLetterhead: sd.mode !== 'exact_form' && useLetterhead,
+          letterheadImageBase64: (sd.mode !== 'exact_form' && useLetterhead) ? (businessProfile?.letterheadBackgroundImage ?? "") : "",
+          letterheadHeaderHtml: (sd.mode !== 'exact_form' && useLetterhead) ? (businessProfile?.letterheadHeader ?? "") : "",
+          letterheadFooterHtml: (sd.mode !== 'exact_form' && useLetterhead) ? (businessProfile?.letterheadFooter ?? "") : "",
+        }),
+      });
+      if (!res.ok) throw new Error("PDF generation failed");
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = sd.title.replace(/\s+/g, "_") + ".pdf";
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e: any) {
+      toast.error("PDF generation failed: " + e.message);
+    } finally {
+      setSavedDocDownloadingId(null);
+      setSavedDocDownloadingType(null);
+    }
+  };
+
+  const downloadSavedDocDocx = async (sd: SavedDoc) => {
+    setSavedDocDownloadingId(sd.id);
+    setSavedDocDownloadingType('docx');
+    try {
+      const res = await fetchWithAuth("/api/generate-docx", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ html: sd.content, filename: sd.title, isMarkdown: !sd.isHtml }),
+      });
+      if (!res.ok) throw new Error("Word generation failed");
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = sd.title.replace(/\s+/g, "_") + ".docx";
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e: any) {
+      toast.error("Word generation failed: " + e.message);
+    } finally {
+      setSavedDocDownloadingId(null);
+      setSavedDocDownloadingType(null);
+    }
+  };
+
   const generateDocument = async () => {
     if (!project) return;
     if (exactFormMode && !exactFormFile) {
@@ -1147,6 +1207,10 @@ export default function ProjectDetails() {
          <button onClick={() => setActiveTab('calculator')} className={`px-6 py-3 font-semibold text-sm border-b-2 whitespace-nowrap transition-colors ${activeTab === 'calculator' ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>Bid Engine & Profit Calculator</button>
          <button onClick={() => setActiveTab('account')} className={`px-6 py-3 font-semibold text-sm border-b-2 whitespace-nowrap transition-colors ${activeTab === 'account' ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>Payments</button>
          <button onClick={() => setActiveTab('chat')} className={`px-6 py-3 font-semibold text-sm border-b-2 whitespace-nowrap transition-colors ${activeTab === 'chat' ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>Tender Chat AI</button>
+         <button onClick={() => setActiveTab('saved_docs')} className={`px-6 py-3 font-semibold text-sm border-b-2 whitespace-nowrap transition-colors flex items-center gap-1.5 ${activeTab === 'saved_docs' ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>
+           Saved Documents
+           {savedDocs.length > 0 && <span className="bg-indigo-100 text-indigo-700 text-[10px] font-bold px-1.5 py-0.5 rounded-full">{savedDocs.length}</span>}
+         </button>
          <button onClick={() => setActiveTab('notes')} className={`px-6 py-3 font-semibold text-sm border-b-2 whitespace-nowrap transition-colors ${activeTab === 'notes' ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>Analysis Notes</button>
       </div>
 
@@ -1265,48 +1329,6 @@ export default function ProjectDetails() {
 
            {activeTab === 'docs' && (
              <div className="space-y-8">
-
-           {/* Saved Documents */}
-           {(savedDocs.length > 0 || savedDocsLoading) && (
-             <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-               <div className="p-4 border-b border-slate-100 flex items-center justify-between">
-                 <h3 className="font-semibold text-slate-800 flex items-center gap-2 text-sm">
-                   <Save className="w-4 h-4 text-slate-500" /> Saved Documents
-                 </h3>
-                 <span className="text-xs text-slate-400">{savedDocs.length} saved</span>
-               </div>
-               {savedDocsLoading ? (
-                 <div className="p-4 flex justify-center"><Loader2 className="w-5 h-5 animate-spin text-slate-400" /></div>
-               ) : (
-                 <ul className="divide-y divide-slate-100">
-                   {savedDocs.map(sd => (
-                     <li key={sd.id} className="p-4 flex items-center gap-3 group">
-                       <FileText className="w-4 h-4 text-indigo-400 shrink-0" />
-                       <div className="flex-1 min-w-0">
-                         <p className="text-sm font-medium text-slate-800 truncate">{sd.title}</p>
-                         <div className="flex items-center gap-2 mt-0.5">
-                           <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded ${sd.mode === 'exact_form' ? 'bg-violet-100 text-violet-700' : 'bg-indigo-100 text-indigo-700'}`}>
-                             {sd.mode === 'exact_form' ? 'Exact Form' : 'Standard'}
-                           </span>
-                           <span className="text-[10px] text-slate-400">{sd.savedAt?.toDate ? sd.savedAt.toDate().toLocaleDateString('en-IN', { day:'numeric', month:'short', year:'numeric' }) : ''}</span>
-                         </div>
-                       </div>
-                       <div className="flex items-center gap-2 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
-                         <button
-                           onClick={() => { setGeneratedDoc(sd.content); setGeneratedDocIsHtml(sd.isHtml); setDocSaved(true); setDocType(sd.title); setIsEditingDoc(false); }}
-                           className="text-xs text-indigo-600 hover:text-indigo-800 font-medium"
-                         >Open</button>
-                         <button
-                           onClick={() => deleteSavedDoc(sd.id)}
-                           className="text-xs text-red-500 hover:text-red-700"
-                         ><Trash2 className="w-3 h-3" /></button>
-                       </div>
-                     </li>
-                   ))}
-                 </ul>
-               )}
-             </div>
-           )}
 
            {/* Generate Documents */}
            <div className="bg-gradient-to-br from-indigo-50 to-blue-50 rounded-xl border border-indigo-100 shadow-sm overflow-hidden">
@@ -1505,7 +1527,7 @@ export default function ProjectDetails() {
                              className={`text-xs flex items-center gap-1 font-medium transition-colors disabled:opacity-50 ${docSaved ? 'text-emerald-600' : 'text-emerald-700 hover:text-emerald-900'}`}
                            >
                              {savingDoc ? <Loader2 className="w-3 h-3 animate-spin" /> : <Save className="w-3 h-3" />}
-                             {docSaved ? "Saved" : "Save"}
+                             {docSaved ? "Saved" : "Save Generated Document"}
                            </button>
                         </div>
                       </div>
@@ -2491,6 +2513,75 @@ export default function ProjectDetails() {
               </div>
             );
           })()}
+
+          {activeTab === 'saved_docs' && (
+            <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+              <div className="p-5 border-b border-slate-100">
+                <h2 className="text-base font-semibold text-slate-800 flex items-center gap-2">
+                  <Save className="w-4 h-4 text-slate-500" /> Saved Documents
+                </h2>
+                <p className="text-xs text-slate-500 mt-0.5">Documents you have saved from the Auto-Generate Documents tab.</p>
+              </div>
+              {savedDocsLoading ? (
+                <div className="p-8 flex justify-center"><Loader2 className="w-6 h-6 animate-spin text-slate-400" /></div>
+              ) : savedDocs.length === 0 ? (
+                <div className="flex flex-col items-center justify-center text-slate-400 p-12 text-center">
+                  <FileText className="w-10 h-10 mb-3 opacity-40" />
+                  <p className="font-semibold text-slate-600 mb-1">No saved documents yet</p>
+                  <p className="text-sm text-slate-400">Generate a document and click "Save Generated Document" to keep it here.</p>
+                </div>
+              ) : (
+                <div className="divide-y divide-slate-100">
+                  {savedDocs.map(sd => {
+                    const isPdfLoading = savedDocDownloadingId === sd.id && savedDocDownloadingType === 'pdf';
+                    const isDocxLoading = savedDocDownloadingId === sd.id && savedDocDownloadingType === 'docx';
+                    return (
+                      <div key={sd.id} className="p-4 flex items-center gap-3 hover:bg-slate-50/50 transition-colors">
+                        <FileText className="w-4 h-4 text-indigo-400 shrink-0" />
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium text-slate-800 truncate">{sd.title}</p>
+                          <div className="flex items-center gap-2 mt-0.5">
+                            <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded ${sd.mode === 'exact_form' ? 'bg-violet-100 text-violet-700' : 'bg-indigo-100 text-indigo-700'}`}>
+                              {sd.mode === 'exact_form' ? 'Exact Form' : 'Standard'}
+                            </span>
+                            <span className="text-[10px] text-slate-400">{sd.savedAt?.toDate ? sd.savedAt.toDate().toLocaleDateString('en-IN', { day:'numeric', month:'short', year:'numeric' }) : ''}</span>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-3 shrink-0">
+                          <button
+                            onClick={() => { setGeneratedDoc(sd.content); setGeneratedDocIsHtml(sd.isHtml); setDocSaved(true); setDocType(sd.title); setIsEditingDoc(false); setActiveTab('docs'); }}
+                            className="text-xs text-indigo-600 hover:text-indigo-800 font-semibold px-2 py-1 rounded hover:bg-indigo-50 transition-colors"
+                          >Open</button>
+                          {sd.mode !== 'exact_form' && (
+                            <button
+                              onClick={() => downloadSavedDocPdf(sd)}
+                              disabled={savedDocDownloadingId === sd.id}
+                              className="text-xs flex items-center gap-1 text-slate-600 hover:text-slate-800 font-medium disabled:opacity-50 px-2 py-1 rounded hover:bg-slate-100 transition-colors"
+                            >
+                              {isPdfLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Download className="w-3 h-3" />}
+                              PDF
+                            </button>
+                          )}
+                          <button
+                            onClick={() => downloadSavedDocDocx(sd)}
+                            disabled={savedDocDownloadingId === sd.id}
+                            className="text-xs flex items-center gap-1 text-slate-600 hover:text-slate-800 font-medium disabled:opacity-50 px-2 py-1 rounded hover:bg-slate-100 transition-colors"
+                          >
+                            {isDocxLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <FileText className="w-3 h-3" />}
+                            Word
+                          </button>
+                          <button
+                            onClick={() => deleteSavedDoc(sd.id)}
+                            className="text-xs text-red-500 hover:text-red-700 p-1 rounded hover:bg-red-50 transition-colors"
+                          ><Trash2 className="w-3 h-3" /></button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
 
           {activeTab === 'notes' && (
             <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6">

@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import { useAuth } from "../auth/AuthProvider";
 import { useAnalyzerStore } from "../context/AnalyzerContext";
 import { Upload, X, Loader2, Sparkles, AlertCircle, FileText, CheckCircle2, ChevronRight, Activity, CalendarDays, Link as LinkIcon, File, MessageSquare, Send, Calculator, Building, Target, Download, Edit2, Trash2, Plus, Minus, ArrowLeft, Info, Save } from "lucide-react";
-import { collection, getDocs, query, addDoc, orderBy, serverTimestamp } from "firebase/firestore";
+import { collection, getDocs, query, addDoc, orderBy, serverTimestamp, doc, updateDoc } from "firebase/firestore";
 import { db } from "../lib/firebase";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -92,8 +92,7 @@ export default function TenderAnalyzer() {
   const [zipFileSize, setZipFileSize] = useState(0);
   
   const [error, setError] = useState("");
-  const [projectName, setProjectName] = useState("");
-  
+
   const [analyzedPayload, setAnalyzedPayload] = useState<any>(null);
   const [docExported, setDocExported] = useState(false);
   
@@ -151,6 +150,8 @@ export default function TenderAnalyzer() {
   const [savedDocs, setSavedDocs] = useState<SavedDoc[]>([]);
   const [savingDoc, setSavingDoc] = useState(false);
   const [docSaved, setDocSaved] = useState(false);
+  const [showNameDialog, setShowNameDialog] = useState(false);
+  const [pendingProjectName, setPendingProjectName] = useState("");
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const chatBottomRef = useRef<HTMLDivElement>(null);
@@ -408,7 +409,6 @@ export default function TenderAnalyzer() {
           userProfile: JSON.stringify(profile),
           language: i18n.language,
           fileNames: nameSource,
-          projectName: projectName.trim() || undefined,
         })
       });
 
@@ -429,6 +429,8 @@ export default function TenderAnalyzer() {
       setPayloadContext(payload);
       if (data.projectId) {
         setSavedProjectId(data.projectId);
+        setPendingProjectName(data.analysis?.tender_simplified?.tender_name || "Untitled Tender");
+        setShowNameDialog(true);
       }
 
     } catch (err: any) {
@@ -483,6 +485,17 @@ export default function TenderAnalyzer() {
       toast.success("Saved document deleted.");
     } catch (e) {
       toast.error("Failed to delete.");
+    }
+  };
+
+  const handleConfirmProjectName = async () => {
+    const name = pendingProjectName.trim();
+    setShowNameDialog(false);
+    if (!savedProjectId || !name) return;
+    try {
+      await updateDoc(doc(db, "saved_tenders", savedProjectId), { projectName: name });
+    } catch (e) {
+      console.error("[NameDialog] updateDoc failed", e);
     }
   };
 
@@ -714,6 +727,44 @@ export default function TenderAnalyzer() {
       onLeave={() => { pendingActionRef.current?.(); pendingActionRef.current = null; setShowNavModal(false); }}
       onStay={() => { pendingActionRef.current = null; setShowNavModal(false); }}
     />
+    {showNameDialog && (
+      <div
+        className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4"
+        onClick={() => setShowNameDialog(false)}
+      >
+        <div
+          className="bg-white rounded-2xl shadow-xl max-w-md w-full p-6 animate-in zoom-in-95"
+          onClick={e => e.stopPropagation()}
+        >
+          <h3 className="text-lg font-bold text-slate-900 mb-1">Name Your Project</h3>
+          <p className="text-sm text-slate-500 mb-4">Give this analysis a memorable name. You can always rename it later from the project view.</p>
+          <input
+            type="text"
+            value={pendingProjectName}
+            onChange={e => setPendingProjectName(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter' && pendingProjectName.trim()) handleConfirmProjectName(); if (e.key === 'Escape') setShowNameDialog(false); }}
+            autoFocus
+            placeholder="e.g. ONGC Solar Panels Q3 2025"
+            className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none mb-4"
+          />
+          <div className="flex justify-end gap-3">
+            <button
+              onClick={() => setShowNameDialog(false)}
+              className="px-4 py-2 font-medium text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
+            >
+              Skip
+            </button>
+            <button
+              onClick={handleConfirmProjectName}
+              disabled={!pendingProjectName.trim()}
+              className="px-4 py-2 font-medium bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg transition-colors shadow-sm"
+            >
+              Save Name
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
     <div className="p-6 md:p-8 max-w-6xl mx-auto pb-24 relative">
       <div className="mb-6 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
@@ -751,19 +802,6 @@ export default function TenderAnalyzer() {
                 <span className="text-sm">{error}</span>
               </div>
             )}
-
-            <div className="mb-5">
-              <label className="block text-sm font-semibold text-slate-700 mb-1.5">
-                Project Name <span className="text-slate-400 font-normal">(optional — defaults to tender name from AI)</span>
-              </label>
-              <input
-                type="text"
-                value={projectName}
-                onChange={e => setProjectName(e.target.value)}
-                placeholder="e.g. ONGC Solar Panels Q3 2025"
-                className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
-              />
-            </div>
 
             {inputType === 'pdf' && (
               <div className="space-y-4">

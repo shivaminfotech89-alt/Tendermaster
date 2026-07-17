@@ -2747,6 +2747,13 @@ app.post(
   verifyFirebaseToken,
   requireTrialAwareAccess('doc'),
   async (req: AuthenticatedRequest, res) => {
+    // Helper: compact ISO timestamp for every log line
+    const mts = () => new Date().toISOString().slice(11, 23);
+    const P = '[ModeBProbe]'; // log prefix
+    let t: number;
+
+    console.log(`${P} [START] request uid=${req.user!.uid} t=${mts()}`);
+
     const uid = req.user!.uid;
     const { storageUrl, projectId } = req.body as { storageUrl?: string; projectId?: string };
 
@@ -2759,53 +2766,68 @@ app.post(
       return res.status(500).json({ error: 'Vision service not configured.' });
     }
 
-    // Cache key: SHA-256 of the URL (deterministic per form, URL-safe)
+    // ── 1. Firestore cache read ────────────────────────────────────────────────
     const urlHash = crypto.createHash('sha256').update(storageUrl).digest('hex');
     const db = getFirestore();
     const cacheRef = db.collection('modeb_probe_cache').doc(urlHash);
-
+    t = Date.now();
+    console.log(`${P} [START] cache-read hash=${urlHash.slice(0, 8)}… t=${mts()}`);
     try {
       const snap = await cacheRef.get();
+      console.log(`${P} [END] cache-read duration=${Date.now() - t}ms exists=${snap.exists}`);
       if (snap.exists) {
         const d = snap.data()!;
         const age = Date.now() - (d.cachedAt?.toDate?.()?.getTime?.() ?? 0);
         if (age < MODEB_PROBE_CACHE_TTL_MS) {
-          console.log(`[ModeBProbe] Cache hit: ${urlHash.slice(0, 8)}…`);
+          console.log(`${P} [INFO] cache hit (age=${Math.round(age / 1000)}s) — returning cached result`);
           return res.json({ fields: d.fields, pageW: d.pageW, pageH: d.pageH, pageCount: d.pageCount, fromCache: true });
         }
+        console.log(`${P} [INFO] cache stale (age=${Math.round(age / 1000)}s) — re-probing`);
       }
     } catch (e) {
-      console.warn('[ModeBProbe] Cache read failed:', (e as Error).message);
+      console.log(`${P} [FAIL] cache-read duration=${Date.now() - t}ms err=${(e as Error).message} — continuing without cache`);
     }
 
-    // Fetch PDF from Storage URL (SSRF-guarded, 30 s hard timeout)
+    // ── 2. Fetch PDF from Firebase Storage (SSRF-guarded, 30 s abort) ─────────
     let pdfBuf: Buffer;
     const fetchController = new AbortController();
-    const fetchTimeoutId = setTimeout(() => fetchController.abort(), 30_000);
+    const fetchTimeoutId = setTimeout(() => {
+      console.log(`${P} [TIMEOUT] safeFetch aborted after 30s t=${mts()}`);
+      fetchController.abort();
+    }, 30_000);
+    t = Date.now();
+    console.log(`${P} [START] safeFetch url=${storageUrl.slice(0, 80)}… t=${mts()}`);
     try {
-      console.log(`[ModeBProbe] ${new Date().toISOString().slice(11,23)} fetch start`);
       const resp = await safeFetch(storageUrl, { signal: fetchController.signal });
       clearTimeout(fetchTimeoutId);
+      console.log(`${P} [END] safeFetch duration=${Date.now() - t}ms status=${resp.status} content-type=${resp.headers.get('content-type')}`);
       if (!resp.ok) {
         return res.status(400).json({ error: `Could not fetch form file: HTTP ${resp.status}` });
       }
+      const t2 = Date.now();
+      console.log(`${P} [START] resp.arrayBuffer t=${mts()}`);
       pdfBuf = Buffer.from(await resp.arrayBuffer());
-      console.log(`[ModeBProbe] ${new Date().toISOString().slice(11,23)} fetch done (${pdfBuf.length} bytes)`);
+      console.log(`${P} [END] resp.arrayBuffer duration=${Date.now() - t2}ms bytes=${pdfBuf.length}`);
     } catch (e) {
       clearTimeout(fetchTimeoutId);
+      console.log(`${P} [FAIL] safeFetch duration=${Date.now() - t}ms err=${(e as Error).message}`);
       return res.status(400).json({ error: 'Could not fetch form file: ' + (e as Error).message });
     }
 
-    // Run Vision probe on all pages
+    // ── 3. Vision probe (all pages; detailed per-step logging inside helper) ──
     let probeResult;
+    t = Date.now();
+    console.log(`${P} [START] probeAllPagesFromBuffer bytes=${pdfBuf.length} t=${mts()}`);
     try {
       probeResult = await probeAllPagesFromBuffer(
         pdfBuf,
         'form.pdf',
         apiKey,
-        (msg) => console.log(`[ModeBProbe] ${msg}`),
+        (msg) => console.log(`${P} ${msg}`),
       );
+      console.log(`${P} [END] probeAllPagesFromBuffer duration=${Date.now() - t}ms fields=${probeResult.fields.length} partial=${probeResult.partial ?? false}`);
     } catch (e: any) {
+      console.log(`${P} [FAIL] probeAllPagesFromBuffer duration=${Date.now() - t}ms err=${e?.message}`);
       logUsageEvent({ uid, type: 'modeb_probe', projectId, success: false, failureReason: (e?.message ?? '').slice(0, 300) });
       if (isProbeRetryable(e)) {
         return res.status(503).json({ error: 'Vision service is busy. Please try again in a few minutes.' });
@@ -2813,14 +2835,18 @@ app.post(
       return res.status(500).json({ error: 'Field detection failed. Please try again.' });
     }
 
+    // ── 4. Usage event (fire-and-forget Firestore write) ──────────────────────
+    console.log(`${P} [INFO] logUsageEvent (fire-and-forget) t=${mts()}`);
     logUsageEvent({ uid, type: 'modeb_probe', projectId, success: true });
     if ((req as any).isTrialDocRequest) incrementTrialDocUsed(uid);
 
-    // Cache result (fire-and-forget — failure is non-fatal)
+    // ── 5. Cache write (fire-and-forget) ──────────────────────────────────────
+    console.log(`${P} [INFO] cache-write (fire-and-forget) t=${mts()}`);
     cacheRef.set({ ...probeResult, cachedAt: Timestamp.now() })
-      .catch(e => console.warn('[ModeBProbe] Cache write failed:', (e as Error).message));
+      .catch(e => console.log(`${P} [FAIL] cache-write err=${(e as Error).message}`));
 
-    return res.json({
+    // ── 6. Serialize and send response ────────────────────────────────────────
+    const payload = {
       fields:      probeResult.fields,
       pageW:       probeResult.pageW,
       pageH:       probeResult.pageH,
@@ -2828,7 +2854,22 @@ app.post(
       partial:     probeResult.partial ?? false,
       failedPages: probeResult.failedPages ?? [],
       fromCache:   false,
-    });
+    };
+    console.log(`${P} [INFO] serializing response: ${probeResult.fields.length} fields, ${JSON.stringify(payload).length} bytes t=${mts()}`);
+
+    // Dump active handles — if this count is non-zero after res.json(), open
+    // handles are what keep the Vercel function alive past our logic.
+    const activeHandles   = (process as any)._getActiveHandles?.()?.length ?? 'n/a';
+    const activeRequests  = (process as any)._getActiveRequests?.()?.length ?? 'n/a';
+    console.log(`${P} [DIAG] before res.json: handles=${activeHandles} requests=${activeRequests} t=${mts()}`);
+
+    console.log(`${P} [START] res.json t=${mts()}`);
+    res.json(payload);
+    console.log(`${P} [END] res.json — HTTP response written t=${mts()}`);
+
+    // If the function does not exit after this point, open handles are keeping
+    // the event loop alive.  Check handles/requests count above for clues.
+    console.log(`${P} [INFO] handler returning t=${mts()}`);
   },
 );
 

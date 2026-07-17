@@ -66,6 +66,10 @@ export interface ProbeData {
   pageCount: number;
   counts: { total: number; high: number; medium: number; low: number };
   fields: ProbeField[];
+  /** True when ≥1 page failed after all retries but ≥1 page succeeded. */
+  partial?: boolean;
+  /** 1-indexed page numbers that could not be probed (only set when partial=true). */
+  failedPages?: number[];
 }
 
 // ── Core probe function ───────────────────────────────────────────────────────
@@ -85,16 +89,16 @@ export async function probeAllPagesFromBuffer(
 
   log(`PDF: ${pageCount} page(s) (${Math.round(pageW)}×${Math.round(pageH)} pts)`);
 
-  // Upload PDF once as Blob — Blob constructor accepts ArrayBufferView (Buffer)
+  // Upload PDF once as Blob — reused by all parallel page calls
   const blob = new Blob([pdfBuf], { type: 'application/pdf' });
   const uploaded = await withRetry('gemini-upload', () =>
     ai.files.upload({ file: blob, config: { mimeType: 'application/pdf', displayName } }),
   );
   log(`Uploaded: ${uploaded.uri}`);
 
-  const allFields: ProbeField[] = [];
+  // ── Per-page probe (extracted so it can run in parallel) ─────────────────────
 
-  for (let pg = 1; pg <= pageCount; pg++) {
+  const probeOnePage = async (pg: number): Promise<ProbeField[]> => {
     const callParams = {
       contents: [{
         role: 'user' as const,
@@ -108,7 +112,6 @@ export async function probeAllPagesFromBuffer(
 
     log(`Probing page ${pg}/${pageCount}…`);
     let rawText = '[]';
-    let pageSucceeded = false;
 
     for (const model of MODEL_FALLBACK_ORDER) {
       try {
@@ -117,45 +120,63 @@ export async function probeAllPagesFromBuffer(
           () => ai.models.generateContent({ model, ...callParams }),
         );
         rawText = result.text ?? '[]';
-        pageSucceeded = true;
         log(`  page ${pg}: OK via ${model}`);
         break;
       } catch (e) {
-        if (model === MODEL_FALLBACK_ORDER[MODEL_FALLBACK_ORDER.length - 1]) {
-          // All models failed — clean up then re-throw so caller can return 503
-          try { await ai.files.delete({ name: uploaded.name! }); } catch (_) {}
-          throw e;
-        }
+        if (model === MODEL_FALLBACK_ORDER[MODEL_FALLBACK_ORDER.length - 1]) throw e;
         log(`  page ${pg}: ${model} failed, trying fallback…`);
       }
     }
 
-    if (pageSucceeded) {
-      try {
-        const cleaned = rawText.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
-        const parsed = JSON.parse(cleaned);
-        if (Array.isArray(parsed)) {
-          for (const f of parsed) {
-            if (!Array.isArray(f.fill_box) || f.fill_box.length !== 4) continue;
-            allFields.push({
-              field_label: f.field_label ?? '',
-              fill_area_description: f.fill_area_description ?? '',
-              fill_box: f.fill_box as [number, number, number, number],
-              confidence: f.confidence ?? 'medium',
-              notes: f.notes,
-              page: pg,
-            });
-          }
-        }
-      } catch {
-        log(`  page ${pg}: could not parse JSON response`);
-      }
+    try {
+      const cleaned = rawText.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+      const parsed = JSON.parse(cleaned);
+      if (!Array.isArray(parsed)) return [];
+      return parsed
+        .filter((f: any) => Array.isArray(f.fill_box) && f.fill_box.length === 4)
+        .map((f: any): ProbeField => ({
+          field_label:          f.field_label ?? '',
+          fill_area_description: f.fill_area_description ?? '',
+          fill_box:             f.fill_box as [number, number, number, number],
+          confidence:           f.confidence ?? 'medium',
+          notes:                f.notes,
+          page:                 pg,
+        }));
+    } catch {
+      log(`  page ${pg}: could not parse JSON response`);
+      return [];
     }
+  };
 
-    if (pg < pageCount) await new Promise(r => setTimeout(r, 1000));
+  // ── Fire all pages in parallel ────────────────────────────────────────────────
+
+  const settled = await Promise.allSettled(
+    Array.from({ length: pageCount }, (_, i) => probeOnePage(i + 1)),
+  );
+
+  // Always clean up the uploaded file regardless of outcome
+  try { await ai.files.delete({ name: uploaded.name! }); } catch (_) {}
+
+  // ── Collect results ───────────────────────────────────────────────────────────
+
+  const allFields: ProbeField[] = [];
+  const failedPages: number[] = [];
+
+  for (let i = 0; i < settled.length; i++) {
+    const r = settled[i]!;
+    if (r.status === 'fulfilled') {
+      allFields.push(...r.value);
+    } else {
+      failedPages.push(i + 1);
+      log(`  page ${i + 1}: failed — ${(r.reason as any)?.message ?? r.reason}`);
+    }
   }
 
-  try { await ai.files.delete({ name: uploaded.name! }); } catch (_) {}
+  // All pages failed → throw so the caller returns 503
+  if (failedPages.length === pageCount) {
+    const firstRejected = settled.find(r => r.status === 'rejected') as PromiseRejectedResult;
+    throw firstRejected?.reason ?? new Error('Vision field detection failed for all pages');
+  }
 
   return {
     pageW, pageH, pageCount,
@@ -166,5 +187,6 @@ export async function probeAllPagesFromBuffer(
       low:    allFields.filter(f => f.confidence === 'low').length,
     },
     fields: allFields,
+    ...(failedPages.length > 0 ? { partial: true, failedPages } : {}),
   };
 }

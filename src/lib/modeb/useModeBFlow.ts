@@ -8,6 +8,7 @@
  */
 
 import { useState, useRef } from 'react';
+import { toast } from 'react-hot-toast';
 import { fetchWithAuth } from '../api';
 import { mapFields } from './fieldMapper';
 import { overlayFields } from './overlay';
@@ -87,7 +88,7 @@ export function useModeBFlow(options: {
 
     // ── Vision probe (server-side — Gemini API key stays on server) ───────────
     setStage('probing');
-    let probe: { fields: DetectedField[]; pageW: number; pageH: number; pageCount: number };
+    let probe: { fields: DetectedField[]; pageW: number; pageH: number; pageCount: number; partial?: boolean; failedPages?: number[] };
     try {
       const res = await fetchWithAuth('/api/modeb/probe', {
         method: 'POST',
@@ -105,6 +106,12 @@ export function useModeBFlow(options: {
         setStage('idle');
         setError('No fillable fields detected on this form. Try a clearer scan.');
         return;
+      }
+      if (probe.partial && probe.failedPages?.length) {
+        toast.error(
+          `Page${probe.failedPages.length > 1 ? 's' : ''} ${probe.failedPages.join(', ')} could not be scanned — review detected fields and fill those pages manually.`,
+          { duration: 7000 },
+        );
       }
     } catch {
       setStage('idle');

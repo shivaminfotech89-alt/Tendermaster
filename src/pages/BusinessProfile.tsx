@@ -134,6 +134,9 @@ const defaultProfile = {
   letterheadBackgroundImage: "",
   state: "",
   city: "",
+  district: "",
+  pinCode: "",
+  place: "",
   website: "",
   contactDetails: "",
   // new: firm identity
@@ -162,8 +165,10 @@ const defaultProfile = {
   turnoverYear3: "",
   netWorth: "",
   bankName: "",
+  bankBranch: "",
   bankAccountNumber: "",
   bankIfsc: "",
+  bankAccountType: "",
   // new: signatory
   authorizedSignatoryName: "",
   authorizedSignatoryDesignation: "",
@@ -628,9 +633,14 @@ export default function BusinessProfile() {
                     ["professionalTaxNumber", "Professional Tax Number"],
                     ["tradeLicenseNumber", "Trade License No."],
                     ["labourLicenseNumber", "Labour / Works Contractor License No."],
+                    ["district", "District"],
+                    ["pinCode", "Pin Code"],
+                    ["place", "Place (for signing)"],
                     ["bankName", "Bank Name"],
+                    ["bankBranch", "Bank Branch"],
                     ["bankAccountNumber", "Bank Account Number"],
                     ["bankIfsc", "IFSC Code"],
+                    ["bankAccountType", "Account Type"],
                     ["authorizedSignatoryName", "Signatory Name"],
                     ["authorizedSignatoryDesignation", "Signatory Designation"],
                     ["authorizedSignatoryDin", "Signatory DIN"],
@@ -878,6 +888,33 @@ export default function BusinessProfile() {
                 value={profile.city}
                 onChange={handleChange}
                 className={inputCls}
+              />
+            </Field>
+            <Field label="District" hint="Used in tender form address fields">
+              <input
+                name="district"
+                value={profile.district}
+                onChange={handleChange}
+                className={inputCls}
+                placeholder="e.g., Mehsana, Surat"
+              />
+            </Field>
+            <Field label="Pin Code">
+              <input
+                name="pinCode"
+                value={profile.pinCode}
+                onChange={handleChange}
+                className={inputCls}
+                placeholder="380001"
+              />
+            </Field>
+            <Field label="Place (for signing)" hint="City name that appears in 'Place: ___' signature blocks">
+              <input
+                name="place"
+                value={profile.place}
+                onChange={handleChange}
+                className={inputCls}
+                placeholder="e.g., Ahmedabad"
               />
             </Field>
             <Field label="Phone (Landline)">
@@ -1129,6 +1166,29 @@ export default function BusinessProfile() {
                   className={inputCls + " uppercase"}
                   placeholder="SBIN0001234"
                 />
+              </Field>
+              <Field label="Bank Branch">
+                <input
+                  name="bankBranch"
+                  value={profile.bankBranch}
+                  onChange={handleChange}
+                  className={inputCls}
+                  placeholder="e.g., Navrangpura"
+                />
+              </Field>
+              <Field label="Account Type">
+                <select
+                  name="bankAccountType"
+                  value={profile.bankAccountType}
+                  onChange={handleChange}
+                  className={selectCls}
+                >
+                  <option value="">Select</option>
+                  <option>Current</option>
+                  <option>Savings</option>
+                  <option>Cash Credit</option>
+                  <option>Overdraft</option>
+                </select>
               </Field>
             </div>
           </div>

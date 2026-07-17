@@ -1,0 +1,512 @@
+{
+  "path": 2,
+  "pageW": 612,
+  "pageH": 792,
+  "counts": {
+    "total": 29,
+    "high": 27,
+    "medium": 2,
+    "low": 0
+  },
+  "fields": [
+    {
+      "field_label": "TENDER NO:",
+      "fill_area_description": "blank line to the right of TENDER NO:",
+      "fill_box": [
+        255,
+        288,
+        271,
+        600
+      ],
+      "confidence": "high",
+      "pdfRect": {
+        "x": 176.256,
+        "y": 577.3679999999999,
+        "w": 190.944,
+        "h": 12.672
+      }
+    },
+    {
+      "field_label": "Name of Firm",
+      "fill_area_description": "blank table cell to the right of Name of Firm",
+      "fill_box": [
+        308,
+        348,
+        333,
+        784
+      ],
+      "confidence": "high",
+      "notes": "Table row 01",
+      "pdfRect": {
+        "x": 212.976,
+        "y": 528.264,
+        "w": 266.832,
+        "h": 19.8
+      }
+    },
+    {
+      "field_label": "Office Address Phone No. Fax No. Email ID",
+      "fill_area_description": "blank table cell to the right of Office Address details",
+      "fill_box": [
+        333,
+        348,
+        381,
+        784
+      ],
+      "confidence": "high",
+      "notes": "Table row 02",
+      "pdfRect": {
+        "x": 212.976,
+        "y": 490.248,
+        "w": 266.832,
+        "h": 38.016
+      }
+    },
+    {
+      "field_label": "Works Address as per Vendor Registration Phone No. Fax No. Email ID",
+      "fill_area_description": "blank table cell to the right of Works Address details",
+      "fill_box": [
+        381,
+        348,
+        453,
+        784
+      ],
+      "confidence": "high",
+      "notes": "Table row 03",
+      "pdfRect": {
+        "x": 212.976,
+        "y": 433.224,
+        "w": 266.832,
+        "h": 57.023999999999994
+      }
+    },
+    {
+      "field_label": "Type of Firm",
+      "fill_area_description": "blank table cell to the right of Type of Firm",
+      "fill_box": [
+        453,
+        348,
+        489,
+        784
+      ],
+      "confidence": "high",
+      "notes": "Table row 04",
+      "pdfRect": {
+        "x": 212.976,
+        "y": 404.712,
+        "w": 266.832,
+        "h": 28.511999999999997
+      }
+    },
+    {
+      "field_label": "CIN / LLPIN of Firm",
+      "fill_area_description": "blank table cell to the right of CIN / LLPIN of Firm",
+      "fill_box": [
+        489,
+        348,
+        515,
+        784
+      ],
+      "confidence": "high",
+      "notes": "Table row 05",
+      "pdfRect": {
+        "x": 212.976,
+        "y": 384.12,
+        "w": 266.832,
+        "h": 20.592
+      }
+    },
+    {
+      "field_label": "GST No. of Firm",
+      "fill_area_description": "blank table cell to the right of GST No. of Firm",
+      "fill_box": [
+        515,
+        348,
+        538,
+        784
+      ],
+      "confidence": "high",
+      "notes": "Table row 06",
+      "pdfRect": {
+        "x": 212.976,
+        "y": 365.904,
+        "w": 266.832,
+        "h": 18.216
+      }
+    },
+    {
+      "field_label": "Names of all Directors/LLP Partners/ Partners / Proprietors of Bidder Firm with DIN (if any) and full address (as on the bid submission date) - Sr. No. 1 - Full Name",
+      "fill_area_description": "blank table cell for Full Name of Director 1",
+      "fill_box": [
+        588,
+        270,
+        613,
+        442
+      ],
+      "confidence": "high",
+      "pdfRect": {
+        "x": 165.24,
+        "y": 306.504,
+        "w": 105.264,
+        "h": 19.8
+      }
+    },
+    {
+      "field_label": "Names of all Directors/LLP Partners/ Partners / Proprietors of Bidder Firm with DIN (if any) and full address (as on the bid submission date) - Sr. No. 1 - DIN",
+      "fill_area_description": "blank table cell for DIN of Director 1",
+      "fill_box": [
+        588,
+        442,
+        613,
+        528
+      ],
+      "confidence": "high",
+      "pdfRect": {
+        "x": 270.504,
+        "y": 306.504,
+        "w": 52.632,
+        "h": 19.8
+      }
+    },
+    {
+      "field_label": "Names of all Directors/LLP Partners/ Partners / Proprietors of Bidder Firm with DIN (if any) and full address (as on the bid submission date) - Sr. No. 1 - Full Residential Address",
+      "fill_area_description": "blank table cell for Full Residential Address of Director 1",
+      "fill_box": [
+        588,
+        528,
+        613,
+        784
+      ],
+      "confidence": "high",
+      "pdfRect": {
+        "x": 323.136,
+        "y": 306.504,
+        "w": 156.672,
+        "h": 19.8
+      }
+    },
+    {
+      "field_label": "Names of all Directors/LLP Partners/ Partners / Proprietors of Bidder Firm with DIN (if any) and full address (as on the bid submission date) - Sr. No. 2 - Full Name",
+      "fill_area_description": "blank table cell for Full Name of Director 2",
+      "fill_box": [
+        613,
+        270,
+        638,
+        442
+      ],
+      "confidence": "high",
+      "pdfRect": {
+        "x": 165.24,
+        "y": 286.704,
+        "w": 105.264,
+        "h": 19.8
+      }
+    },
+    {
+      "field_label": "Names of all Directors/LLP Partners/ Partners / Proprietors of Bidder Firm with DIN (if any) and full address (as on the bid submission date) - Sr. No. 2 - DIN",
+      "fill_area_description": "blank table cell for DIN of Director 2",
+      "fill_box": [
+        613,
+        442,
+        638,
+        528
+      ],
+      "confidence": "high",
+      "pdfRect": {
+        "x": 270.504,
+        "y": 286.704,
+        "w": 52.632,
+        "h": 19.8
+      }
+    },
+    {
+      "field_label": "Names of all Directors/LLP Partners/ Partners / Proprietors of Bidder Firm with DIN (if any) and full address (as on the bid submission date) - Sr. No. 2 - Full Residential Address",
+      "fill_area_description": "blank table cell for Full Residential Address of Director 2",
+      "fill_box": [
+        613,
+        528,
+        638,
+        784
+      ],
+      "confidence": "high",
+      "pdfRect": {
+        "x": 323.136,
+        "y": 286.704,
+        "w": 156.672,
+        "h": 19.8
+      }
+    },
+    {
+      "field_label": "Names of all Directors/LLP Partners/ Partners / Proprietors of Bidder Firm with DIN (if any) and full address (as on the bid submission date) - Sr. No. 3 - Full Name",
+      "fill_area_description": "blank table cell for Full Name of Director 3",
+      "fill_box": [
+        638,
+        270,
+        663,
+        442
+      ],
+      "confidence": "high",
+      "pdfRect": {
+        "x": 165.24,
+        "y": 266.904,
+        "w": 105.264,
+        "h": 19.8
+      }
+    },
+    {
+      "field_label": "Names of all Directors/LLP Partners/ Partners / Proprietors of Bidder Firm with DIN (if any) and full address (as on the bid submission date) - Sr. No. 3 - DIN",
+      "fill_area_description": "blank table cell for DIN of Director 3",
+      "fill_box": [
+        638,
+        442,
+        663,
+        528
+      ],
+      "confidence": "high",
+      "pdfRect": {
+        "x": 270.504,
+        "y": 266.904,
+        "w": 52.632,
+        "h": 19.8
+      }
+    },
+    {
+      "field_label": "Names of all Directors/LLP Partners/ Partners / Proprietors of Bidder Firm with DIN (if any) and full address (as on the bid submission date) - Sr. No. 3 - Full Residential Address",
+      "fill_area_description": "blank table cell for Full Residential Address of Director 3",
+      "fill_box": [
+        638,
+        528,
+        663,
+        784
+      ],
+      "confidence": "high",
+      "pdfRect": {
+        "x": 323.136,
+        "y": 266.904,
+        "w": 156.672,
+        "h": 19.8
+      }
+    },
+    {
+      "field_label": "Names of all Directors/LLP Partners/ Partners / Proprietors of Bidder Firm with DIN (if any) and full address (as on the bid submission date) - Sr. No. 4 - Full Name",
+      "fill_area_description": "blank table cell for Full Name of Director 4",
+      "fill_box": [
+        663,
+        270,
+        688,
+        442
+      ],
+      "confidence": "high",
+      "pdfRect": {
+        "x": 165.24,
+        "y": 247.10399999999998,
+        "w": 105.264,
+        "h": 19.8
+      }
+    },
+    {
+      "field_label": "Names of all Directors/LLP Partners/ Partners / Proprietors of Bidder Firm with DIN (if any) and full address (as on the bid submission date) - Sr. No. 4 - DIN",
+      "fill_area_description": "blank table cell for DIN of Director 4",
+      "fill_box": [
+        663,
+        442,
+        688,
+        528
+      ],
+      "confidence": "high",
+      "pdfRect": {
+        "x": 270.504,
+        "y": 247.10399999999998,
+        "w": 52.632,
+        "h": 19.8
+      }
+    },
+    {
+      "field_label": "Names of all Directors/LLP Partners/ Partners / Proprietors of Bidder Firm with DIN (if any) and full address (as on the bid submission date) - Sr. No. 4 - Full Residential Address",
+      "fill_area_description": "blank table cell for Full Residential Address of Director 4",
+      "fill_box": [
+        663,
+        528,
+        688,
+        784
+      ],
+      "confidence": "high",
+      "pdfRect": {
+        "x": 323.136,
+        "y": 247.10399999999998,
+        "w": 156.672,
+        "h": 19.8
+      }
+    },
+    {
+      "field_label": "Names of all Directors/LLP Partners/ Partners / Proprietors of Bidder Firm with DIN (if any) and full address (as on the bid submission date) - Sr. No. 5 - Full Name",
+      "fill_area_description": "blank table cell for Full Name of Director 5",
+      "fill_box": [
+        688,
+        270,
+        713,
+        442
+      ],
+      "confidence": "high",
+      "pdfRect": {
+        "x": 165.24,
+        "y": 227.30400000000003,
+        "w": 105.264,
+        "h": 19.8
+      }
+    },
+    {
+      "field_label": "Names of all Directors/LLP Partners/ Partners / Proprietors of Bidder Firm with DIN (if any) and full address (as on the bid submission date) - Sr. No. 5 - DIN",
+      "fill_area_description": "blank table cell for DIN of Director 5",
+      "fill_box": [
+        688,
+        442,
+        713,
+        528
+      ],
+      "confidence": "high",
+      "pdfRect": {
+        "x": 270.504,
+        "y": 227.30400000000003,
+        "w": 52.632,
+        "h": 19.8
+      }
+    },
+    {
+      "field_label": "Names of all Directors/LLP Partners/ Partners / Proprietors of Bidder Firm with DIN (if any) and full address (as on the bid submission date) - Sr. No. 5 - Full Residential Address",
+      "fill_area_description": "blank table cell for Full Residential Address of Director 5",
+      "fill_box": [
+        688,
+        528,
+        713,
+        784
+      ],
+      "confidence": "high",
+      "pdfRect": {
+        "x": 323.136,
+        "y": 227.30400000000003,
+        "w": 156.672,
+        "h": 19.8
+      }
+    },
+    {
+      "field_label": "Full Name of Legal Representative / Agent",
+      "fill_area_description": "blank table cell to the right of Full Name of Legal Representative / Agent",
+      "fill_box": [
+        748,
+        359,
+        773,
+        760
+      ],
+      "confidence": "high",
+      "pdfRect": {
+        "x": 219.708,
+        "y": 179.78399999999993,
+        "w": 245.412,
+        "h": 19.8
+      }
+    },
+    {
+      "field_label": "Whether employee of Bidder-Firm or not? (Yes/No)",
+      "fill_area_description": "blank table cell to the right of Whether employee of Bidder-Firm or not?",
+      "fill_box": [
+        773,
+        359,
+        809,
+        760
+      ],
+      "confidence": "high",
+      "pdfRect": {
+        "x": 219.708,
+        "y": 151.272,
+        "w": 245.412,
+        "h": 28.511999999999997
+      }
+    },
+    {
+      "field_label": "Designation",
+      "fill_area_description": "blank table cell to the right of Designation",
+      "fill_box": [
+        809,
+        359,
+        821,
+        760
+      ],
+      "confidence": "high",
+      "pdfRect": {
+        "x": 219.708,
+        "y": 141.76799999999994,
+        "w": 245.412,
+        "h": 9.504
+      }
+    },
+    {
+      "fill_area_description": "blank table cell to the right of Office Address",
+      "field_label": "Office Address",
+      "fill_box": [
+        821,
+        359,
+        833,
+        760
+      ],
+      "confidence": "high",
+      "pdfRect": {
+        "x": 219.708,
+        "y": 132.26400000000004,
+        "w": 245.412,
+        "h": 9.504
+      }
+    },
+    {
+      "field_label": "Office Land-line Nos.",
+      "fill_area_description": "blank table cell to the right of Office Land-line Nos.",
+      "fill_box": [
+        833,
+        359,
+        846,
+        760
+      ],
+      "confidence": "high",
+      "pdfRect": {
+        "x": 219.708,
+        "y": 121.96800000000002,
+        "w": 245.412,
+        "h": 10.296
+      }
+    },
+    {
+      "field_label": "Signature",
+      "fill_area_description": "blank area above Signature label for signing",
+      "fill_box": [
+        850,
+        202,
+        870,
+        320
+      ],
+      "confidence": "medium",
+      "pdfRect": {
+        "x": 123.62400000000001,
+        "y": 102.96000000000006,
+        "w": 72.216,
+        "h": 15.84
+      }
+    },
+    {
+      "field_label": "Stamp / Round Seal",
+      "fill_area_description": "blank area above Stamp / Round Seal label for stamping",
+      "fill_box": [
+        850,
+        640,
+        870,
+        760
+      ],
+      "confidence": "medium",
+      "pdfRect": {
+        "x": 391.68,
+        "y": 102.96000000000006,
+        "w": 73.44,
+        "h": 15.84
+      }
+    }
+  ]
+}

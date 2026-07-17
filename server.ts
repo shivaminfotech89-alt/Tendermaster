@@ -14,6 +14,7 @@ import dns from "dns";
 import { promisify } from "util";
 // Bundled by esbuild (--bundle inlines local files; --packages=external only skips npm deps).
 import { PLANS, TRIAL_CREDITS, TRIAL_DOC_LIMIT, CREDIT_VALIDITY_MONTHS } from './src/lib/plans';
+import { probeAllPagesFromBuffer, isRetryable as isProbeRetryable } from './src/lib/modeb/probe-helpers';
 
 const lookupPromise = promisify(dns.lookup);
 
@@ -1041,7 +1042,7 @@ async function grantCredits(uid: string, credits: number, paymentId: string): Pr
 // ---------------------------------------------------------------------------
 function logUsageEvent(event: {
   uid: string;
-  type: 'analysis' | 'reanalysis' | 'document' | 'chat' | 'extraction' | 'payment_error';
+  type: 'analysis' | 'reanalysis' | 'document' | 'chat' | 'extraction' | 'payment_error' | 'modeb_probe';
   projectId?: string;
   success: boolean;
   failureReason?: string;
@@ -1737,6 +1738,7 @@ MODE 1: CONTRACT PROFILE ANALYSIS & MATCHING
   },
   "tender_simplified": {
     "tender_name": "Official Title of the Tender",
+    "tender_number": "NIT / Tender reference number exactly as printed (e.g. 'UGVCL/PROC/2024-25/001'). Use null if not present.",
     "authority_name": "Name of Govt body or private entity",
     "tender_value": "Estimated total value, e.g. ₹5.00 CR",
     "is_active": true,
@@ -1818,6 +1820,7 @@ MODE 1: CONTRACT PROFILE ANALYSIS & MATCHING
               type: "object",
               properties: {
                 tender_name: { type: "string" },
+                tender_number: { type: "string" },
                 authority_name: { type: "string" },
                 tender_value: { type: "string" },
                 is_active: { type: "boolean" },
@@ -2726,6 +2729,99 @@ app.post(
       res.status(500).json({ error: err.message || "Word generation failed" });
     }
   }
+);
+
+// ---------------------------------------------------------------------------
+// Mode B — Vision field probe: POST /api/modeb/probe
+// ---------------------------------------------------------------------------
+// Accepts a Firebase Storage URL, runs Gemini Vision on all pages, and
+// returns the detected field map (labels + bounding boxes + page numbers).
+// Probe results are cached in Firestore for 7 days to avoid re-running Vision
+// on the same form.  Gated with requireTrialAwareAccess('doc') so it counts
+// against the same entitlement as document generation.
+// ---------------------------------------------------------------------------
+const MODEB_PROBE_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+
+app.post(
+  '/api/modeb/probe',
+  verifyFirebaseToken,
+  requireTrialAwareAccess('doc'),
+  async (req: AuthenticatedRequest, res) => {
+    const uid = req.user!.uid;
+    const { storageUrl, projectId } = req.body as { storageUrl?: string; projectId?: string };
+
+    if (!storageUrl || typeof storageUrl !== 'string') {
+      return res.status(400).json({ error: 'storageUrl is required' });
+    }
+
+    const apiKey = process.env.GEMINI_API_KEY ?? '';
+    if (!apiKey) {
+      return res.status(500).json({ error: 'Vision service not configured.' });
+    }
+
+    // Cache key: SHA-256 of the URL (deterministic per form, URL-safe)
+    const urlHash = crypto.createHash('sha256').update(storageUrl).digest('hex');
+    const db = getFirestore();
+    const cacheRef = db.collection('modeb_probe_cache').doc(urlHash);
+
+    try {
+      const snap = await cacheRef.get();
+      if (snap.exists) {
+        const d = snap.data()!;
+        const age = Date.now() - (d.cachedAt?.toDate?.()?.getTime?.() ?? 0);
+        if (age < MODEB_PROBE_CACHE_TTL_MS) {
+          console.log(`[ModeBProbe] Cache hit: ${urlHash.slice(0, 8)}…`);
+          return res.json({ fields: d.fields, pageW: d.pageW, pageH: d.pageH, pageCount: d.pageCount, fromCache: true });
+        }
+      }
+    } catch (e) {
+      console.warn('[ModeBProbe] Cache read failed:', (e as Error).message);
+    }
+
+    // Fetch PDF from Storage URL (SSRF-guarded)
+    let pdfBuf: Buffer;
+    try {
+      const resp = await safeFetch(storageUrl);
+      if (!resp.ok) {
+        return res.status(400).json({ error: `Could not fetch form file: HTTP ${resp.status}` });
+      }
+      pdfBuf = Buffer.from(await resp.arrayBuffer());
+    } catch (e) {
+      return res.status(400).json({ error: 'Could not fetch form file: ' + (e as Error).message });
+    }
+
+    // Run Vision probe on all pages
+    let probeResult;
+    try {
+      probeResult = await probeAllPagesFromBuffer(
+        pdfBuf,
+        'form.pdf',
+        apiKey,
+        (msg) => console.log(`[ModeBProbe] ${msg}`),
+      );
+    } catch (e: any) {
+      logUsageEvent({ uid, type: 'modeb_probe', projectId, success: false, failureReason: (e?.message ?? '').slice(0, 300) });
+      if (isProbeRetryable(e)) {
+        return res.status(503).json({ error: 'Vision service is busy. Please try again in a few minutes.' });
+      }
+      return res.status(500).json({ error: 'Field detection failed. Please try again.' });
+    }
+
+    logUsageEvent({ uid, type: 'modeb_probe', projectId, success: true });
+    if ((req as any).isTrialDocRequest) incrementTrialDocUsed(uid);
+
+    // Cache result (fire-and-forget — failure is non-fatal)
+    cacheRef.set({ ...probeResult, cachedAt: Timestamp.now() })
+      .catch(e => console.warn('[ModeBProbe] Cache write failed:', (e as Error).message));
+
+    return res.json({
+      fields: probeResult.fields,
+      pageW: probeResult.pageW,
+      pageH: probeResult.pageH,
+      pageCount: probeResult.pageCount,
+      fromCache: false,
+    });
+  },
 );
 
 // ---------------------------------------------------------------------------

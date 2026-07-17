@@ -1,9 +1,10 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { useAuth } from "../auth/AuthProvider";
 import { useAnalyzerStore } from "../context/AnalyzerContext";
-import { Upload, X, Loader2, Sparkles, AlertCircle, FileText, CheckCircle2, ChevronRight, Activity, CalendarDays, Link as LinkIcon, File, MessageSquare, Send, Calculator, Building, Target, Download, Edit2, Trash2, Plus, Minus, ArrowLeft, Info, Save } from "lucide-react";
-import { collection, getDocs, query, addDoc, orderBy, serverTimestamp, doc, updateDoc } from "firebase/firestore";
-import { db } from "../lib/firebase";
+import { Upload, X, Loader2, Sparkles, AlertCircle, FileText, CheckCircle2, ChevronRight, Activity, CalendarDays, Link as LinkIcon, File, MessageSquare, Send, Calculator, Building, Target, Download, Edit2, Trash2, Plus, Minus, ArrowLeft, Info, Save, Scan } from "lucide-react";
+import { collection, getDocs, query, addDoc, orderBy, serverTimestamp, doc, updateDoc, Timestamp } from "firebase/firestore";
+import { ref as storageRef, uploadBytes, getDownloadURL } from "firebase/storage";
+import { db, storage } from "../lib/firebase";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import JSZip from "jszip";
@@ -14,6 +15,8 @@ import { fetchWithAuth } from "../lib/api";
 import { useNavigationGuard } from "../hooks/useNavigationGuard";
 import { UnsavedChangesModal } from "../components/UnsavedChangesModal";
 import { countPdfPages, extractPdfText, textToBase64, arrayBufferToBase64 } from "../lib/pdfToImage";
+import { useModeBFlow } from "../lib/modeb/useModeBFlow";
+import ModeBReviewPanel from "../components/modeb/ModeBReviewPanel";
 
 const CollapsibleSection = ({ title, defaultOpen = true, children }: { title: string, defaultOpen?: boolean, children: React.ReactNode }) => {
   const [isOpen, setIsOpen] = useState(defaultOpen);
@@ -45,9 +48,10 @@ function formatFileSize(bytes: number): string {
 interface SavedDoc {
   id: string;
   title: string;
-  mode: "standard" | "exact_form";
+  mode: "standard" | "exact_form" | "exact_form_overlay";
   content: string;
   isHtml: boolean;
+  filledPdfUrl?: string;
   savedAt: any;
 }
 
@@ -153,6 +157,32 @@ export default function TenderAnalyzer() {
   const [savedDocDownloadingId, setSavedDocDownloadingId] = useState<string | null>(null);
   const [savedDocDownloadingType, setSavedDocDownloadingType] = useState<'pdf' | 'docx' | null>(null);
   const [showNameDialog, setShowNameDialog] = useState(false);
+
+  // Mode B Vision fill — onSave handler + state machine hook
+  const handleModeBSave = async (blob: Blob, filename: string) => {
+    if (!user || !savedProjectId) return;
+    const path = `users/${user.uid}/filled-forms/${Date.now()}-${filename}`;
+    const fileRef = storageRef(storage, path);
+    await uploadBytes(fileRef, new Uint8Array(await blob.arrayBuffer()));
+    const filledPdfUrl = await getDownloadURL(fileRef);
+    const colRef = collection(db, 'saved_tenders', savedProjectId, 'generated_docs');
+    const docRef = await addDoc(colRef, {
+      title: filename,
+      mode: 'exact_form_overlay',
+      content: '',
+      isHtml: false,
+      filledPdfUrl,
+      savedAt: serverTimestamp(),
+    });
+    setSavedDocs(prev => [{ id: docRef.id, title: filename, mode: 'exact_form_overlay', content: '', isHtml: false, filledPdfUrl, savedAt: Timestamp.now() }, ...prev]);
+  };
+
+  const modeb = useModeBFlow({
+    businessProfile,
+    directors: businessProfile?.directors ?? [],
+    tenderData: analysisResult,
+    onSave: savedProjectId ? handleModeBSave : undefined,
+  });
   const [pendingProjectName, setPendingProjectName] = useState("");
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -505,6 +535,21 @@ export default function TenderAnalyzer() {
     setSavedDocDownloadingId(sd.id);
     setSavedDocDownloadingType('pdf');
     try {
+      // Vision-filled PDFs are already stored in Storage — fetch directly
+      if (sd.mode === 'exact_form_overlay' && sd.filledPdfUrl) {
+        const resp = await fetch(sd.filledPdfUrl);
+        if (!resp.ok) throw new Error('Download failed');
+        const blob = await resp.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = sd.title.replace(/\s+/g, '_') + '.pdf';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        return;
+      }
       const res = await fetchWithAuth("/api/generate-pdf", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -1523,17 +1568,17 @@ export default function TenderAnalyzer() {
                   </select>
                   ) : (
                   <div>
-                    <p className="text-xs text-indigo-700/80 mb-2">Upload the exact blank form or annexure issued by the tender authority (PDF or image). The AI reproduces its structure verbatim and fills your business details into every field.</p>
-                    {!exactFormFile ? (
+                    <p className="text-xs text-indigo-700/80 mb-2">Upload the exact blank form or annexure issued by the tender authority (PDF). Vision AI detects every field and fills your business details — you review and confirm before the PDF is generated.</p>
+                    {!modeb.formFile ? (
                       <label className="flex flex-col items-center justify-center w-full h-24 border-2 border-dashed border-indigo-300 rounded-lg cursor-pointer bg-white hover:bg-indigo-50 transition-colors">
                         <div className="flex flex-col items-center justify-center gap-1">
                           <Upload className="w-5 h-5 text-indigo-400" />
                           <span className="text-xs text-indigo-600 font-medium">Click to upload blank form</span>
-                          <span className="text-[10px] text-slate-400">PDF or image • max 20 MB</span>
+                          <span className="text-[10px] text-slate-400">PDF • max 20 MB</span>
                         </div>
                         <input
                           type="file"
-                          accept=".pdf,image/*"
+                          accept=".pdf"
                           className="hidden"
                           onChange={(e) => {
                             const f = e.target.files?.[0] || null;
@@ -1541,16 +1586,16 @@ export default function TenderAnalyzer() {
                               toast.error("File is over 20 MB — please use a smaller file or a single page.");
                               return;
                             }
-                            setExactFormFile(f);
+                            modeb.selectFile(f);
                           }}
                         />
                       </label>
                     ) : (
                       <div className="flex items-center gap-3 bg-white border border-indigo-200 rounded-lg px-3 py-2.5">
                         <FileText className="w-4 h-4 text-indigo-500 shrink-0" />
-                        <span className="text-xs text-indigo-900 font-medium truncate flex-1">{exactFormFile.name}</span>
-                        <span className="text-[10px] text-slate-400 shrink-0">{formatFileSize(exactFormFile.size)}</span>
-                        <button onClick={() => setExactFormFile(null)} className="text-slate-400 hover:text-red-500 shrink-0 transition-colors">
+                        <span className="text-xs text-indigo-900 font-medium truncate flex-1">{modeb.formFile.name}</span>
+                        <span className="text-[10px] text-slate-400 shrink-0">{formatFileSize(modeb.formFile.size)}</span>
+                        <button onClick={() => modeb.selectFile(null)} className="text-slate-400 hover:text-red-500 shrink-0 transition-colors">
                           <X className="w-4 h-4" />
                         </button>
                       </div>
@@ -1558,6 +1603,7 @@ export default function TenderAnalyzer() {
                   </div>
                   )}
 
+                  {!exactFormMode && (
                   <input
                     type="text"
                     placeholder="Optional: Enter specific details or instructions for this document..."
@@ -1565,14 +1611,42 @@ export default function TenderAnalyzer() {
                     onChange={(e) => setExtraInstructions(e.target.value)}
                     className="w-full bg-white border border-indigo-200 text-indigo-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block p-2.5"
                   />
+                  )}
                   <button
-                    onClick={generateDocument}
-                    disabled={generatingDoc || formUploading}
-                    className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-medium rounded-lg text-sm px-5 py-2.5 text-center flex items-center justify-center gap-2 transition-colors"
+                    onClick={exactFormMode ? () => modeb.startFlow(user!.uid) : generateDocument}
+                    disabled={exactFormMode
+                      ? (!modeb.formFile || modeb.stage === 'uploading' || modeb.stage === 'probing')
+                      : (generatingDoc || formUploading)
+                    }
+                    className="w-full bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 text-white font-medium rounded-lg text-sm px-5 py-2.5 text-center flex items-center justify-center gap-2 transition-colors"
                   >
-                    {(generatingDoc || formUploading) ? <Loader2 className="w-4 h-4 animate-spin" /> : <Target className="w-4 h-4" />}
-                    {formUploading ? "Uploading form…" : generatingDoc ? "Drafting..." : "Generate Draft"}
+                    {exactFormMode ? (
+                      modeb.stage === 'uploading' ? <><Loader2 className="w-4 h-4 animate-spin" /> Uploading form…</> :
+                      modeb.stage === 'probing'   ? <><Loader2 className="w-4 h-4 animate-spin" /> Detecting fields…</> :
+                      modeb.stage === 'done'      ? <><CheckCircle2 className="w-4 h-4" /> Done — fill another?</> :
+                                                    <><Scan className="w-4 h-4" /> Start Vision Fill</>
+                    ) : (
+                      <>
+                        {(generatingDoc || formUploading) ? <Loader2 className="w-4 h-4 animate-spin" /> : <Target className="w-4 h-4" />}
+                        {formUploading ? "Uploading form…" : generatingDoc ? "Drafting..." : "Generate Draft"}
+                      </>
+                    )}
                   </button>
+                  {exactFormMode && modeb.error && (
+                    <p className="text-xs text-red-600 flex items-center gap-1.5">
+                      <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                      {modeb.error}
+                    </p>
+                  )}
+                  {exactFormMode && modeb.stage === 'done' && (
+                    <div className="flex items-start gap-3 bg-emerald-50 border border-emerald-200 rounded-lg p-3">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-600 mt-0.5 shrink-0" />
+                      <div>
+                        <p className="text-sm font-semibold text-emerald-800">PDF filled and saved</p>
+                        <p className="text-xs text-emerald-600 mt-0.5">Download started automatically. The filled form has been saved to your Saved Documents.</p>
+                      </div>
+                    </div>
+                  )}
 
                   {generatedDoc && (
                      <div className="mt-6">
@@ -1827,17 +1901,19 @@ export default function TenderAnalyzer() {
                           <div className="flex-1 min-w-0">
                             <p className="text-sm font-medium text-slate-800 truncate">{sd.title}</p>
                             <div className="flex items-center gap-2 mt-0.5">
-                              <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded ${sd.mode === 'exact_form' ? 'bg-violet-100 text-violet-700' : 'bg-indigo-100 text-indigo-700'}`}>
-                                {sd.mode === 'exact_form' ? 'Exact Form' : 'Standard'}
+                              <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded ${sd.mode === 'exact_form' ? 'bg-violet-100 text-violet-700' : sd.mode === 'exact_form_overlay' ? 'bg-emerald-100 text-emerald-700' : 'bg-indigo-100 text-indigo-700'}`}>
+                                {sd.mode === 'exact_form' ? 'Exact Form' : sd.mode === 'exact_form_overlay' ? 'Vision Fill' : 'Standard'}
                               </span>
                               <span className="text-[10px] text-slate-400">{sd.savedAt?.toDate ? sd.savedAt.toDate().toLocaleDateString('en-IN', { day:'numeric', month:'short', year:'numeric' }) : ''}</span>
                             </div>
                           </div>
                           <div className="flex items-center gap-3 shrink-0">
-                            <button
-                              onClick={() => { setGeneratedDoc(sd.content); setGeneratedDocIsHtml(sd.isHtml); setDocSaved(true); setDocType(sd.title); setIsEditingDoc(false); setActiveTab('docs'); }}
-                              className="text-xs text-indigo-600 hover:text-indigo-800 font-semibold px-2 py-1 rounded hover:bg-indigo-50 transition-colors"
-                            >Open</button>
+                            {sd.mode !== 'exact_form_overlay' && (
+                              <button
+                                onClick={() => { setGeneratedDoc(sd.content); setGeneratedDocIsHtml(sd.isHtml); setDocSaved(true); setDocType(sd.title); setIsEditingDoc(false); setActiveTab('docs'); }}
+                                className="text-xs text-indigo-600 hover:text-indigo-800 font-semibold px-2 py-1 rounded hover:bg-indigo-50 transition-colors"
+                              >Open</button>
+                            )}
                             {sd.mode !== 'exact_form' && (
                               <button
                                 onClick={() => downloadSavedDocPdf(sd)}
@@ -1848,14 +1924,16 @@ export default function TenderAnalyzer() {
                                 PDF
                               </button>
                             )}
-                            <button
-                              onClick={() => downloadSavedDocDocx(sd)}
-                              disabled={savedDocDownloadingId === sd.id}
-                              className="text-xs flex items-center gap-1 text-slate-600 hover:text-slate-800 font-medium disabled:opacity-50 px-2 py-1 rounded hover:bg-slate-100 transition-colors"
-                            >
-                              {isDocxLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <FileText className="w-3 h-3" />}
-                              Word
-                            </button>
+                            {sd.mode !== 'exact_form_overlay' && (
+                              <button
+                                onClick={() => downloadSavedDocDocx(sd)}
+                                disabled={savedDocDownloadingId === sd.id}
+                                className="text-xs flex items-center gap-1 text-slate-600 hover:text-slate-800 font-medium disabled:opacity-50 px-2 py-1 rounded hover:bg-slate-100 transition-colors"
+                              >
+                                {isDocxLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <FileText className="w-3 h-3" />}
+                                Word
+                              </button>
+                            )}
                             <button
                               onClick={() => deleteSavedDoc(sd.id)}
                               className="text-xs text-red-500 hover:text-red-700 p-1 rounded hover:bg-red-50 transition-colors"
@@ -1931,6 +2009,22 @@ export default function TenderAnalyzer() {
         </div>
       )}
     </div>
+
+      {/* Mode B — Vision Fill review modal */}
+      {(modeb.stage === 'reviewing' || modeb.stage === 'exporting') && modeb.mappedFields && (
+        <div className="fixed inset-0 z-50 flex flex-col bg-slate-100">
+          <ModeBReviewPanel
+            mappedFields={modeb.mappedFields}
+            pageW={modeb.pageW}
+            pageH={modeb.pageH}
+            pageCount={modeb.pageCount}
+            formName={modeb.formFile?.name}
+            exporting={modeb.stage === 'exporting'}
+            onExport={modeb.confirmExport}
+            onCancel={modeb.reset}
+          />
+        </div>
+      )}
     </>
   );
 }

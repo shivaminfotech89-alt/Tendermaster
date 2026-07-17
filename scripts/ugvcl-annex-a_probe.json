@@ -1,0 +1,566 @@
+{
+  "path": 2,
+  "pageW": 612,
+  "pageH": 792,
+  "pageCount": 3,
+  "counts": {
+    "total": 46,
+    "high": 42,
+    "medium": 4,
+    "low": 0
+  },
+  "fields": [
+    {
+      "field_label": "TENDER NO:",
+      "fill_area_description": "Blank line next to TENDER NO:",
+      "fill_box": [
+        250,
+        280,
+        270,
+        600
+      ],
+      "confidence": "high",
+      "page": 1
+    },
+    {
+      "field_label": "Name of Firm",
+      "fill_area_description": "Blank box next to Name of Firm",
+      "fill_box": [
+        308,
+        348,
+        333,
+        784
+      ],
+      "confidence": "high",
+      "page": 1
+    },
+    {
+      "field_label": "Office Address Phone No. Fax No. Email ID",
+      "fill_area_description": "Blank box next to Office Address details",
+      "fill_box": [
+        333,
+        348,
+        381,
+        784
+      ],
+      "confidence": "high",
+      "page": 1
+    },
+    {
+      "field_label": "Works Address as per Vendor Registration Phone No. Fax No. Email ID",
+      "fill_area_description": "Blank box next to Works Address details",
+      "fill_box": [
+        381,
+        348,
+        451,
+        784
+      ],
+      "confidence": "high",
+      "page": 1
+    },
+    {
+      "field_label": "Type of Firm",
+      "fill_area_description": "Blank box next to Type of Firm options",
+      "fill_box": [
+        451,
+        348,
+        489,
+        784
+      ],
+      "confidence": "high",
+      "page": 1
+    },
+    {
+      "field_label": "CIN / LLPIN of Firm",
+      "fill_area_description": "Blank box next to CIN / LLPIN of Firm",
+      "fill_box": [
+        489,
+        348,
+        514,
+        784
+      ],
+      "confidence": "high",
+      "page": 1
+    },
+    {
+      "field_label": "GST No. of Firm",
+      "fill_area_description": "Blank box next to GST No. of Firm",
+      "fill_box": [
+        514,
+        348,
+        538,
+        784
+      ],
+      "confidence": "high",
+      "page": 1
+    },
+    {
+      "field_label": "Names of all Directors/LLP Partners/ Partners / Proprietors of Bidder Firm with DIN (if any) and full address (as on the bid submission date) - Row 1 Full Name",
+      "fill_area_description": "Blank cell for Row 1 Full Name",
+      "fill_box": [
+        588,
+        296,
+        613,
+        442
+      ],
+      "confidence": "high",
+      "page": 1
+    },
+    {
+      "field_label": "Names of all Directors/LLP Partners/ Partners / Proprietors of Bidder Firm with DIN (if any) and full address (as on the bid submission date) - Row 1 DIN",
+      "fill_area_description": "Blank cell for Row 1 DIN",
+      "fill_box": [
+        588,
+        442,
+        613,
+        528
+      ],
+      "confidence": "high",
+      "page": 1
+    },
+    {
+      "field_label": "Names of all Directors/LLP Partners/ Partners / Proprietors of Bidder Firm with DIN (if any) and full address (as on the bid submission date) - Row 1 Full Residential Address",
+      "fill_area_description": "Blank cell for Row 1 Full Residential Address",
+      "fill_box": [
+        588,
+        528,
+        613,
+        784
+      ],
+      "confidence": "high",
+      "page": 1
+    },
+    {
+      "field_label": "Names of all Directors/LLP Partners/ Partners / Proprietors of Bidder Firm with DIN (if any) and full address (as on the bid submission date) - Row 2 Full Name",
+      "fill_area_description": "Blank cell for Row 2 Full Name",
+      "fill_box": [
+        613,
+        296,
+        638,
+        442
+      ],
+      "confidence": "high",
+      "page": 1
+    },
+    {
+      "field_label": "Names of all Directors/LLP Partners/ Partners / Proprietors of Bidder Firm with DIN (if any) and full address (as on the bid submission date) - Row 2 DIN",
+      "fill_area_description": "Blank cell for Row 2 DIN",
+      "fill_box": [
+        613,
+        442,
+        638,
+        528
+      ],
+      "confidence": "high",
+      "page": 1
+    },
+    {
+      "field_label": "Names of all Directors/LLP Partners/ Partners / Proprietors of Bidder Firm with DIN (if any) and full address (as on the bid submission date) - Row 2 Full Residential Address",
+      "fill_area_description": "Blank cell for Row 2 Full Residential Address",
+      "fill_box": [
+        613,
+        528,
+        638,
+        784
+      ],
+      "confidence": "high",
+      "page": 1
+    },
+    {
+      "field_label": "Names of all Directors/LLP Partners/ Partners / Proprietors of Bidder Firm with DIN (if any) and full address (as on the bid submission date) - Row 3 Full Name",
+      "fill_area_description": "Blank cell for Row 3 Full Name",
+      "fill_box": [
+        638,
+        296,
+        663,
+        442
+      ],
+      "confidence": "high",
+      "page": 1
+    },
+    {
+      "field_label": "Names of all Directors/LLP Partners/ Partners / Proprietors of Bidder Firm with DIN (if any) and full address (as on the bid submission date) - Row 3 DIN",
+      "fill_area_description": "Blank cell for Row 3 DIN",
+      "fill_box": [
+        638,
+        442,
+        663,
+        528
+      ],
+      "confidence": "high",
+      "page": 1
+    },
+    {
+      "field_label": "Names of all Directors/LLP Partners/ Partners / Proprietors of Bidder Firm with DIN (if any) and full address (as on the bid submission date) - Row 3 Full Residential Address",
+      "fill_area_description": "Blank cell for Row 3 Full Residential Address",
+      "fill_box": [
+        638,
+        528,
+        663,
+        784
+      ],
+      "confidence": "high",
+      "page": 1
+    },
+    {
+      "field_label": "Names of all Directors/LLP Partners/ Partners / Proprietors of Bidder Firm with DIN (if any) and full address (as on the bid submission date) - Row 4 Full Name",
+      "fill_area_description": "Blank cell for Row 4 Full Name",
+      "fill_box": [
+        663,
+        296,
+        688,
+        442
+      ],
+      "confidence": "high",
+      "page": 1
+    },
+    {
+      "field_label": "Names of all Directors/LLP Partners/ Partners / Proprietors of Bidder Firm with DIN (if any) and full address (as on the bid submission date) - Row 4 DIN",
+      "fill_area_description": "Blank cell for Row 4 DIN",
+      "fill_box": [
+        663,
+        442,
+        688,
+        528
+      ],
+      "confidence": "high",
+      "page": 1
+    },
+    {
+      "field_label": "Names of all Directors/LLP Partners/ Partners / Proprietors of Bidder Firm with DIN (if any) and full address (as on the bid submission date) - Row 4 Full Residential Address",
+      "fill_area_description": "Blank cell for Row 4 Full Residential Address",
+      "fill_box": [
+        663,
+        528,
+        688,
+        784
+      ],
+      "confidence": "high",
+      "page": 1
+    },
+    {
+      "field_label": "Names of all Directors/LLP Partners/ Partners / Proprietors of Bidder Firm with DIN (if any) and full address (as on the bid submission date) - Row 5 Full Name",
+      "fill_area_description": "Blank cell for Row 5 Full Name",
+      "fill_box": [
+        688,
+        296,
+        712,
+        442
+      ],
+      "confidence": "high",
+      "page": 1
+    },
+    {
+      "field_label": "Names of all Directors/LLP Partners/ Partners / Proprietors of Bidder Firm with DIN (if any) and full address (as on the bid submission date) - Row 5 DIN",
+      "fill_area_description": "Blank cell for Row 5 DIN",
+      "fill_box": [
+        688,
+        442,
+        712,
+        528
+      ],
+      "confidence": "high",
+      "page": 1
+    },
+    {
+      "field_label": "Names of all Directors/LLP Partners/ Partners / Proprietors of Bidder Firm with DIN (if any) and full address (as on the bid submission date) - Row 5 Full Residential Address",
+      "fill_area_description": "Blank cell for Row 5 Full Residential Address",
+      "fill_box": [
+        688,
+        528,
+        712,
+        784
+      ],
+      "confidence": "high",
+      "page": 1
+    },
+    {
+      "field_label": "Full Name of Legal Representative / Agent",
+      "fill_area_description": "Blank box next to Full Name of Legal Representative / Agent",
+      "fill_box": [
+        748,
+        360,
+        773,
+        760
+      ],
+      "confidence": "high",
+      "page": 1
+    },
+    {
+      "field_label": "Whether employee of Bidder-Firm or not? (Yes/No)",
+      "fill_area_description": "Blank box next to Whether employee of Bidder-Firm or not?",
+      "fill_box": [
+        773,
+        360,
+        809,
+        760
+      ],
+      "confidence": "high",
+      "page": 1
+    },
+    {
+      "field_label": "Designation",
+      "fill_area_description": "Blank box next to Designation",
+      "fill_box": [
+        809,
+        360,
+        821,
+        760
+      ],
+      "confidence": "high",
+      "page": 1
+    },
+    {
+      "field_label": "Office Address",
+      "fill_area_description": "Blank box next to Office Address",
+      "fill_box": [
+        821,
+        360,
+        833,
+        760
+      ],
+      "confidence": "high",
+      "page": 1
+    },
+    {
+      "field_label": "Office Land-line Nos.",
+      "fill_area_description": "Blank box next to Office Land-line Nos.",
+      "fill_box": [
+        833,
+        360,
+        846,
+        760
+      ],
+      "confidence": "high",
+      "page": 1
+    },
+    {
+      "field_label": "Signature",
+      "fill_area_description": "Blank space above Signature label",
+      "fill_box": [
+        855,
+        200,
+        880,
+        325
+      ],
+      "confidence": "medium",
+      "page": 1
+    },
+    {
+      "field_label": "Stamp / Round Seal",
+      "fill_area_description": "Blank space above Stamp / Round Seal label",
+      "fill_box": [
+        855,
+        640,
+        880,
+        765
+      ],
+      "confidence": "medium",
+      "page": 1
+    },
+    {
+      "field_label": "We hereby certify that our Firm M/s. (Firm Name)",
+      "fill_area_description": "Blank line for Firm Name",
+      "fill_box": [
+        505,
+        535,
+        517,
+        612
+      ],
+      "confidence": "high",
+      "page": 2
+    },
+    {
+      "field_label": "particular quoted item viz. (Item Name)",
+      "fill_area_description": "Blank line for Item Name",
+      "fill_box": [
+        515,
+        620,
+        527,
+        785
+      ],
+      "confidence": "high",
+      "page": 2
+    },
+    {
+      "field_label": "For (Firm Name)",
+      "fill_area_description": "Blank line for Firm Name",
+      "fill_box": [
+        570,
+        638,
+        582,
+        790
+      ],
+      "confidence": "high",
+      "page": 2
+    },
+    {
+      "field_label": "Place:",
+      "fill_area_description": "Blank space next to Place",
+      "fill_box": [
+        610,
+        295,
+        625,
+        400
+      ],
+      "confidence": "high",
+      "page": 2
+    },
+    {
+      "field_label": "Date:",
+      "fill_area_description": "Blank space next to Date",
+      "fill_box": [
+        645,
+        295,
+        660,
+        400
+      ],
+      "confidence": "high",
+      "page": 2
+    },
+    {
+      "field_label": "Signature of Director / Partner / Proprietor / Authorized Signatory",
+      "fill_area_description": "Blank space above Name for signature",
+      "fill_box": [
+        590,
+        580,
+        625,
+        780
+      ],
+      "confidence": "high",
+      "page": 2
+    },
+    {
+      "field_label": "Name:",
+      "fill_area_description": "Blank space next to Name",
+      "fill_box": [
+        645,
+        580,
+        660,
+        780
+      ],
+      "confidence": "high",
+      "page": 2
+    },
+    {
+      "field_label": "Designation:",
+      "fill_area_description": "Blank space next to Designation",
+      "fill_box": [
+        670,
+        580,
+        685,
+        780
+      ],
+      "confidence": "high",
+      "page": 2
+    },
+    {
+      "field_label": "Stamp / Seal of Firm",
+      "fill_area_description": "Blank space for Stamp / Seal of Firm",
+      "fill_box": [
+        630,
+        420,
+        670,
+        550
+      ],
+      "confidence": "high",
+      "page": 2
+    },
+    {
+      "field_label": "Signature",
+      "fill_area_description": "Blank space above Signature label at the bottom left",
+      "fill_box": [
+        740,
+        260,
+        780,
+        350
+      ],
+      "confidence": "high",
+      "page": 2
+    },
+    {
+      "field_label": "Stamp / Round Seal",
+      "fill_area_description": "Blank space above Stamp / Round Seal label at the bottom right",
+      "fill_box": [
+        740,
+        680,
+        780,
+        780
+      ],
+      "confidence": "high",
+      "page": 2
+    },
+    {
+      "field_label": "Mobile No.",
+      "fill_area_description": "Blank cell in the table next to 'Mobile No.'",
+      "fill_box": [
+        140,
+        358,
+        153,
+        796
+      ],
+      "confidence": "high",
+      "page": 3
+    },
+    {
+      "field_label": "Email ID",
+      "fill_area_description": "Blank cell in the table next to 'Email ID'",
+      "fill_box": [
+        153,
+        358,
+        165,
+        796
+      ],
+      "confidence": "high",
+      "page": 3
+    },
+    {
+      "field_label": "Whether acting as Legal Representative / Agent in any other Private Limited Company or Public Limited Company or Limited Liability Partnership (LLP) or Partnership Firm or Proprietor Firm? If yes, give names.",
+      "fill_area_description": "Large blank cell in the table next to the question",
+      "fill_box": [
+        165,
+        358,
+        278,
+        796
+      ],
+      "confidence": "high",
+      "page": 3
+    },
+    {
+      "field_label": "Conflict of Interest' of Tender No.",
+      "fill_area_description": "Blank line after 'Tender No.'",
+      "fill_box": [
+        590,
+        480,
+        605,
+        615
+      ],
+      "confidence": "high",
+      "page": 3
+    },
+    {
+      "field_label": "Signature",
+      "fill_area_description": "Blank space above the 'Signature' label",
+      "fill_box": [
+        740,
+        260,
+        790,
+        350
+      ],
+      "confidence": "medium",
+      "page": 3
+    },
+    {
+      "field_label": "Stamp / Round Seal",
+      "fill_area_description": "Blank space above the 'Stamp / Round Seal' label",
+      "fill_box": [
+        740,
+        680,
+        790,
+        780
+      ],
+      "confidence": "medium",
+      "page": 3
+    }
+  ]
+}

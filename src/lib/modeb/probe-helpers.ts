@@ -5,6 +5,21 @@ import { GoogleGenAI, createPartFromUri } from '@google/genai';
 import { PDFDocument } from 'pdf-lib';
 import type { DetectedField } from './types.js';
 
+// ── Timeout helper ─────────────────────────────────────────────────────────────
+// Wraps any promise with a hard deadline.  On timeout the promise REJECTS
+// (never hangs).  The timer is always cleared so it cannot leak.
+
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout>;
+  const deadline = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () => reject(new Error(`${label} timed out after ${ms / 1000}s`)),
+      ms,
+    );
+  });
+  return Promise.race([promise, deadline]).finally(() => clearTimeout(timer));
+}
+
 // ── Retry helpers ──────────────────────────────────────────────────────────────
 
 export function isRetryable(e: unknown): boolean {
@@ -15,6 +30,8 @@ export function isRetryable(e: unknown): boolean {
     msg.includes('503') || msg.includes('unavailable') ||
     msg.includes('overloaded') || msg.includes('429') || msg.includes('quota')
   );
+  // Note: "timed out after Xs" messages are intentionally NOT retryable —
+  // a hung call should fall through to the next model, not be retried.
 }
 
 export async function withRetry<T>(
@@ -72,7 +89,22 @@ export interface ProbeData {
   failedPages?: number[];
 }
 
+// ── Compact ISO timestamp for log lines ───────────────────────────────────────
+
+const ts = (): string => new Date().toISOString().slice(11, 23); // HH:MM:SS.mmm
+
 // ── Core probe function ───────────────────────────────────────────────────────
+//
+// Hard timeouts per phase:
+//   Upload  → 30 s  (once, large file)
+//   Vision  → 45 s  (per individual generateContent attempt)
+//   Delete  → 10 s  (cleanup; non-fatal anyway)
+//
+// Timeout errors are NOT retryable (message "timed out after Xs" doesn't match
+// isRetryable), so a hung call falls through to the next model immediately.
+// Promise.allSettled therefore always settles within:
+//   max(45s × attempts + retry delays) per page
+// and can never hang forever.
 
 export async function probeAllPagesFromBuffer(
   pdfBuf: Buffer,
@@ -87,16 +119,22 @@ export async function probeAllPagesFromBuffer(
   const pageCount = pdfDoc.getPageCount();
   const { width: pageW, height: pageH } = pdfDoc.getPage(0).getSize();
 
-  log(`PDF: ${pageCount} page(s) (${Math.round(pageW)}×${Math.round(pageH)} pts)`);
+  log(`[${ts()}] PDF: ${pageCount} page(s) (${Math.round(pageW)}×${Math.round(pageH)} pts)`);
 
-  // Upload PDF once as Blob — reused by all parallel page calls
+  // ── Upload PDF once ─────────────────────────────────────────────────────────
   const blob = new Blob([pdfBuf], { type: 'application/pdf' });
-  const uploaded = await withRetry('gemini-upload', () =>
-    ai.files.upload({ file: blob, config: { mimeType: 'application/pdf', displayName } }),
-  );
-  log(`Uploaded: ${uploaded.uri}`);
 
-  // ── Per-page probe (extracted so it can run in parallel) ─────────────────────
+  log(`[${ts()}] Upload start`);
+  const uploaded = await withRetry('gemini-upload', () =>
+    withTimeout(
+      ai.files.upload({ file: blob, config: { mimeType: 'application/pdf', displayName } }),
+      30_000,
+      'gemini-upload',
+    ),
+  );
+  log(`[${ts()}] Upload done: ${uploaded.uri} (name=${uploaded.name})`);
+
+  // ── Per-page probe (runs in parallel — see Promise.allSettled below) ─────────
 
   const probeOnePage = async (pg: number): Promise<ProbeField[]> => {
     const callParams = {
@@ -110,21 +148,26 @@ export async function probeAllPagesFromBuffer(
       config: { temperature: 0.1 },
     };
 
-    log(`Probing page ${pg}/${pageCount}…`);
     let rawText = '[]';
 
     for (const model of MODEL_FALLBACK_ORDER) {
       try {
+        log(`[${ts()}] pg${pg}: starting Vision call via ${model}`);
         const result = await withRetry(
           `${model} pg${pg}`,
-          () => ai.models.generateContent({ model, ...callParams }),
+          () => withTimeout(
+            ai.models.generateContent({ model, ...callParams }),
+            45_000,
+            `${model} pg${pg}`,
+          ),
         );
         rawText = result.text ?? '[]';
-        log(`  page ${pg}: OK via ${model}`);
+        log(`[${ts()}] pg${pg}: OK via ${model} (${rawText.length} chars)`);
         break;
       } catch (e) {
+        log(`[${ts()}] pg${pg}: ${model} failed — ${(e as any)?.message ?? e}`);
         if (model === MODEL_FALLBACK_ORDER[MODEL_FALLBACK_ORDER.length - 1]) throw e;
-        log(`  page ${pg}: ${model} failed, trying fallback…`);
+        log(`[${ts()}] pg${pg}: trying fallback model`);
       }
     }
 
@@ -135,30 +178,40 @@ export async function probeAllPagesFromBuffer(
       return parsed
         .filter((f: any) => Array.isArray(f.fill_box) && f.fill_box.length === 4)
         .map((f: any): ProbeField => ({
-          field_label:          f.field_label ?? '',
+          field_label:           f.field_label ?? '',
           fill_area_description: f.fill_area_description ?? '',
-          fill_box:             f.fill_box as [number, number, number, number],
-          confidence:           f.confidence ?? 'medium',
-          notes:                f.notes,
-          page:                 pg,
+          fill_box:              f.fill_box as [number, number, number, number],
+          confidence:            f.confidence ?? 'medium',
+          notes:                 f.notes,
+          page:                  pg,
         }));
     } catch {
-      log(`  page ${pg}: could not parse JSON response`);
+      log(`[${ts()}] pg${pg}: JSON parse failed`);
       return [];
     }
   };
 
   // ── Fire all pages in parallel ────────────────────────────────────────────────
-
+  log(`[${ts()}] Firing ${pageCount} page(s) in parallel`);
   const settled = await Promise.allSettled(
     Array.from({ length: pageCount }, (_, i) => probeOnePage(i + 1)),
   );
+  log(`[${ts()}] All pages settled`);
 
-  // Always clean up the uploaded file regardless of outcome
-  try { await ai.files.delete({ name: uploaded.name! }); } catch (_) {}
+  // ── Clean up uploaded file — MUST use withTimeout so delete cannot hang ───────
+  log(`[${ts()}] Delete start`);
+  try {
+    await withTimeout(
+      ai.files.delete({ name: uploaded.name! }),
+      10_000,
+      'gemini-delete',
+    );
+    log(`[${ts()}] Delete done`);
+  } catch (e) {
+    log(`[${ts()}] Delete failed (non-fatal): ${(e as any)?.message ?? e}`);
+  }
 
   // ── Collect results ───────────────────────────────────────────────────────────
-
   const allFields: ProbeField[] = [];
   const failedPages: number[] = [];
 
@@ -168,15 +221,17 @@ export async function probeAllPagesFromBuffer(
       allFields.push(...r.value);
     } else {
       failedPages.push(i + 1);
-      log(`  page ${i + 1}: failed — ${(r.reason as any)?.message ?? r.reason}`);
+      log(`[${ts()}] pg${i + 1}: failed — ${(r.reason as any)?.message ?? r.reason}`);
     }
   }
 
-  // All pages failed → throw so the caller returns 503
+  // All pages failed → throw so caller can return 503
   if (failedPages.length === pageCount) {
     const firstRejected = settled.find(r => r.status === 'rejected') as PromiseRejectedResult;
     throw firstRejected?.reason ?? new Error('Vision field detection failed for all pages');
   }
+
+  log(`[${ts()}] Done: ${allFields.length} fields across ${pageCount - failedPages.length}/${pageCount} pages`);
 
   return {
     pageW, pageH, pageCount,

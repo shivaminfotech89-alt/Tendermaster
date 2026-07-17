@@ -2778,15 +2778,21 @@ app.post(
       console.warn('[ModeBProbe] Cache read failed:', (e as Error).message);
     }
 
-    // Fetch PDF from Storage URL (SSRF-guarded)
+    // Fetch PDF from Storage URL (SSRF-guarded, 30 s hard timeout)
     let pdfBuf: Buffer;
+    const fetchController = new AbortController();
+    const fetchTimeoutId = setTimeout(() => fetchController.abort(), 30_000);
     try {
-      const resp = await safeFetch(storageUrl);
+      console.log(`[ModeBProbe] ${new Date().toISOString().slice(11,23)} fetch start`);
+      const resp = await safeFetch(storageUrl, { signal: fetchController.signal });
+      clearTimeout(fetchTimeoutId);
       if (!resp.ok) {
         return res.status(400).json({ error: `Could not fetch form file: HTTP ${resp.status}` });
       }
       pdfBuf = Buffer.from(await resp.arrayBuffer());
+      console.log(`[ModeBProbe] ${new Date().toISOString().slice(11,23)} fetch done (${pdfBuf.length} bytes)`);
     } catch (e) {
+      clearTimeout(fetchTimeoutId);
       return res.status(400).json({ error: 'Could not fetch form file: ' + (e as Error).message });
     }
 
@@ -2815,11 +2821,13 @@ app.post(
       .catch(e => console.warn('[ModeBProbe] Cache write failed:', (e as Error).message));
 
     return res.json({
-      fields: probeResult.fields,
-      pageW: probeResult.pageW,
-      pageH: probeResult.pageH,
-      pageCount: probeResult.pageCount,
-      fromCache: false,
+      fields:      probeResult.fields,
+      pageW:       probeResult.pageW,
+      pageH:       probeResult.pageH,
+      pageCount:   probeResult.pageCount,
+      partial:     probeResult.partial ?? false,
+      failedPages: probeResult.failedPages ?? [],
+      fromCache:   false,
     });
   },
 );

@@ -45,6 +45,15 @@ function formatFileSize(bytes: number): string {
   return Math.round(bytes / 1024) + ' KB';
 }
 
+function dataUriToBlob(dataUri: string): Blob {
+  const [header = '', b64 = ''] = dataUri.split(',');
+  const mimeType = header.match(/data:([^;]+)/)?.[1] ?? 'application/octet-stream';
+  const raw = atob(b64);
+  const bytes = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
+  return new Blob([bytes], { type: mimeType });
+}
+
 interface SavedDoc {
   id: string;
   title: string;
@@ -96,6 +105,9 @@ export default function TenderAnalyzer() {
   const [zipFileSize, setZipFileSize] = useState(0);
   
   const [error, setError] = useState("");
+  const [processingFile, setProcessingFile] = useState(false);
+  const [uploadPercent, setUploadPercent] = useState(0);
+  const [analyzeStage, setAnalyzeStage] = useState<'uploading' | 'analyzing' | ''>('');
 
   const [analyzedPayload, setAnalyzedPayload] = useState<any>(null);
   const [docExported, setDocExported] = useState(false);
@@ -227,27 +239,32 @@ export default function TenderAnalyzer() {
     setPdfFileName(files.length === 1 ? files[0].name : `${files.length} PDFs selected`);
     setPdfFileNames(files.map(f => f.name));
     setPdfFileSize(files.reduce((acc, f) => acc + f.size, 0));
+    setProcessingFile(true);
 
-    for (const file of files) {
-      const arrayBuffer = await file.arrayBuffer();
-      let dataUri: string;
-      try {
-        const extraction = await extractPdfText(arrayBuffer);
-        if (extraction.isDigital) {
-          console.log(`[PDF extraction] ${file.name} → TEXT (${extraction.charsExtracted} non-ws chars across ${extraction.pagesChecked} sampled pages of ${extraction.pageCount})`);
-          dataUri = `data:text/plain;base64,${textToBase64(extraction.text)}`;
-        } else {
-          console.log(`[PDF extraction] ${file.name} → IMAGE fallback (${extraction.charsExtracted} non-ws chars across ${extraction.pagesChecked} sampled pages of ${extraction.pageCount})`);
+    try {
+      for (const file of files) {
+        const arrayBuffer = await file.arrayBuffer();
+        let dataUri: string;
+        try {
+          const extraction = await extractPdfText(arrayBuffer);
+          if (extraction.isDigital) {
+            console.log(`[PDF extraction] ${file.name} → TEXT (${extraction.charsExtracted} non-ws chars across ${extraction.pagesChecked} sampled pages of ${extraction.pageCount})`);
+            dataUri = `data:text/plain;base64,${textToBase64(extraction.text)}`;
+          } else {
+            console.log(`[PDF extraction] ${file.name} → IMAGE fallback (${extraction.charsExtracted} non-ws chars across ${extraction.pagesChecked} sampled pages of ${extraction.pageCount})`);
+            dataUri = `data:application/pdf;base64,${arrayBufferToBase64(arrayBuffer)}`;
+          }
+        } catch {
+          // pdfjs failed — fall back to sending raw PDF bytes
+          console.warn(`[PDF extraction] ${file.name} → IMAGE fallback (extraction error)`);
           dataUri = `data:application/pdf;base64,${arrayBufferToBase64(arrayBuffer)}`;
         }
-      } catch {
-        // pdfjs failed — fall back to sending raw PDF bytes
-        console.warn(`[PDF extraction] ${file.name} → IMAGE fallback (extraction error)`);
-        dataUri = `data:application/pdf;base64,${arrayBufferToBase64(arrayBuffer)}`;
+        base64Files.push(dataUri);
       }
-      base64Files.push(dataUri);
+      setTenderPdfBase64(base64Files as any);
+    } finally {
+      setProcessingFile(false);
     }
-    setTenderPdfBase64(base64Files as any);
   };
 
   const handleZipUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -261,6 +278,7 @@ export default function TenderAnalyzer() {
     
     setZipFileName(file.name);
     setZipFileSize(file.size);
+    setProcessingFile(true);
     try {
       const zip = new JSZip();
       const contents = await zip.loadAsync(file);
@@ -324,6 +342,8 @@ export default function TenderAnalyzer() {
     } catch (err) {
       setError("Failed to extract ZIP file.");
       console.error(err);
+    } finally {
+      setProcessingFile(false);
     }
   };
 
@@ -404,7 +424,7 @@ export default function TenderAnalyzer() {
       setBusinessProfile(userSnap.exists() ? userSnap.data() : null);
 
 
-      const { ref, uploadString, getDownloadURL } = await import("firebase/storage");
+      const { ref, uploadBytesResumable, getDownloadURL } = await import("firebase/storage");
       const { storage } = await import("../lib/firebase");
 
       let processedPayload = payload;
@@ -412,17 +432,38 @@ export default function TenderAnalyzer() {
 
       if (inputType === 'pdf' || inputType === 'zip') {
         const dataUris = Array.isArray(payload) ? payload : [payload];
-        const uploadedUrls = [];
+        const uploadedUrls: string[] = [];
         const nameSource = inputType === 'pdf' ? pdfFileNames : zipFileNames;
+        const blobs = dataUris.map(dataUriToBlob);
+        const totalBytes = blobs.reduce((sum, b) => sum + b.size, 0);
+        let completedBytes = 0;
 
-        for (let i = 0; i < dataUris.length; i++) {
-          const dataUri = dataUris[i];
-          const storageRef = ref(storage, `users/${user?.uid || 'anon'}/tenders/${Date.now()}_${i}`);
-          await uploadString(storageRef, dataUri, 'data_url');
-          const url = await getDownloadURL(storageRef);
+        setAnalyzeStage('uploading');
+        setUploadPercent(0);
+
+        for (let i = 0; i < blobs.length; i++) {
+          const blob = blobs[i]!;
+          const fileRef = ref(storage, `users/${user?.uid || 'anon'}/tenders/${Date.now()}_${i}`);
+          const url = await new Promise<string>((resolve, reject) => {
+            const task = uploadBytesResumable(fileRef, blob, { contentType: blob.type });
+            task.on('state_changed',
+              (snapshot) => {
+                const pct = Math.min(99, ((completedBytes + snapshot.bytesTransferred) / totalBytes) * 100);
+                setUploadPercent(pct);
+              },
+              reject,
+              async () => {
+                completedBytes += blob.size;
+                setUploadPercent(Math.min(100, (completedBytes / totalBytes) * 100));
+                try { resolve(await getDownloadURL(task.snapshot.ref)); }
+                catch (e) { reject(e); }
+              },
+            );
+          });
           uploadedUrls.push(url);
         }
 
+        setAnalyzeStage('analyzing');
         setAnalyzedPayloadNames(nameSource.length === dataUris.length ? nameSource : dataUris.map((_, i) => `Document ${i + 1}`));
         processedPayload = uploadedUrls;
         finalTenderType = 'storage_urls';
@@ -469,6 +510,8 @@ export default function TenderAnalyzer() {
       setError(friendlyAnalysisError(err.message));
     } finally {
       setAnalyzing(false);
+      setAnalyzeStage('');
+      setUploadPercent(0);
     }
   };
 
@@ -933,17 +976,47 @@ export default function TenderAnalyzer() {
                          )}
                        </div>
                     </div>
-                    <div className="flex items-center gap-3">
-                      <button onClick={clearPdf} disabled={analyzing} className="text-slate-500 hover:text-red-500 p-2 disabled:opacity-50">
-                        <Trash2 className="w-5 h-5" />
-                      </button>
-                      <button
-                        onClick={handleAnalyze}
-                        disabled={analyzing || pageChecking}
-                        className="bg-gradient-to-br from-indigo-700 to-blue-600 hover:from-indigo-800 hover:to-blue-700 text-white px-6 py-2.5 rounded-lg font-semibold transition-all shadow-sm disabled:opacity-50 flex items-center gap-2"
-                      >
-                        {pageChecking ? <><Loader2 className="w-4 h-4 animate-spin" /> Checking...</> : analyzing ? <><Loader2 className="w-4 h-4 animate-spin" /> Analyzing</> : 'Analyze Document'}
-                      </button>
+                    <div className="flex items-center gap-3 shrink-0">
+                      {analyzing ? (
+                        <div className="flex flex-col gap-2 min-w-[180px]">
+                          <div className="flex items-center gap-2 text-sm font-medium text-slate-700">
+                            <Loader2 className="w-4 h-4 animate-spin text-indigo-500 shrink-0" />
+                            <span>
+                              {analyzeStage === 'uploading'
+                                ? `Uploading… ${Math.round(uploadPercent)}%`
+                                : pageChecking
+                                ? 'Checking pages…'
+                                : 'Analyzing tender…'}
+                            </span>
+                          </div>
+                          {analyzeStage === 'uploading' && (
+                            <div className="h-1.5 bg-slate-200 rounded-full overflow-hidden">
+                              <div
+                                className="h-full bg-indigo-500 rounded-full transition-all duration-300"
+                                style={{ width: `${uploadPercent}%` }}
+                              />
+                            </div>
+                          )}
+                        </div>
+                      ) : processingFile ? (
+                        <div className="flex items-center gap-2 text-sm text-slate-500">
+                          <Loader2 className="w-4 h-4 animate-spin text-slate-400" />
+                          <span>Reading file…</span>
+                        </div>
+                      ) : (
+                        <>
+                          <button onClick={clearPdf} className="text-slate-500 hover:text-red-500 p-2">
+                            <Trash2 className="w-5 h-5" />
+                          </button>
+                          <button
+                            onClick={handleAnalyze}
+                            disabled={pageChecking}
+                            className="bg-gradient-to-br from-indigo-700 to-blue-600 hover:from-indigo-800 hover:to-blue-700 text-white px-6 py-2.5 rounded-lg font-semibold transition-all shadow-sm disabled:opacity-50 flex items-center gap-2"
+                          >
+                            {pageChecking ? <><Loader2 className="w-4 h-4 animate-spin" /> Checking…</> : 'Analyze Document'}
+                          </button>
+                        </>
+                      )}
                     </div>
                   </div>
                 )}
@@ -970,23 +1043,57 @@ export default function TenderAnalyzer() {
                         </div>
                         <div>
                           <p className="font-semibold text-slate-800">{zipFileName}</p>
-                          <p className="text-sm text-slate-500">{zipFilesData.length} documents · {formatFileSize(zipFileSize)}</p>
-                          {zipFileSize > LARGE_FILE_BYTES && (
+                          <p className="text-sm text-slate-500">
+                            {processingFile
+                              ? 'Extracting documents…'
+                              : `${zipFilesData.length} document${zipFilesData.length !== 1 ? 's' : ''} · ${formatFileSize(zipFileSize)}`}
+                          </p>
+                          {!processingFile && zipFileSize > LARGE_FILE_BYTES && (
                             <p className="text-xs text-amber-600 mt-0.5">Large file — may take longer or exceed analysis limits.</p>
                           )}
                         </div>
                      </div>
-                     <div className="flex items-center gap-3">
-                       <button onClick={clearZip} disabled={analyzing} className="text-slate-500 hover:text-red-500 p-2 disabled:opacity-50">
-                         <Trash2 className="w-5 h-5" />
-                       </button>
-                       <button
-                         onClick={handleAnalyze}
-                         disabled={analyzing || pageChecking}
-                         className="bg-gradient-to-br from-indigo-700 to-blue-600 hover:from-indigo-800 hover:to-blue-700 text-white px-6 py-2.5 rounded-lg font-semibold transition-all shadow-sm disabled:opacity-50 flex items-center gap-2"
-                       >
-                         {pageChecking ? <><Loader2 className="w-4 h-4 animate-spin" /> Checking...</> : analyzing ? <><Loader2 className="w-4 h-4 animate-spin" /> Analyzing</> : 'Analyze ZIP'}
-                       </button>
+                     <div className="flex items-center gap-3 shrink-0">
+                       {analyzing ? (
+                         <div className="flex flex-col gap-2 min-w-[180px]">
+                           <div className="flex items-center gap-2 text-sm font-medium text-slate-700">
+                             <Loader2 className="w-4 h-4 animate-spin text-indigo-500 shrink-0" />
+                             <span>
+                               {analyzeStage === 'uploading'
+                                 ? `Uploading… ${Math.round(uploadPercent)}%`
+                                 : pageChecking
+                                 ? 'Checking pages…'
+                                 : 'Analyzing tender…'}
+                             </span>
+                           </div>
+                           {analyzeStage === 'uploading' && (
+                             <div className="h-1.5 bg-slate-200 rounded-full overflow-hidden">
+                               <div
+                                 className="h-full bg-indigo-500 rounded-full transition-all duration-300"
+                                 style={{ width: `${uploadPercent}%` }}
+                               />
+                             </div>
+                           )}
+                         </div>
+                       ) : processingFile ? (
+                         <div className="flex items-center gap-2 text-sm text-slate-500">
+                           <Loader2 className="w-4 h-4 animate-spin text-slate-400" />
+                           <span>Reading ZIP…</span>
+                         </div>
+                       ) : (
+                         <>
+                           <button onClick={clearZip} className="text-slate-500 hover:text-red-500 p-2">
+                             <Trash2 className="w-5 h-5" />
+                           </button>
+                           <button
+                             onClick={handleAnalyze}
+                             disabled={pageChecking}
+                             className="bg-gradient-to-br from-indigo-700 to-blue-600 hover:from-indigo-800 hover:to-blue-700 text-white px-6 py-2.5 rounded-lg font-semibold transition-all shadow-sm disabled:opacity-50 flex items-center gap-2"
+                           >
+                             {pageChecking ? <><Loader2 className="w-4 h-4 animate-spin" /> Checking…</> : 'Analyze ZIP'}
+                           </button>
+                         </>
+                       )}
                      </div>
                    </div>
                  )}

@@ -1050,10 +1050,20 @@ function logUsageEvent(event: {
   amountPaise?: number;
   email?: string;
 }): void {
-  getFirestore()
-    .collection('usage_events')
-    .add({ ...event, timestamp: Timestamp.now() })
-    .catch(err => console.warn('[UsageEvent] Failed to log:', err.message));
+  try {
+    // Strip undefined fields: Firestore Admin SDK throws synchronously on undefined
+    // values before a Promise is created, bypassing .catch().
+    const doc: Record<string, unknown> = { timestamp: Timestamp.now() };
+    for (const [k, v] of Object.entries(event)) {
+      if (v !== undefined) doc[k] = v;
+    }
+    getFirestore()
+      .collection('usage_events')
+      .add(doc)
+      .catch(err => console.warn('[UsageEvent] Failed to log (async):', err.message));
+  } catch (err: any) {
+    console.warn('[UsageEvent] Failed to log (sync):', err.message);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -2840,10 +2850,14 @@ app.post(
     logUsageEvent({ uid, type: 'modeb_probe', projectId, success: true });
     if ((req as any).isTrialDocRequest) incrementTrialDocUsed(uid);
 
-    // ── 5. Cache write (fire-and-forget) ──────────────────────────────────────
+    // ── 5. Cache write (fire-and-forget, but both sync and async errors caught) ──
     console.log(`${P} [INFO] cache-write (fire-and-forget) t=${mts()}`);
-    cacheRef.set({ ...probeResult, cachedAt: Timestamp.now() })
-      .catch(e => console.log(`${P} [FAIL] cache-write err=${(e as Error).message}`));
+    try {
+      cacheRef.set({ ...probeResult, cachedAt: Timestamp.now() })
+        .catch(e => console.log(`${P} [FAIL] cache-write (async) err=${(e as Error).message}`));
+    } catch (e: any) {
+      console.log(`${P} [FAIL] cache-write (sync) err=${e.message}`);
+    }
 
     // ── 6. Serialize and send response ────────────────────────────────────────
     const payload = {

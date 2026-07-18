@@ -69,7 +69,7 @@ export async function withRetry<T>(
 
 // ── Gemini models ─────────────────────────────────────────────────────────────
 
-export const MODEL_FALLBACK_ORDER = ['gemini-2.5-flash', 'gemini-2.0-flash'];
+export const MODEL_FALLBACK_ORDER = ['gemini-3.5-flash', 'gemini-3.1-flash-lite'];
 
 // ── Vision prompt ─────────────────────────────────────────────────────────────
 

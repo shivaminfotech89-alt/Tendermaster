@@ -108,6 +108,11 @@ function extractTurnoverIdx(n: string): number | null {
 
 const p = (r: string) => new RegExp(r, 'i');
 
+// Matches fill_area_description or notes values that describe a checkbox /
+// tick-box / radio-button — these fields must never have text overlaid.
+const CHOICE_FIELD_RE =
+  /\b(check\s*box|tick\s*box|radio(?:\s*button)?|circle.*(?:tick|select|check)|tick\s*mark|put.*tick|check\s*mark)\b/i;
+
 interface Rule {
   patterns: RegExp[];
   source: string;
@@ -377,6 +382,19 @@ const RULES: Rule[] = [
     status: 'skip',
     resolve: () => null,
   },
+  // ── J. Tick/choice selectors — never overlay text on pre-printed options ──
+  {
+    patterns: [
+      p('tick\\s*(which|applic)'),     // "tick whichever applicable"
+      p('whichever\\s*(is\\s*)?applic'), // "whichever is applicable"
+      p('put\\s*(?:a\\s*)?tick'),       // "put a tick mark"
+      p('(?:please\\s*)?tick\\s*mark'), // "please tick mark"
+      p('applicable\\s*tick'),
+    ],
+    source: '(tick/choice — leave blank)',
+    status: 'skip',
+    resolve: () => null,
+  },
 ];
 
 // ── Compound cells ────────────────────────────────────────────────────────────
@@ -428,6 +446,16 @@ export function mapFields(
   return detectedFields.map((field): MappedField => {
     const pdfRect = toPdfRect(field.fill_box, pageW, pageH);
     const n = norm(field.field_label);
+
+    // ── BUG 3: tick/checkbox detected from Gemini fill_area_description ───
+    // Runs before all other checks so a label match (e.g. "type of firm")
+    // never overwrites a tick-box selector on the actual form.
+    if (
+      CHOICE_FIELD_RE.test(field.fill_area_description) ||
+      CHOICE_FIELD_RE.test(field.notes ?? '')
+    ) {
+      return { ...field, pdfRect, value: '', source: '(tick/choice — leave blank)', status: 'skip' };
+    }
 
     // ── Special case 0: Compound cell ─────────────────────────────────────
     const compoundSpec = COMPOUND_SPECS.find(s => s.pattern.test(n));

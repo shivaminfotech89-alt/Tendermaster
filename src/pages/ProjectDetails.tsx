@@ -15,6 +15,7 @@ import { fetchWithAuth } from "../lib/api";
 import { extractPdfText, textToBase64, arrayBufferToBase64 } from "../lib/pdfToImage";
 import { useModeBFlow } from "../lib/modeb/useModeBFlow";
 import ModeBReviewPanel from "../components/modeb/ModeBReviewPanel";
+import { isTemplated, fillTemplate, saveCandidateTemplate } from "../lib/docTemplates";
 
 function formatFileSize(bytes: number): string {
   if (bytes >= 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
@@ -138,13 +139,14 @@ export default function ProjectDetails() {
   const [generatingDoc, setGeneratingDoc] = useState(false);
   const [generatedDoc, setGeneratedDoc] = useState("");
   const [isEditingDoc, setIsEditingDoc] = useState(false);
-  const [docType, setDocType] = useState("Covering Letter");
+  const [docType, setDocType] = useState("Cover Letter");
   const [useLetterhead, setUseLetterhead] = useState(false);
   const [extraInstructions, setExtraInstructions] = useState("");
   const [exactFormMode, setExactFormMode] = useState(false);
   const [exactFormFile, setExactFormFile] = useState<File | null>(null);
   const [formUploading, setFormUploading] = useState(false);
   const [generatedDocIsHtml, setGeneratedDocIsHtml] = useState(false);
+  const [generatedFromTemplate, setGeneratedFromTemplate] = useState(false);
   const [downloadingPdf, setDownloadingPdf] = useState(false);
   const [downloadingDocx, setDownloadingDocx] = useState(false);
   const [printWithoutLetterhead, setPrintWithoutLetterhead] = useState(false);
@@ -788,6 +790,20 @@ export default function ProjectDetails() {
     setGeneratedDoc("Generating...");
     setGeneratedDocIsHtml(false);
     setIsEditingDoc(false);
+    setGeneratedFromTemplate(false);
+
+    // ── Template path: instant generation, no API call ────────────────────────
+    if (!exactFormMode && isTemplated(docType, project.details?.tender_simplified?.authority_name)) {
+      const md = fillTemplate(docType, businessProfile, project.details, project.details?.tender_simplified?.authority_name);
+      if (md) {
+        setGeneratedDoc(md);
+        setGeneratedDocIsHtml(false);
+        setGeneratedFromTemplate(true);
+        setGeneratingDoc(false);
+        return;
+      }
+    }
+
     try {
       let exactFormUrl: string | undefined;
       let exactFormMimeType: string | undefined;
@@ -832,6 +848,14 @@ export default function ProjectDetails() {
       } else {
         setGeneratedDocIsHtml(false);
         setGeneratedDoc(sanitizeDocOutput(data.document));
+      }
+      // Save as candidate template for admin review (fire-and-forget)
+      if (!exactFormMode) {
+        saveCandidateTemplate(
+          docType,
+          data.document,
+          project.details?.tender_simplified?.authority_name ?? null,
+        );
       }
     } catch (e: any) {
       toast.error("Failed to generate: " + e.message);
@@ -1399,10 +1423,12 @@ export default function ProjectDetails() {
                 </div>
 
                 {!exactFormMode ? (
+                <div className="space-y-1.5">
+                <div className="flex items-center gap-2">
                 <select
                   value={docType}
                   onChange={e => setDocType(e.target.value)}
-                  className="w-full bg-white border border-indigo-200 text-indigo-900 text-sm rounded-lg focus:ring-indigo-500 focus:border-indigo-500 block p-2.5"
+                  className="flex-1 bg-white border border-indigo-200 text-indigo-900 text-sm rounded-lg focus:ring-indigo-500 focus:border-indigo-500 block p-2.5"
                 >
                   <optgroup label="Standard Documents">
                     <option>Cover Letter</option>
@@ -1424,6 +1450,13 @@ export default function ProjectDetails() {
                     </optgroup>
                   )}
                 </select>
+                {isTemplated(docType, project.details?.tender_simplified?.authority_name) && (
+                  <span className="flex items-center gap-1 px-2 py-1 rounded-md bg-emerald-50 border border-emerald-200 text-emerald-700 text-[10px] font-bold whitespace-nowrap shrink-0">
+                    ⚡ Instant
+                  </span>
+                )}
+                </div>
+                </div>
                 ) : (
                 <div>
                   <p className="text-xs text-indigo-700/80 mb-2">Upload the exact blank form or annexure issued by the tender authority (PDF). Vision AI detects every field and fills your business details — you review and confirm before the PDF is generated.</p>
@@ -1509,8 +1542,12 @@ export default function ProjectDetails() {
                 {generatedDoc && (
                    <div className="mt-6">
                       <div className="flex justify-between items-center mb-2">
-                        <span className="text-xs font-bold text-indigo-900 uppercase">Generated Output</span>
-                        
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-bold text-indigo-900 uppercase">Generated Output</span>
+                          {generatedFromTemplate && (
+                            <span className="px-2 py-0.5 rounded bg-emerald-50 border border-emerald-200 text-emerald-700 text-[10px] font-bold">⚡ Instant — from template</span>
+                          )}
+                        </div>
                         <div className="flex items-center gap-3">
                            {!exactFormMode && (
                              <label className="flex items-center gap-1.5 text-xs font-medium text-slate-700 cursor-pointer">

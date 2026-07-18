@@ -8,7 +8,7 @@ import {
 import {
   Users, Activity, Search, ChevronDown, ChevronRight,
   FileText, CreditCard, Loader2, CheckCircle2, AlertCircle,
-  ArrowLeft, Shield,
+  ArrowLeft, Shield, LayoutTemplate, Check, X,
 } from "lucide-react";
 import { toast } from "react-hot-toast";
 import { fetchWithAuth } from "../lib/api";
@@ -67,7 +67,7 @@ interface Payment { paymentId: string; credits: number; processedAt: string | nu
 
 export default function AdminPanel() {
   const { user } = useAuth();
-  const [activeTab, setActiveTab] = useState<"users" | "activity">("users");
+  const [activeTab, setActiveTab] = useState<"users" | "activity" | "templates">("users");
 
   // ── users list ─────────────────────────────────────────────────────────────
   const [users, setUsers] = useState<UserRow[]>([]);
@@ -170,6 +170,41 @@ export default function AdminPanel() {
       .finally(() => setLogsLoading(false));
   }, [activeTab]);
 
+  // ── candidate templates ────────────────────────────────────────────────────
+  interface CandidateRow {
+    id: string;
+    documentType: string;
+    authority: string | null;
+    source: string;
+    generatedContent: string;
+    createdAt?: any;
+    reviewStatus: "pending" | "approved" | "rejected";
+  }
+
+  const [candidates, setCandidates] = useState<CandidateRow[]>([]);
+  const [candidatesLoading, setCandidatesLoading] = useState(false);
+  const [expandedCandidateId, setExpandedCandidateId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (activeTab !== "templates") return;
+    setCandidatesLoading(true);
+    getDocs(query(collection(db, "candidate_templates"), orderBy("createdAt", "desc"), limit(100)))
+      .then(snap => setCandidates(snap.docs.map(d => ({ id: d.id, ...d.data() } as CandidateRow))))
+      .catch(console.error)
+      .finally(() => setCandidatesLoading(false));
+  }, [activeTab]);
+
+  const updateCandidateStatus = async (id: string, status: "approved" | "rejected") => {
+    try {
+      await updateDoc(doc(db, "candidate_templates", id), { reviewStatus: status });
+      await logAction(status === "approved" ? "TEMPLATE_APPROVE" : "TEMPLATE_REJECT", { candidateId: id });
+      setCandidates(prev => prev.map(c => c.id === id ? { ...c, reviewStatus: status } : c));
+      toast.success(status === "approved" ? "Template approved" : "Template rejected");
+    } catch (e: any) {
+      toast.error(e.message);
+    }
+  };
+
   // ── stat cards ─────────────────────────────────────────────────────────────
   const totalUsers = users.length;
   const activeUsers = users.filter(u => {
@@ -221,6 +256,9 @@ export default function AdminPanel() {
         </button>
         <button onClick={() => setActiveTab("activity")} className={TAB_CLS("activity")}>
           <Activity className="w-4 h-4 inline mr-1.5 -mt-0.5" /> Activity Log
+        </button>
+        <button onClick={() => setActiveTab("templates")} className={TAB_CLS("templates")}>
+          <LayoutTemplate className="w-4 h-4 inline mr-1.5 -mt-0.5" /> Templates
         </button>
       </div>
 
@@ -383,6 +421,110 @@ export default function AdminPanel() {
               })}
             </div>
           )}
+        </div>
+      )}
+
+      {/* ── TEMPLATES TAB ── */}
+      {activeTab === "templates" && (
+        <div className="space-y-6">
+          {/* Hardcoded approved templates */}
+          <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+            <div className="p-4 border-b border-slate-100">
+              <h2 className="font-bold text-slate-800 flex items-center gap-2">
+                <LayoutTemplate className="w-4 h-4 text-emerald-500" /> Active Templates
+                <span className="ml-1 text-xs font-normal text-slate-400">(hardcoded — always available)</span>
+              </h2>
+            </div>
+            <div className="divide-y divide-slate-100">
+              {[
+                { docType: "Cover Letter", authority: "generic", category: "bid" },
+                { docType: "Bid Submission Letter", authority: "generic", category: "bid" },
+                { docType: "Company Profile Summary", authority: "generic", category: "company" },
+                { docType: "Technical Proposal", authority: "generic", category: "technical" },
+              ].map(t => (
+                <div key={t.docType} className="px-4 py-3 flex items-center gap-3">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <span className="text-sm font-medium text-slate-800">{t.docType}</span>
+                    <span className="ml-2 text-xs text-slate-400">{t.authority} · {t.category}</span>
+                  </div>
+                  <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">Active</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Candidate templates from Gemini */}
+          <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+            <div className="p-4 border-b border-slate-100 flex items-center justify-between">
+              <h2 className="font-bold text-slate-800 flex items-center gap-2">
+                <FileText className="w-4 h-4 text-amber-500" /> Candidate Templates
+                <span className="ml-1 text-xs font-normal text-slate-400">(AI-generated, awaiting review)</span>
+              </h2>
+              <span className="text-xs text-slate-400">{candidates.length} total</span>
+            </div>
+            {candidatesLoading ? (
+              <div className="p-10 flex justify-center"><Loader2 className="w-6 h-6 animate-spin text-blue-600" /></div>
+            ) : candidates.length === 0 ? (
+              <p className="text-center text-slate-400 text-sm py-10">No candidate templates yet. They appear here after users generate documents with AI.</p>
+            ) : (
+              <div className="divide-y divide-slate-100">
+                {candidates.map(c => {
+                  const isExpanded = expandedCandidateId === c.id;
+                  const statusColors: Record<string, string> = {
+                    pending: "bg-amber-50 text-amber-700 border-amber-200",
+                    approved: "bg-emerald-50 text-emerald-700 border-emerald-200",
+                    rejected: "bg-red-50 text-red-600 border-red-200",
+                  };
+                  return (
+                    <div key={c.id}>
+                      <div
+                        className="px-4 py-3 flex items-center gap-3 hover:bg-slate-50/60 cursor-pointer"
+                        onClick={() => setExpandedCandidateId(isExpanded ? null : c.id)}
+                      >
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-sm font-medium text-slate-800">{c.documentType}</span>
+                            {c.authority && <span className="text-xs text-slate-400">{c.authority}</span>}
+                            <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold border ${statusColors[c.reviewStatus] || statusColors.pending}`}>
+                              {c.reviewStatus}
+                            </span>
+                          </div>
+                          <div className="text-[10px] text-slate-400 mt-0.5">
+                            {c.source} · {fmtDate(c.createdAt)}
+                          </div>
+                        </div>
+                        {c.reviewStatus === "pending" && (
+                          <div className="flex items-center gap-2 shrink-0" onClick={e => e.stopPropagation()}>
+                            <button
+                              onClick={() => updateCandidateStatus(c.id, "approved")}
+                              className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs font-semibold hover:bg-emerald-100 transition-colors"
+                            >
+                              <Check className="w-3 h-3" /> Approve
+                            </button>
+                            <button
+                              onClick={() => updateCandidateStatus(c.id, "rejected")}
+                              className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-red-50 border border-red-200 text-red-600 text-xs font-semibold hover:bg-red-100 transition-colors"
+                            >
+                              <X className="w-3 h-3" /> Reject
+                            </button>
+                          </div>
+                        )}
+                        <ChevronRight className={`w-4 h-4 text-slate-400 shrink-0 transition-transform ${isExpanded ? "rotate-90" : ""}`} />
+                      </div>
+                      {isExpanded && (
+                        <div className="px-4 pb-4">
+                          <pre className="text-[11px] text-slate-700 bg-slate-50 border border-slate-200 rounded-lg p-3 overflow-auto max-h-80 whitespace-pre-wrap font-mono">
+                            {c.generatedContent}
+                          </pre>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
         </div>
       )}
 

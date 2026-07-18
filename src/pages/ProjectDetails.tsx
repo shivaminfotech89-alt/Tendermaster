@@ -16,6 +16,9 @@ import { extractPdfText, textToBase64, arrayBufferToBase64 } from "../lib/pdfToI
 import { useModeBFlow } from "../lib/modeb/useModeBFlow";
 import ModeBReviewPanel from "../components/modeb/ModeBReviewPanel";
 import { isTemplated, fillTemplate, saveCandidateTemplate } from "../lib/docTemplates";
+import BOQSection from "../components/boq/BOQSection";
+import type { BOQData, BidSnapshotRow } from "../lib/boq/types";
+import { INITIAL_BOQ } from "../lib/boq/types";
 
 function formatFileSize(bytes: number): string {
   if (bytes >= 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
@@ -147,6 +150,10 @@ export default function ProjectDetails() {
   const [formUploading, setFormUploading] = useState(false);
   const [generatedDocIsHtml, setGeneratedDocIsHtml] = useState(false);
   const [generatedFromTemplate, setGeneratedFromTemplate] = useState(false);
+  const [boq, setBoqState] = useState<BOQData>({ ...INITIAL_BOQ });
+  const [boqChangedSinceDocGen, setBoqChangedSinceDocGen] = useState(false);
+  const [snapshots, setSnapshots] = useState<BidSnapshotRow[]>([]);
+  const [snapshotsLoading, setSnapshotsLoading] = useState(false);
   const [downloadingPdf, setDownloadingPdf] = useState(false);
   const [downloadingDocx, setDownloadingDocx] = useState(false);
   const [printWithoutLetterhead, setPrintWithoutLetterhead] = useState(false);
@@ -188,6 +195,7 @@ export default function ProjectDetails() {
   // Uploaded docs
   const [uploadedFiles, setUploadedFiles] = useState<{name: string, size: string, type: string, bytes?: number}[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const boqSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Chatbot state
   const [chatInput, setChatInput] = useState("");
@@ -242,8 +250,10 @@ export default function ProjectDetails() {
           if (data.revenue) setRevenue(data.revenue);
           
           if (data.checkedItems) setCheckedItems(data.checkedItems);
-          
+
           if (data.uploadedFiles) setUploadedFiles(data.uploadedFiles);
+
+          if (data.boq) setBoqState(data.boq);
         }
         
         if (user) {
@@ -301,6 +311,26 @@ export default function ProjectDetails() {
     loadPayments();
   }, [projectId, user]);
 
+  useEffect(() => {
+    if (!projectId || !user) return;
+    const loadSnapshots = async () => {
+      setSnapshotsLoading(true);
+      try {
+        const q = query(
+          collection(db, 'saved_tenders', projectId, 'bid_snapshots'),
+          orderBy('version', 'desc'),
+        );
+        const snap = await getDocs(q);
+        setSnapshots(snap.docs.map(d => ({ id: d.id, ...d.data() } as BidSnapshotRow)));
+      } catch (e) {
+        console.error('Failed to load bid snapshots:', e);
+      } finally {
+        setSnapshotsLoading(false);
+      }
+    };
+    loadSnapshots();
+  }, [projectId, user]);
+
   const handleSaveName = async () => {
     if (!projectId || !projectName.trim()) return;
     try {
@@ -312,6 +342,41 @@ export default function ProjectDetails() {
       console.error(e);
       console.log("Failed to rename project");
     }
+  };
+
+  const handleBoqChange = (updated: BOQData) => {
+    setBoqState(updated);
+    if (generatedDoc) setBoqChangedSinceDocGen(true);
+    if (!projectId) return;
+    if (boqSaveTimerRef.current) clearTimeout(boqSaveTimerRef.current);
+    boqSaveTimerRef.current = setTimeout(() => {
+      updateDoc(doc(db, 'saved_tenders', projectId), { boq: updated }).catch(console.error);
+    }, 1000);
+  };
+
+  const handleFinalize = async (
+    data: Omit<BidSnapshotRow, 'id' | 'createdAt' | 'createdBy' | 'version'>,
+  ) => {
+    if (!projectId || !user) return;
+    const colRef = collection(db, 'saved_tenders', projectId, 'bid_snapshots');
+    const nextVersion = (snapshots[0]?.version ?? 0) + 1;
+    const docRef = await addDoc(colRef, {
+      ...data,
+      version: nextVersion,
+      createdAt: serverTimestamp(),
+      createdBy: user.uid,
+    });
+    const newSnap: BidSnapshotRow = {
+      id: docRef.id,
+      ...data,
+      version: nextVersion,
+      createdAt: new Date(),
+      createdBy: user.uid,
+    };
+    setSnapshots(prev => [newSnap, ...prev]);
+    await updateDoc(doc(db, 'saved_tenders', projectId), {
+      'boq.finalisedAt': serverTimestamp(),
+    });
   };
 
   const saveCalculations = async () => {
@@ -794,11 +859,12 @@ export default function ProjectDetails() {
 
     // ── Template path: instant generation, no API call ────────────────────────
     if (!exactFormMode && isTemplated(docType, project.details?.tender_simplified?.authority_name)) {
-      const md = fillTemplate(docType, businessProfile, project.details, project.details?.tender_simplified?.authority_name);
+      const md = fillTemplate(docType, businessProfile, project.details, project.details?.tender_simplified?.authority_name, boq);
       if (md) {
         setGeneratedDoc(md);
         setGeneratedDocIsHtml(false);
         setGeneratedFromTemplate(true);
+        setBoqChangedSinceDocGen(false);
         setGeneratingDoc(false);
         return;
       }
@@ -849,6 +915,7 @@ export default function ProjectDetails() {
         setGeneratedDocIsHtml(false);
         setGeneratedDoc(sanitizeDocOutput(data.document));
       }
+      setBoqChangedSinceDocGen(false);
       // Save as candidate template for admin review (fire-and-forget)
       if (!exactFormMode) {
         saveCandidateTemplate(
@@ -1399,6 +1466,13 @@ export default function ProjectDetails() {
            {activeTab === 'docs' && (
              <div className="space-y-8">
 
+           {boqChangedSinceDocGen && boq.quotedAmount != null && (
+             <div className="flex items-center gap-2 bg-amber-50 border border-amber-200 rounded-lg px-4 py-2.5 text-sm text-amber-800">
+               <AlertCircle className="w-4 h-4 text-amber-500 shrink-0" />
+               BOQ has been updated since this document was generated. Regenerate to include the latest bid figures.
+             </div>
+           )}
+
            {/* Generate Documents */}
            <div className="bg-gradient-to-br from-indigo-50 to-blue-50 rounded-xl border border-indigo-100 shadow-sm overflow-hidden">
              <div className="p-5 border-b border-indigo-100/50">
@@ -1691,7 +1765,18 @@ export default function ProjectDetails() {
         {/* Right Column: Financial Calculation */}
         {activeTab === 'calculator' && (
         <div className="lg:col-span-2 space-y-8">
-          
+
+           <BOQSection
+             analysisResult={project.details}
+             boq={boq}
+             setBoq={handleBoqChange}
+             totalCost={totalExpense}
+             onRevenueSync={(amount) => setRevenue(amount)}
+             onFinalize={handleFinalize}
+             snapshots={snapshots}
+             snapshotsLoading={snapshotsLoading}
+           />
+
            {project.details?.bid_recommendation ? (
              <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden flex flex-col md:flex-row divide-y md:divide-y-0 md:divide-x divide-slate-100">
                {/* Bid Recommendation */}

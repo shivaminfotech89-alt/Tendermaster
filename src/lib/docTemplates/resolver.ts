@@ -124,6 +124,37 @@ const PLACEHOLDERS: Record<string, Resolver> = {
     return `1. ${BLANK}\n2. ${BLANK}\n3. ${BLANK}`;
   },
 
+  // ── BOQ / Bid Pricing placeholders ────────────────────────────────────────
+  boqType: (c) => v(c.boq?.boqType),
+  estimatedAmount: (c) => {
+    const n = c.boq?.estimatedAmount;
+    return (n != null && Number.isFinite(n)) ? `₹${n.toLocaleString('en-IN')}` : BLANK;
+  },
+  estimatedAmountConfirmed: (c) => c.boq?.estimatedAmountConfirmed ? 'Yes' : BLANK,
+  percentage: (c) => {
+    const pct = c.boq?.percentage;
+    return (pct != null && Number.isFinite(pct)) ? `${pct}%` : BLANK;
+  },
+  aboveBelow: (c) => v(c.boq?.aboveBelow),
+  quotedAmount: (c) => {
+    const n = c.boq?.quotedAmount;
+    return (n != null && Number.isFinite(n)) ? `₹${n.toLocaleString('en-IN')}` : BLANK;
+  },
+  quotedAmountWords: (c) => v(c.boq?.quotedAmountWords),
+  profitPercentage: (c) => {
+    const n = c.boq?.profitPercent;
+    return (n != null && Number.isFinite(n)) ? `${n.toFixed(2)}%` : BLANK;
+  },
+  grossProfit: (c) => {
+    const n = c.boq?.grossProfit;
+    return (n != null && Number.isFinite(n)) ? `₹${n.toLocaleString('en-IN')}` : BLANK;
+  },
+  marginPercentage: (c) => {
+    const n = c.boq?.marginPercent;
+    return (n != null && Number.isFinite(n)) ? `${n.toFixed(2)}%` : BLANK;
+  },
+  boqRemarks: (c) => v(c.boq?.remarks),
+
   // ── Derived: enclosures list from required_documents_checklist ────────────
   enclosuresList: (c) => {
     const header = `| Sr. No. | Document | Status |\n|---|---|---|`;

@@ -1809,6 +1809,21 @@ MODE 1: CONTRACT PROFILE ANALYSIS & MATCHING
     "amount": "₹50,000 (use 'Not specified' if the document does not state an EMD requirement)",
     "mode": "DD / Bank Guarantee / Online / Exempted for MSME",
     "msme_exemption": false
+  },
+  "boq_details": {
+    "boq_type": "percentage_rate | item_rate | lump_sum_epc | hybrid | unknown — extract from explicit tender clause (e.g. 'Bids shall be submitted as a percentage above/below the schedule of rates' → percentage_rate). Use 'unknown' if not stated.",
+    "boq_type_confidence": "high (explicit clause) | medium (inferred from structure) | low (unclear)",
+    "financial_values": [
+      {
+        "label": "Estimated Amount Put to Tender",
+        "value_raw": "₹1,25,00,000",
+        "value_number": 12500000,
+        "page": 3,
+        "clause": "Clause 3.1",
+        "source_text": "The estimated amount put to tender is ₹1,25,00,000"
+      }
+    ],
+    "suggested_estimated_index": 0
   }
 }`;
 
@@ -1978,6 +1993,30 @@ MODE 1: CONTRACT PROFILE ANALYSIS & MATCHING
               },
               required: ["amount", "mode", "msme_exemption"],
             },
+            boq_details: {
+              type: "object",
+              properties: {
+                boq_type: { type: "string" },
+                boq_type_confidence: { type: "string" },
+                financial_values: {
+                  type: "array",
+                  items: {
+                    type: "object",
+                    properties: {
+                      label:       { type: "string" },
+                      value_raw:   { type: "string" },
+                      value_number:{ type: "number" },
+                      page:        { type: "number" },
+                      clause:      { type: "string" },
+                      source_text: { type: "string" },
+                    },
+                    required: ["label", "value_raw", "value_number"],
+                  },
+                },
+                suggested_estimated_index: { type: "number" },
+              },
+              required: ["boq_type", "boq_type_confidence", "financial_values"],
+            },
           },
           required: [
             "compatibility",
@@ -1991,6 +2030,7 @@ MODE 1: CONTRACT PROFILE ANALYSIS & MATCHING
             "winning_probability",
             "compliance_matrix",
             "emd_details",
+            "boq_details",
           ],
         },
       },

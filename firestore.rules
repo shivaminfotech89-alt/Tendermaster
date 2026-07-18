@@ -117,5 +117,18 @@ service cloud.firestore {
       allow read, create, delete: if isSignedIn()
         && get(/databases/$(database)/documents/saved_tenders/$(savedId)).data.userId == request.auth.uid;
     }
+
+    match /saved_tenders/{savedId}/bid_snapshots/{snapshotId} {
+      allow read: if isSignedIn() && (resource.data.createdBy == request.auth.uid || isAdmin());
+      allow create: if isSignedIn()
+        && request.resource.data.createdBy == request.auth.uid
+        && request.resource.data.estimatedAmountConfirmed == true
+        && request.resource.data.keys().hasAll([
+             'version', 'boqType', 'estimatedAmount', 'estimatedAmountConfirmed',
+             'aboveBelow', 'percentage', 'quotedAmount', 'quotedAmountWords',
+             'totalCost', 'grossProfit', 'createdAt', 'createdBy'
+           ]);
+      allow update, delete: if false;
+    }
   }
 }

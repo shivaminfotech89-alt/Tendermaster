@@ -68,8 +68,23 @@ export interface FullTenderAnalysis {
   }>;
 }
 
+export interface BOQForPlaceholders {
+  boqType?: string;
+  estimatedAmount?: number | null;
+  estimatedAmountConfirmed?: boolean;
+  percentage?: number | null;
+  aboveBelow?: 'above' | 'below';
+  quotedAmount?: number | null;
+  quotedAmountWords?: string | null;
+  profitPercent?: number | null;
+  grossProfit?: number | null;
+  marginPercent?: number | null;
+  remarks?: string;
+}
+
 export interface PlaceholderContext {
   profile: BusinessProfile | null;
   analysis: FullTenderAnalysis | null;
   directors?: Array<{ name: string; designation: string; din: string; pan: string }>;
+  boq?: BOQForPlaceholders;
 }

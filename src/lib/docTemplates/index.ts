@@ -1,4 +1,4 @@
-import type { ApprovedTemplate, TemplateAuthority, PlaceholderContext, CandidateTemplate } from './types';
+import type { ApprovedTemplate, TemplateAuthority, PlaceholderContext, CandidateTemplate, BOQForPlaceholders } from './types';
 import type { BusinessProfile } from '../modeb/types';
 import { resolve, extractPlaceholders } from './resolver';
 import { COVER_LETTER } from './templates/generic/coverLetter';
@@ -48,6 +48,7 @@ export function fillTemplate(
   profile: BusinessProfile | null,
   analysis: any | null,
   authorityName?: string | null,
+  boq?: BOQForPlaceholders | null,
 ): string | null {
   const template = findTemplate(docType, authorityName);
   if (!template) return null;
@@ -55,6 +56,7 @@ export function fillTemplate(
     profile,
     analysis,
     directors: (profile as any)?.directors ?? [],
+    boq: boq ?? undefined,
   };
   return resolve(template.content, ctx);
 }

@@ -18,6 +18,9 @@ import { countPdfPages, extractPdfText, textToBase64, arrayBufferToBase64 } from
 import { useModeBFlow } from "../lib/modeb/useModeBFlow";
 import ModeBReviewPanel from "../components/modeb/ModeBReviewPanel";
 import { isTemplated, fillTemplate, saveCandidateTemplate } from "../lib/docTemplates";
+import BOQSection from "../components/boq/BOQSection";
+import type { BOQData } from "../lib/boq/types";
+import { INITIAL_BOQ } from "../lib/boq/types";
 
 const CollapsibleSection = ({ title, defaultOpen = true, children }: { title: string, defaultOpen?: boolean, children: React.ReactNode }) => {
   const [isOpen, setIsOpen] = useState(defaultOpen);
@@ -163,6 +166,10 @@ export default function TenderAnalyzer() {
   const [generatedDocIsHtml, setGeneratedDocIsHtml] = useState(false);
   const [generatedFromTemplate, setGeneratedFromTemplate] = useState(false);
   const [downloadingPdf, setDownloadingPdf] = useState(false);
+
+  // BOQ state (session only — not persisted for TenderAnalyzer)
+  const [boq, setBoq] = useState<BOQData>({ ...INITIAL_BOQ });
+  const [boqChangedSinceDocGen, setBoqChangedSinceDocGen] = useState(false);
   const [downloadingDocx, setDownloadingDocx] = useState(false);
   const [printWithoutLetterhead, setPrintWithoutLetterhead] = useState(false);
   const [savedDocs, setSavedDocs] = useState<SavedDoc[]>([]);
@@ -171,6 +178,11 @@ export default function TenderAnalyzer() {
   const [savedDocDownloadingId, setSavedDocDownloadingId] = useState<string | null>(null);
   const [savedDocDownloadingType, setSavedDocDownloadingType] = useState<'pdf' | 'docx' | null>(null);
   const [showNameDialog, setShowNameDialog] = useState(false);
+
+  const handleBoqChange = (updated: BOQData) => {
+    setBoq(updated);
+    if (generatedDoc) setBoqChangedSinceDocGen(true);
+  };
 
   // Mode B Vision fill — onSave handler + state machine hook
   const handleModeBSave = async (blob: Blob, filename: string) => {
@@ -662,10 +674,11 @@ export default function TenderAnalyzer() {
     setIsEditingDoc(false);
     setDocExported(false);
     setGeneratedFromTemplate(false);
+    setBoqChangedSinceDocGen(false);
 
     // ── Template path: instant generation, no API call ────────────────────────
     if (!exactFormMode && isTemplated(docType, analysisResult?.tender_simplified?.authority_name)) {
-      const md = fillTemplate(docType, businessProfile, analysisResult, analysisResult?.tender_simplified?.authority_name);
+      const md = fillTemplate(docType, businessProfile, analysisResult, analysisResult?.tender_simplified?.authority_name, boq);
       if (md) {
         setGeneratedDoc(md);
         setGeneratedDocIsHtml(false);
@@ -1233,6 +1246,15 @@ export default function TenderAnalyzer() {
             {activeTab === 'calculator' && role === 'free' && <LockedOverlay />}
             {activeTab === 'calculator' && role !== 'free' && (
               <div className="space-y-6">
+                {/* BOQ & Bid Pricing */}
+                <BOQSection
+                  analysisResult={analysisResult}
+                  boq={boq}
+                  setBoq={handleBoqChange}
+                  totalCost={totalExpense}
+                  onRevenueSync={(amount) => setRevenue(amount)}
+                />
+
                 {/* AI Bid Recommendation — shown only when the field is present */}
                 {analysisResult?.bid_recommendation ? (
                 <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden flex flex-col md:flex-row divide-y md:divide-y-0 md:divide-x divide-slate-100">
@@ -1652,6 +1674,13 @@ export default function TenderAnalyzer() {
              {/* Generate Documents */}
              {activeTab === 'docs' && role === 'free' && <LockedOverlay />}
              {activeTab === 'docs' && role !== 'free' && (
+             <>
+             {boqChangedSinceDocGen && boq.quotedAmount != null && (
+               <div className="flex items-center gap-2 mb-4 bg-amber-50 border border-amber-200 rounded-lg px-4 py-2.5 text-sm text-amber-800">
+                 <AlertCircle className="w-4 h-4 text-amber-500 shrink-0" />
+                 BOQ has been updated since this document was generated. Regenerate to include the latest bid figures.
+               </div>
+             )}
              <div className="bg-gradient-to-br from-indigo-50 to-blue-50 rounded-xl border border-indigo-100 shadow-sm overflow-hidden mb-6">
                <div className="p-5 border-b border-indigo-100/50">
                   <h3 className="font-semibold text-indigo-900 flex items-center gap-2"><FileText className="w-5 h-5" /> Auto-Generate Documents</h3>
@@ -1936,6 +1965,7 @@ export default function TenderAnalyzer() {
                   )}
                </div>
              </div>
+             </>
              )}
 
              {/* Integrated Chatbot for active tender */}

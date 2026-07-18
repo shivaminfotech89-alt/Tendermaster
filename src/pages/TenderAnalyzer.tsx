@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { useAuth } from "../auth/AuthProvider";
 import { useAnalyzerStore } from "../context/AnalyzerContext";
-import { Upload, X, Loader2, Sparkles, AlertCircle, FileText, CheckCircle2, ChevronRight, Activity, CalendarDays, Link as LinkIcon, File, MessageSquare, Send, Calculator, Building, Target, Download, Edit2, Trash2, Plus, Minus, ArrowLeft, Info, Save, Scan } from "lucide-react";
+import { Upload, X, Loader2, Sparkles, AlertCircle, FileText, CheckCircle2, ChevronRight, Activity, CalendarDays, File, MessageSquare, Send, Calculator, Building, Target, Download, Edit2, Trash2, Plus, Minus, ArrowLeft, Info, Save, Scan } from "lucide-react";
 import { collection, getDocs, query, addDoc, orderBy, serverTimestamp, doc, updateDoc, Timestamp } from "firebase/firestore";
 import { ref as storageRef, uploadBytes, getDownloadURL } from "firebase/storage";
 import { db, storage } from "../lib/firebase";
@@ -97,8 +97,7 @@ export default function TenderAnalyzer() {
   
   const { analyzing, progress, analysisResult, payloadContext, savedProjectId, setAnalyzing, setProgress, setAnalysisResult, setPayloadContext, setSavedProjectId, clearAnalysis } = useAnalyzerStore();
 
-  const [inputType, setInputType] = useState<'url' | 'pdf' | 'zip'>('pdf');
-  const [tenderUrl, setTenderUrl] = useState("");
+  const [inputType, setInputType] = useState<'pdf' | 'zip'>('pdf');
   const [tenderPdfBase64, setTenderPdfBase64] = useState<string | string[]>("");
   const [pdfFileName, setPdfFileName] = useState("");
   const [pdfFileNames, setPdfFileNames] = useState<string[]>([]);
@@ -380,10 +379,7 @@ export default function TenderAnalyzer() {
   const handleAnalyze = async () => {
     let payload: string | string[] = "";
     
-    if (inputType === 'url') {
-      if (!tenderUrl.trim()) return setError("Please enter a valid tender URL.");
-      payload = tenderUrl;
-    } else if (inputType === 'pdf') {
+    if (inputType === 'pdf') {
       if (!tenderPdfBase64 || tenderPdfBase64.length === 0) return setError("Please upload a PDF document.");
       payload = tenderPdfBase64;
     } else if (inputType === 'zip') {
@@ -393,34 +389,32 @@ export default function TenderAnalyzer() {
     
     setError("");
 
-    // Page-count pre-check for PDF/ZIP uploads (URL inputs can't be counted client-side)
-    if (inputType !== 'url') {
-      setPageChecking(true);
-      try {
-        const dataUris: string[] = Array.isArray(payload) ? payload : [payload as string];
-        let totalPages = 0;
-        for (const uri of dataUris) {
-          if (!uri.startsWith('data:application/pdf')) continue;
-          try {
-            totalPages += await countPdfPages(uri);
-          } catch {
-            // unparseable PDF — let the server enforce the limit
-          }
+    // Page-count pre-check — reject uploads that exceed the 1000-page server limit
+    setPageChecking(true);
+    try {
+      const dataUris: string[] = Array.isArray(payload) ? payload : [payload as string];
+      let totalPages = 0;
+      for (const uri of dataUris) {
+        if (!uri.startsWith('data:application/pdf')) continue;
+        try {
+          totalPages += await countPdfPages(uri);
+        } catch {
+          // unparseable PDF — let the server enforce the limit
         }
-        if (totalPages > 1000) {
-          setError(
-            `These documents total ${totalPages} pages, over the 1000-page analysis limit. ` +
-            `Tip: analyze your main documents first (main tender + eligibility docs), then open the ` +
-            `saved project and use "Add document / re-analyze" to include the remaining files in ` +
-            `smaller batches, keeping each batch under 1000 pages.`
-          );
-          return;
-        }
-      } catch {
-        // counting failed entirely — proceed and let the server enforce the limit
-      } finally {
-        setPageChecking(false);
       }
+      if (totalPages > 1000) {
+        setError(
+          `These documents total ${totalPages} pages, over the 1000-page analysis limit. ` +
+          `Tip: analyze your main documents first (main tender + eligibility docs), then open the ` +
+          `saved project and use "Add document / re-analyze" to include the remaining files in ` +
+          `smaller batches, keeping each batch under 1000 pages.`
+        );
+        return;
+      }
+    } catch {
+      // counting failed entirely — proceed and let the server enforce the limit
+    } finally {
+      setPageChecking(false);
     }
 
     setAnalyzing(true);
@@ -973,12 +967,6 @@ export default function TenderAnalyzer() {
             >
               <Upload className="w-4 h-4" /> ZIP Folder (PDF, Excel, CSV)
             </button>
-            <button
-              onClick={() => setInputType('url')}
-              className={`flex-1 py-4 px-6 text-sm font-semibold border-b-2 flex justify-center items-center gap-2 whitespace-nowrap ${inputType === 'url' ? 'border-indigo-600 text-indigo-700 bg-white' : 'border-transparent text-slate-500 hover:text-slate-700'}`}
-            >
-              <LinkIcon className="w-4 h-4" /> Web Link
-            </button>
           </div>
           <div className="p-6 md:p-8">
             {error && (
@@ -1138,26 +1126,6 @@ export default function TenderAnalyzer() {
                </div>
             )}
 
-            {inputType === 'url' && (
-              <div className="space-y-4">
-                <div className="flex gap-2">
-                  <input 
-                    type="url"
-                    value={tenderUrl}
-                    onChange={e => setTenderUrl(e.target.value)}
-                    placeholder="https://gem.gov.in/tender/..." 
-                    className="flex-1 px-4 py-3 rounded-lg border border-slate-300 outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all"
-                  />
-                  <button
-                    onClick={() => { if(tenderUrl) handleAnalyze(); }}
-                    disabled={!tenderUrl || analyzing}
-                    className="bg-gradient-to-br from-indigo-700 to-blue-600 hover:from-indigo-800 hover:to-blue-700 text-white px-6 py-3 rounded-lg font-semibold transition-all shadow-sm disabled:opacity-50"
-                  >
-                    Analyze
-                  </button>
-                </div>
-              </div>
-            )}
           </div>
         </div>
       )}

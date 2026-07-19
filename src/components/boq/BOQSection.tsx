@@ -48,6 +48,15 @@ export default function BOQSection({
   const [selectedCandidateIdx, setSelectedCandidateIdx] = useState<number | null>(null);
   const [finalizing, setFinalizing] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
+  const [isExpanded, setIsExpanded] = useState(() => {
+    try { return localStorage.getItem('boq-section-expanded') !== 'false'; }
+    catch { return true; }
+  });
+  const handleToggle = () => setIsExpanded(prev => {
+    const next = !prev;
+    try { localStorage.setItem('boq-section-expanded', String(next)); } catch {}
+    return next;
+  });
 
   const candidates: FinancialValueCandidate[] =
     boq.financialCandidates ?? analysisResult?.boq_details?.financial_values ?? [];
@@ -74,6 +83,17 @@ export default function BOQSection({
       sourceText: v.source_text,
     }));
 
+    // When the API returns no boq_details (current state), preserve whatever candidates
+    // and amount were already loaded from Firestore. Without this guard, re-initialising
+    // with an empty rawCandidates array clears the pre-filled amount and disables the
+    // confirm button even though the candidates are already visible on screen.
+    const effectiveCandidates = rawCandidates.length > 0
+      ? rawCandidates
+      : (boq.financialCandidates ?? []);
+    const effectiveIdx = rawCandidates.length > 0
+      ? (bd?.suggested_estimated_index ?? 0)
+      : (boq.suggestedCandidateIndex ?? 0);
+
     // Determine BOQ type: API field (future) > client detection > leave as-is.
     // Only auto-set on HIGH confidence to prevent false positives (e.g. Annual Rate Contract
     // tenders sharing generic "above the estimated amount" language).
@@ -97,34 +117,35 @@ export default function BOQSection({
       }
     }
 
-    const suggestedIdx = bd?.suggested_estimated_index ?? 0;
     setBoq({
       ...boq,
       boqType: detectedType,
       boqTypeConfidence: detectedConf,
       boqTypeReason: detectedReason,
       boqTypeScore: detectedScore,
-      financialCandidates: rawCandidates,
-      suggestedCandidateIndex: suggestedIdx,
-      // Pre-fill amount from suggested candidate (still requires confirm)
+      financialCandidates: effectiveCandidates,
+      suggestedCandidateIndex: effectiveIdx,
+      // Pre-fill amount from suggested candidate (still requires confirm).
+      // Falls back to the already-loaded boq.estimatedAmount so a 0/absent
+      // valueNumber from the API never clears a valid saved amount.
       estimatedAmount:
         boq.estimatedAmountConfirmed
           ? boq.estimatedAmount
-          : rawCandidates[suggestedIdx]?.valueNumber ?? null,
+          : effectiveCandidates[effectiveIdx]?.valueNumber || boq.estimatedAmount || null,
       estimatedAmountPage:
         boq.estimatedAmountConfirmed
           ? boq.estimatedAmountPage
-          : rawCandidates[suggestedIdx]?.page,
+          : effectiveCandidates[effectiveIdx]?.page ?? boq.estimatedAmountPage,
       estimatedAmountClause:
         boq.estimatedAmountConfirmed
           ? boq.estimatedAmountClause
-          : rawCandidates[suggestedIdx]?.clause,
+          : effectiveCandidates[effectiveIdx]?.clause ?? boq.estimatedAmountClause,
       estimatedAmountText:
         boq.estimatedAmountConfirmed
           ? boq.estimatedAmountText
-          : rawCandidates[suggestedIdx]?.sourceText,
+          : effectiveCandidates[effectiveIdx]?.sourceText ?? boq.estimatedAmountText,
     });
-    if (selectedCandidateIdx === null) setSelectedCandidateIdx(suggestedIdx);
+    if (selectedCandidateIdx === null) setSelectedCandidateIdx(effectiveIdx);
   }, [analysisResult]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Computed values ────────────────────────────────────────────────────────
@@ -357,11 +378,17 @@ export default function BOQSection({
         <button
           onClick={handleConfirmAmount}
           disabled={!boq.estimatedAmount}
-          className="w-full py-2.5 bg-amber-500 hover:bg-amber-600 disabled:opacity-50 text-white font-semibold text-sm rounded-lg transition-colors flex items-center justify-center gap-2"
+          className="w-full py-2.5 bg-amber-500 hover:bg-amber-600 disabled:opacity-50 disabled:cursor-not-allowed text-white font-semibold text-sm rounded-lg transition-colors flex items-center justify-center gap-2"
         >
           <CheckCircle2 className="w-4 h-4" />
           Yes, this is the estimated amount put to tender
         </button>
+        {!boq.estimatedAmount && (
+          <p className="text-xs text-amber-700 flex items-center gap-1">
+            <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+            Type the amount in the field above, then click to confirm
+          </p>
+        )}
       </div>
     );
   };
@@ -569,82 +596,96 @@ export default function BOQSection({
 
   return (
     <div className="bg-white rounded-xl border border-indigo-100 shadow-sm overflow-hidden">
-      {/* Header */}
-      <div className="bg-gradient-to-r from-indigo-700 to-indigo-600 px-5 py-4">
-        <div className="flex items-start justify-between gap-2">
-          <div>
+      {/* Header — click to collapse / expand */}
+      <div
+        className="bg-gradient-to-r from-indigo-700 to-indigo-600 px-5 py-4 cursor-pointer select-none"
+        onClick={handleToggle}
+      >
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex-1 min-w-0">
             <h3 className="text-base font-bold text-white">BOQ & Bid Pricing</h3>
             <p className="text-xs text-indigo-200 mt-0.5">Supported: Percentage Rate Tenders · Item Rate and EPC coming later</p>
           </div>
-          {boq.boqType !== 'unknown' && boq.boqTypeConfidence && (
-            <span
-              className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase shrink-0 ${boq.boqTypeConfidence === 'high' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}
-              title={boq.boqTypeReason}
+          <div className="flex items-center gap-2 shrink-0">
+            {boq.boqType !== 'unknown' && boq.boqTypeConfidence && (
+              <span
+                className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${boq.boqTypeConfidence === 'high' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}
+                title={boq.boqTypeReason}
+              >
+                {boq.boqType === 'percentage_rate' ? 'Percentage Rate'
+                  : boq.boqType === 'item_rate' ? 'Item Rate'
+                  : boq.boqType === 'lump_sum_epc' ? 'Lump Sum / EPC'
+                  : boq.boqType}
+                {boq.boqTypeScore != null
+                  ? ` · ✓ Auto-detected (${boq.boqTypeScore}%)`
+                  : ` · ${boq.boqTypeConfidence} conf.`}
+              </span>
+            )}
+            {isExpanded
+              ? <ChevronDown className="w-4 h-4 text-indigo-200" />
+              : <ChevronRight className="w-4 h-4 text-indigo-200" />}
+          </div>
+        </div>
+      </div>
+
+      {isExpanded && (
+        <div className="p-5 space-y-4">
+          {/* BOQ Type selector */}
+          <div>
+            <label className="block text-xs font-semibold text-slate-600 mb-1.5">BOQ / Contract Type</label>
+            <select
+              value={boq.boqType}
+              onChange={e => setBoq({ ...boq, boqType: e.target.value as any, boqLastChangedAt: Date.now() })}
+              className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 bg-white focus:ring-2 focus:ring-indigo-300 outline-none"
             >
-              {boq.boqType === 'percentage_rate' ? 'Percentage Rate'
-                : boq.boqType === 'item_rate' ? 'Item Rate'
-                : boq.boqType === 'lump_sum_epc' ? 'Lump Sum / EPC'
-                : boq.boqType}
-              {boq.boqTypeScore != null
-                ? ` · ✓ Auto-detected (${boq.boqTypeScore}%)`
-                : ` · ${boq.boqTypeConfidence} conf.`}
-            </span>
+              <option value="unknown">— Select BOQ type —</option>
+              <option value="percentage_rate">Percentage Rate</option>
+              <option value="item_rate" disabled>Item Rate (coming soon)</option>
+              <option value="lump_sum_epc" disabled>Lump Sum / EPC (coming soon)</option>
+              <option value="hybrid" disabled>Hybrid (coming soon)</option>
+            </select>
+          </div>
+
+          {import.meta.env.DEV && (
+            <div className="rounded bg-slate-50 border border-slate-200 px-3 py-2 text-[10px] font-mono text-slate-500 break-all">
+              {boq.boqTypeReason
+                ? `Detection: ${boq.boqTypeReason}`
+                : analysisResult
+                ? `Detection (not auto-set — capped low from AI text): ${detectBoqTypeFromAnalysis(analysisResult).reason}`
+                : 'Detection: waiting for analysis result'}
+            </div>
+          )}
+
+          {boq.boqType !== 'percentage_rate' && boq.boqType !== 'unknown' && (
+            <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-lg p-3 text-xs text-slate-600">
+              <AlertCircle className="w-4 h-4 text-slate-400 shrink-0" />
+              {boq.boqType === 'item_rate' ? 'Item Rate' : 'Lump Sum / EPC'} BOQ entry is coming in a future update.
+            </div>
+          )}
+
+          {boq.boqType === 'percentage_rate' && (
+            <>
+              {/* Step 1: Confirm amount */}
+              <div>
+                <p className="text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-widest">Step 1 — Estimated Amount</p>
+                {renderAmountStep()}
+              </div>
+
+              {/* Step 2: Pricing */}
+              {renderPricingStep()}
+
+              {/* Financial Summary Card */}
+              {renderSummaryCard()}
+
+              {/* Finalize button — always visible in percentage_rate flow */}
+              {renderFinalizeButton()}
+
+              {/* Revision history */}
+              {renderHistory()}
+            </>
           )}
         </div>
-      </div>
-
-      <div className="p-5 space-y-4">
-        {/* BOQ Type selector */}
-        <div>
-          <label className="block text-xs font-semibold text-slate-600 mb-1.5">BOQ / Contract Type</label>
-          <select
-            value={boq.boqType}
-            onChange={e => setBoq({ ...boq, boqType: e.target.value as any, boqLastChangedAt: Date.now() })}
-            className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 bg-white focus:ring-2 focus:ring-indigo-300 outline-none"
-          >
-            <option value="unknown">— Select BOQ type —</option>
-            <option value="percentage_rate">Percentage Rate</option>
-            <option value="item_rate" disabled>Item Rate (coming soon)</option>
-            <option value="lump_sum_epc" disabled>Lump Sum / EPC (coming soon)</option>
-            <option value="hybrid" disabled>Hybrid (coming soon)</option>
-          </select>
-        </div>
-
-        {import.meta.env.DEV && boq.boqTypeReason && (
-          <div className="rounded bg-slate-50 border border-slate-200 px-3 py-2 text-[10px] font-mono text-slate-500 break-all">
-            Detection log: {boq.boqTypeReason}
-          </div>
-        )}
-
-        {boq.boqType !== 'percentage_rate' && boq.boqType !== 'unknown' && (
-          <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-lg p-3 text-xs text-slate-600">
-            <AlertCircle className="w-4 h-4 text-slate-400 shrink-0" />
-            {boq.boqType === 'item_rate' ? 'Item Rate' : 'Lump Sum / EPC'} BOQ entry is coming in a future update.
-          </div>
-        )}
-
-        {boq.boqType === 'percentage_rate' && (
-          <>
-            {/* Step 1: Confirm amount */}
-            <div>
-              <p className="text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-widest">Step 1 — Estimated Amount</p>
-              {renderAmountStep()}
-            </div>
-
-            {/* Step 2: Pricing */}
-            {renderPricingStep()}
-
-            {/* Financial Summary Card */}
-            {renderSummaryCard()}
-
-            {/* Finalize button — always visible in percentage_rate flow */}
-            {renderFinalizeButton()}
-
-            {/* Revision history */}
-            {renderHistory()}
-          </>
-        )}
-      </div>
+      )}
     </div>
   );
 }

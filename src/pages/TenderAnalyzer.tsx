@@ -22,6 +22,7 @@ import BOQSection from "../components/boq/BOQSection";
 import type { BOQData } from "../lib/boq/types";
 import { INITIAL_BOQ } from "../lib/boq/types";
 import { detectBoqTypeFromText } from "../lib/boq/detectBoqType";
+import { removeUndefined } from "../lib/firestore";
 
 const CollapsibleSection = ({ title, defaultOpen = true, children }: { title: string, defaultOpen?: boolean, children: React.ReactNode }) => {
   const [isOpen, setIsOpen] = useState(defaultOpen);
@@ -534,6 +535,17 @@ export default function TenderAnalyzer() {
                 }
               : prev,
           );
+          // Persist so ProjectDetails reads the detected type on first load.
+          // Guard: boq.boqType is 'unknown' here (INITIAL_BOQ, TenderAnalyzer never
+          // loads from Firestore), so we only write when this is a fresh analysis.
+          if (data.projectId && boq.boqType === 'unknown') {
+            updateDoc(doc(db, 'saved_tenders', data.projectId), removeUndefined({
+              'boq.boqType': detection.type,
+              'boq.boqTypeConfidence': detection.confidence,
+              'boq.boqTypeReason': detection.reason,
+              'boq.boqTypeScore': detection.score,
+            })).catch(console.error);
+          }
         }
         rawExtractedTextRef.current = '';
       }

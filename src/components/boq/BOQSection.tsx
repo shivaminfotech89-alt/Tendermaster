@@ -74,18 +74,25 @@ export default function BOQSection({
       sourceText: v.source_text,
     }));
 
-    // Determine BOQ type: API field (future) > client detection > leave as-is
+    // Determine BOQ type: API field (future) > client detection > leave as-is.
+    // Only auto-set on HIGH confidence to prevent false positives (e.g. Annual Rate Contract
+    // tenders sharing generic "above the estimated amount" language).
     let detectedType = boq.boqType;
     let detectedConf = boq.boqTypeConfidence;
+    let detectedReason = boq.boqTypeReason;
+    let detectedScore  = boq.boqTypeScore;
     if (boq.boqType === 'unknown') {
       if (bd?.boq_type && bd?.boq_type_confidence === 'high') {
-        detectedType = bd.boq_type;
-        detectedConf = bd.boq_type_confidence;
+        detectedType   = bd.boq_type;
+        detectedConf   = bd.boq_type_confidence;
       } else {
         const clientDetection = detectBoqTypeFromAnalysis(analysisResult);
-        if (clientDetection.confidence !== 'low') {
-          detectedType = clientDetection.type;
-          detectedConf = clientDetection.confidence;
+        // Analysis-text detection is capped at LOW — never auto-selects; used only as a hint.
+        if (clientDetection.confidence === 'high') {
+          detectedType   = clientDetection.type;
+          detectedConf   = clientDetection.confidence;
+          detectedReason = clientDetection.reason;
+          detectedScore  = clientDetection.score;
         }
       }
     }
@@ -95,6 +102,8 @@ export default function BOQSection({
       ...boq,
       boqType: detectedType,
       boqTypeConfidence: detectedConf,
+      boqTypeReason: detectedReason,
+      boqTypeScore: detectedScore,
       financialCandidates: rawCandidates,
       suggestedCandidateIndex: suggestedIdx,
       // Pre-fill amount from suggested candidate (still requires confirm)
@@ -568,11 +577,17 @@ export default function BOQSection({
             <p className="text-xs text-indigo-200 mt-0.5">Supported: Percentage Rate Tenders · Item Rate and EPC coming later</p>
           </div>
           {boq.boqType !== 'unknown' && boq.boqTypeConfidence && (
-            <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase shrink-0 ${boq.boqTypeConfidence === 'high' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
+            <span
+              className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase shrink-0 ${boq.boqTypeConfidence === 'high' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}
+              title={boq.boqTypeReason}
+            >
               {boq.boqType === 'percentage_rate' ? 'Percentage Rate'
                 : boq.boqType === 'item_rate' ? 'Item Rate'
                 : boq.boqType === 'lump_sum_epc' ? 'Lump Sum / EPC'
-                : boq.boqType} · {boq.boqTypeConfidence} conf.
+                : boq.boqType}
+              {boq.boqTypeScore != null
+                ? ` · ✓ Auto-detected (${boq.boqTypeScore}%)`
+                : ` · ${boq.boqTypeConfidence} conf.`}
             </span>
           )}
         </div>
@@ -594,6 +609,12 @@ export default function BOQSection({
             <option value="hybrid" disabled>Hybrid (coming soon)</option>
           </select>
         </div>
+
+        {import.meta.env.DEV && boq.boqTypeReason && (
+          <div className="rounded bg-slate-50 border border-slate-200 px-3 py-2 text-[10px] font-mono text-slate-500 break-all">
+            Detection log: {boq.boqTypeReason}
+          </div>
+        )}
 
         {boq.boqType !== 'percentage_rate' && boq.boqType !== 'unknown' && (
           <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-lg p-3 text-xs text-slate-600">

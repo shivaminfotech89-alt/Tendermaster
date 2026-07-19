@@ -21,6 +21,8 @@ export interface FinancialValueCandidate {
 export interface BOQData {
   boqType: BOQType;
   boqTypeConfidence?: BOQTypeConfidence;
+  boqTypeScore?: number;    // 0-100 numeric from auto-detection; undefined = manually set
+  boqTypeReason?: string;   // decision log from detectBoqTypeFromText / detectBoqTypeFromItems
 
   // Candidate pool from analysis (stored for re-display after reload)
   financialCandidates?: FinancialValueCandidate[];

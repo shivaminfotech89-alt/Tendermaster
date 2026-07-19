@@ -519,12 +519,19 @@ export default function TenderAnalyzer() {
       // Detect BOQ type from raw PDF text (more reliable than analysis text fields).
       // Only fires when raw text was extracted (digital PDFs); image PDFs fall back to
       // BOQSection's analysis-text detection.
+      // Only auto-sets on HIGH confidence — medium/low never override the user's Unknown state.
       if (rawExtractedTextRef.current) {
         const detection = detectBoqTypeFromText(rawExtractedTextRef.current);
-        if (detection.confidence !== 'low') {
+        if (detection.confidence === 'high') {
           setBoq(prev =>
             prev.boqType === 'unknown'
-              ? { ...prev, boqType: detection.type, boqTypeConfidence: detection.confidence }
+              ? {
+                  ...prev,
+                  boqType: detection.type,
+                  boqTypeConfidence: detection.confidence,
+                  boqTypeReason: detection.reason,
+                  boqTypeScore: detection.score,
+                }
               : prev,
           );
         }

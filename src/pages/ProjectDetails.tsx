@@ -3,6 +3,7 @@ import { useParams, Link, useNavigate } from "react-router-dom";
 import { doc, getDoc, updateDoc, deleteDoc, addDoc, collection, query, where, getDocs, orderBy, writeBatch, serverTimestamp, arrayUnion, Timestamp } from "firebase/firestore";
 import { ref as storageRef, uploadBytes, getDownloadURL } from "firebase/storage";
 import { db, storage } from "../lib/firebase";
+import { removeUndefined } from "../lib/firestore";
 import { ArrowLeft, AlertCircle, Calculator, Building, Activity, Upload, FileText, Download, Loader2, Save, Plus, Target, CheckCircle, CheckCircle2, ListTodo, Calendar, MessageSquare, Send, X, Trash2, RefreshCw, Edit2, Check, ChevronRight, Info, IndianRupee, Wallet, Receipt, CreditCard, RotateCcw, BadgeCheck, Clock, Copy, ArrowUpRight, Scan } from "lucide-react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -350,7 +351,7 @@ export default function ProjectDetails() {
     if (!projectId) return;
     if (boqSaveTimerRef.current) clearTimeout(boqSaveTimerRef.current);
     boqSaveTimerRef.current = setTimeout(() => {
-      updateDoc(doc(db, 'saved_tenders', projectId), { boq: updated }).catch(console.error);
+      updateDoc(doc(db, 'saved_tenders', projectId), { boq: removeUndefined(updated) }).catch(console.error);
     }, 1000);
   };
 
@@ -360,12 +361,12 @@ export default function ProjectDetails() {
     if (!projectId || !user) return;
     const colRef = collection(db, 'saved_tenders', projectId, 'bid_snapshots');
     const nextVersion = (snapshots[0]?.version ?? 0) + 1;
-    const docRef = await addDoc(colRef, {
+    const docRef = await addDoc(colRef, removeUndefined({
       ...data,
       version: nextVersion,
       createdAt: serverTimestamp(),
       createdBy: user.uid,
-    });
+    }));
     const newSnap: BidSnapshotRow = {
       id: docRef.id,
       ...data,

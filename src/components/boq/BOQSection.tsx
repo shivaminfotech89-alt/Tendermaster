@@ -45,7 +45,6 @@ export default function BOQSection({
   // ── Local UI state ─────────────────────────────────────────────────────────
   const [editingAmount, setEditingAmount] = useState(false);
   const [amountInput, setAmountInput] = useState('');
-  const [selectedCandidateIdx, setSelectedCandidateIdx] = useState<number | null>(null);
   const [finalizing, setFinalizing] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   const [isExpanded, setIsExpanded] = useState(() => {
@@ -145,7 +144,12 @@ export default function BOQSection({
           ? boq.estimatedAmountText
           : effectiveCandidates[effectiveIdx]?.sourceText ?? boq.estimatedAmountText,
     });
-    if (selectedCandidateIdx === null) setSelectedCandidateIdx(effectiveIdx);
+    // Pre-fill the amount input so the simplified single-field UI shows the suggested value.
+    if (!boq.estimatedAmountConfirmed && !amountInput) {
+      const prefilledAmount =
+        effectiveCandidates[effectiveIdx]?.valueNumber || boq.estimatedAmount;
+      if (prefilledAmount) setAmountInput(String(prefilledAmount));
+    }
   }, [analysisResult]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Computed values ────────────────────────────────────────────────────────
@@ -206,23 +210,11 @@ export default function BOQSection({
 
   // ── Handlers ───────────────────────────────────────────────────────────────
 
-  const handleSelectCandidate = (idx: number | null) => {
-    setSelectedCandidateIdx(idx);
-    if (idx === null) {
-      // "Enter manually" — clear prefilled amount
-      setBoq({ ...boq, estimatedAmount: null, estimatedAmountConfirmed: false, estimatedAmountEdited: false, estimatedAmountPage: undefined, estimatedAmountClause: undefined, estimatedAmountText: undefined });
-    } else {
-      const c = candidates[idx]!;
-      setAmountInput(c.valueNumber.toString());
-      setBoq({ ...boq, estimatedAmount: c.valueNumber, estimatedAmountConfirmed: false, estimatedAmountEdited: false, estimatedAmountPage: c.page, estimatedAmountClause: c.clause, estimatedAmountText: c.sourceText });
-    }
-  };
-
   const handleAmountInputChange = (v: string) => {
     setAmountInput(v);
     const n = parseFloat(v.replace(/,/g, ''));
     if (isFinite(n)) {
-      const orig = selectedCandidateIdx !== null ? (candidates[selectedCandidateIdx]?.valueNumber ?? null) : null;
+      const orig = candidates[suggestedIdx]?.valueNumber ?? null;
       setBoq({ ...boq, estimatedAmount: n, estimatedAmountEdited: orig !== null && n !== orig, estimatedAmountConfirmed: false });
     }
   };
@@ -294,82 +286,43 @@ export default function BOQSection({
       );
     }
 
-    const hasMultiple = candidates.length > 1;
-    const hasSingle   = candidates.length === 1;
-    const hasNone     = candidates.length === 0;
+    const suggested = candidates[suggestedIdx];
+    const sourceNote = suggested
+      ? suggested.page
+        ? `Pre-filled from page ${suggested.page}${suggested.clause ? ` (${suggested.clause})` : ''} — verify against the tender document`
+        : suggested.clause
+        ? `Pre-filled from ${suggested.clause} — verify against the tender document`
+        : suggested.label
+        ? `Pre-filled from detected value — verify against the tender document`
+        : null
+      : null;
 
     return (
       <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 space-y-3">
         <div className="flex items-start gap-2">
           <AlertTriangle className="w-4 h-4 text-amber-600 mt-0.5 shrink-0" />
           <div>
-            <p className="text-sm font-bold text-amber-800">
-              {hasMultiple ? 'Multiple financial values found — select the Estimated Amount Put to Tender' : 'Confirm the Estimated Amount Put to Tender'}
-            </p>
+            <p className="text-sm font-bold text-amber-800">Estimated Amount Put to Tender (₹)</p>
             <p className="text-xs text-amber-700 mt-0.5">
-              Always confirm before any calculation — a wrong base changes the entire bid.
+              Confirm before any calculation — a wrong base changes the entire bid.
             </p>
           </div>
         </div>
 
-        {/* Multi-candidate picker */}
-        {hasMultiple && (
-          <div className="space-y-2">
-            {candidates.map((c, i) => (
-              <label key={i} className={`flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${selectedCandidateIdx === i ? 'bg-white border-amber-400 ring-1 ring-amber-300' : 'bg-amber-50/60 border-amber-200 hover:border-amber-300'}`}>
-                <input type="radio" name="candidatePick" checked={selectedCandidateIdx === i} onChange={() => handleSelectCandidate(i)} className="mt-0.5 accent-amber-500" />
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="text-sm font-semibold text-slate-800">{c.valueRaw}</span>
-                    <span className="text-xs text-slate-500">{c.label}</span>
-                    {i === suggestedIdx && (
-                      <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-700 border border-amber-200">Suggested</span>
-                    )}
-                  </div>
-                  {c.sourceText && <p className="text-xs text-slate-500 mt-1 italic truncate">"{c.sourceText}"</p>}
-                  {(c.clause || c.page) && (
-                    <p className="text-[10px] text-slate-400 mt-0.5">
-                      {c.clause}{c.page ? ` · Page ${c.page}` : ''}
-                    </p>
-                  )}
-                </div>
-              </label>
-            ))}
-            <label className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${selectedCandidateIdx === null ? 'bg-white border-amber-400 ring-1 ring-amber-300' : 'bg-amber-50/60 border-amber-200 hover:border-amber-300'}`}>
-              <input type="radio" name="candidatePick" checked={selectedCandidateIdx === null} onChange={() => handleSelectCandidate(null)} className="accent-amber-500" />
-              <span className="text-sm text-slate-600">None of the above — I'll enter the amount manually</span>
-            </label>
-          </div>
-        )}
-
-        {/* Single candidate info */}
-        {hasSingle && candidates[0] && (
-          <div className="bg-white border border-amber-200 rounded-lg p-3 space-y-1">
-            <p className="text-sm font-semibold text-slate-800">{candidates[0].valueRaw} — {candidates[0].label}</p>
-            {candidates[0].sourceText && <p className="text-xs text-slate-500 italic">"{candidates[0].sourceText}"</p>}
-            {(candidates[0].clause || candidates[0].page) && (
-              <p className="text-[10px] text-slate-400">
-                {candidates[0].clause}{candidates[0].page ? ` · Page ${candidates[0].page}` : ''}
-              </p>
-            )}
-          </div>
-        )}
-
-        {/* Amount input */}
         <div>
-          <label className="block text-xs font-semibold text-amber-800 mb-1">
-            {hasNone || selectedCandidateIdx === null ? 'Enter Estimated Amount (₹)' : 'Verify Amount (₹)'}
-          </label>
           <div className="flex items-center gap-2 bg-white border border-amber-300 rounded-lg px-3 py-2 focus-within:ring-2 focus-within:ring-amber-300">
-            <span className="text-slate-400 font-bold">₹</span>
+            <span className="text-slate-400 font-bold text-sm">₹</span>
             <input
               type="text"
               value={amountInput || (boq.estimatedAmount != null ? boq.estimatedAmount.toString() : '')}
               onChange={e => handleAmountInputChange(e.target.value)}
-              placeholder="e.g. 12500000"
+              placeholder="Type the amount here"
               className="flex-1 bg-transparent text-slate-900 font-semibold text-sm outline-none"
             />
           </div>
+          {sourceNote && (
+            <p className="text-[11px] text-amber-600 mt-1.5 italic">{sourceNote}</p>
+          )}
           {boq.estimatedAmount != null && (
             <p className="text-xs text-amber-700 mt-1">{toIndianWords(boq.estimatedAmount)}</p>
           )}
@@ -381,12 +334,12 @@ export default function BOQSection({
           className="w-full py-2.5 bg-amber-500 hover:bg-amber-600 disabled:opacity-50 disabled:cursor-not-allowed text-white font-semibold text-sm rounded-lg transition-colors flex items-center justify-center gap-2"
         >
           <CheckCircle2 className="w-4 h-4" />
-          Yes, this is the estimated amount put to tender
+          Confirm Estimated Amount
         </button>
         {!boq.estimatedAmount && (
           <p className="text-xs text-amber-700 flex items-center gap-1">
             <AlertCircle className="w-3.5 h-3.5 shrink-0" />
-            Type the amount in the field above, then click to confirm
+            Type the amount above, then click to confirm
           </p>
         )}
       </div>

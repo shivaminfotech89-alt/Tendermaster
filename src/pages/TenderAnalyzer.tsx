@@ -21,6 +21,7 @@ import { isTemplated, fillTemplate, saveCandidateTemplate } from "../lib/docTemp
 import BOQSection from "../components/boq/BOQSection";
 import type { BOQData } from "../lib/boq/types";
 import { INITIAL_BOQ } from "../lib/boq/types";
+import { detectBoqTypeFromText } from "../lib/boq/detectBoqType";
 
 const CollapsibleSection = ({ title, defaultOpen = true, children }: { title: string, defaultOpen?: boolean, children: React.ReactNode }) => {
   const [isOpen, setIsOpen] = useState(defaultOpen);
@@ -169,6 +170,8 @@ export default function TenderAnalyzer() {
   // BOQ state (session only — not persisted for TenderAnalyzer)
   const [boq, setBoq] = useState<BOQData>({ ...INITIAL_BOQ });
   const [boqChangedSinceDocGen, setBoqChangedSinceDocGen] = useState(false);
+  // Accumulates raw PDF text during upload for client-side BOQ type detection
+  const rawExtractedTextRef = useRef<string>('');
   const [downloadingDocx, setDownloadingDocx] = useState(false);
   const [printWithoutLetterhead, setPrintWithoutLetterhead] = useState(false);
   const [savedDocs, setSavedDocs] = useState<SavedDoc[]>([]);
@@ -254,6 +257,7 @@ export default function TenderAnalyzer() {
     setPdfFileSize(files.reduce((acc, f) => acc + f.size, 0));
     setProcessingFile(true);
 
+    rawExtractedTextRef.current = '';
     try {
       for (const file of files) {
         const arrayBuffer = await file.arrayBuffer();
@@ -263,6 +267,7 @@ export default function TenderAnalyzer() {
           if (extraction.isDigital) {
             console.log(`[PDF extraction] ${file.name} → TEXT (${extraction.charsExtracted} non-ws chars across ${extraction.pagesChecked} sampled pages of ${extraction.pageCount})`);
             dataUri = `data:text/plain;base64,${textToBase64(extraction.text)}`;
+            rawExtractedTextRef.current += extraction.text + ' ';
           } else {
             console.log(`[PDF extraction] ${file.name} → IMAGE fallback (${extraction.charsExtracted} non-ws chars across ${extraction.pagesChecked} sampled pages of ${extraction.pageCount})`);
             dataUri = `data:application/pdf;base64,${arrayBufferToBase64(arrayBuffer)}`;
@@ -292,6 +297,7 @@ export default function TenderAnalyzer() {
     setZipFileName(file.name);
     setZipFileSize(file.size);
     setProcessingFile(true);
+    rawExtractedTextRef.current = '';
     try {
       const zip = new JSZip();
       const contents = await zip.loadAsync(file);
@@ -311,6 +317,7 @@ export default function TenderAnalyzer() {
             if (extraction.isDigital) {
               console.log(`[PDF extraction] ${shortName} (ZIP) → TEXT (${extraction.charsExtracted} chars / ${extraction.pageCount} pages)`);
               dataUri = `data:text/plain;base64,${textToBase64(extraction.text)}`;
+              rawExtractedTextRef.current += extraction.text + ' ';
             } else {
               console.log(`[PDF extraction] ${shortName} (ZIP) → IMAGE fallback (${extraction.charsExtracted} chars / ${extraction.pageCount} pages)`);
               dataUri = `data:application/pdf;base64,${arrayBufferToBase64(arrayBuffer)}`;
@@ -508,6 +515,21 @@ export default function TenderAnalyzer() {
       setAnalysisResult(data.analysis);
       setAnalysisRemarks(data.remarks || null);
       setPayloadContext(payload);
+
+      // Detect BOQ type from raw PDF text (more reliable than analysis text fields).
+      // Only fires when raw text was extracted (digital PDFs); image PDFs fall back to
+      // BOQSection's analysis-text detection.
+      if (rawExtractedTextRef.current) {
+        const detection = detectBoqTypeFromText(rawExtractedTextRef.current);
+        if (detection.confidence !== 'low') {
+          setBoq(prev =>
+            prev.boqType === 'unknown'
+              ? { ...prev, boqType: detection.type, boqTypeConfidence: detection.confidence }
+              : prev,
+          );
+        }
+        rawExtractedTextRef.current = '';
+      }
       if (data.projectId) {
         setSavedProjectId(data.projectId);
         setPendingProjectName(data.analysis?.tender_simplified?.tender_name || "Untitled Tender");

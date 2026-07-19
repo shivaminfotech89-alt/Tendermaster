@@ -6,6 +6,7 @@ import {
 import type { BOQData, BidSnapshotRow, FinancialValueCandidate } from '../../lib/boq/types';
 import { toIndianWords } from '../../lib/boq/indianWords';
 import { netBidAmount, calcProfit, getBidWarnings, fmtINR } from '../../lib/boq/calculator';
+import { detectBoqTypeFromAnalysis } from '../../lib/boq/detectBoqType';
 
 interface BOQSectionProps {
   analysisResult: any;
@@ -58,11 +59,13 @@ export default function BOQSection({
   const initializedRef = useRef(false);
   useEffect(() => {
     if (initializedRef.current) return;
-    const bd = analysisResult?.boq_details;
-    if (!bd) return;
+    if (!analysisResult) return;
     initializedRef.current = true;
 
-    const rawCandidates: FinancialValueCandidate[] = (bd.financial_values ?? []).map((v: any) => ({
+    // API may return boq_details in future; fall back to client-side detection today
+    const bd = (analysisResult as any)?.boq_details;
+
+    const rawCandidates: FinancialValueCandidate[] = (bd?.financial_values ?? []).map((v: any) => ({
       label: v.label ?? '',
       valueRaw: v.value_raw ?? '',
       valueNumber: v.value_number ?? 0,
@@ -71,36 +74,49 @@ export default function BOQSection({
       sourceText: v.source_text,
     }));
 
+    // Determine BOQ type: API field (future) > client detection > leave as-is
+    let detectedType = boq.boqType;
+    let detectedConf = boq.boqTypeConfidence;
+    if (boq.boqType === 'unknown') {
+      if (bd?.boq_type && bd?.boq_type_confidence === 'high') {
+        detectedType = bd.boq_type;
+        detectedConf = bd.boq_type_confidence;
+      } else {
+        const clientDetection = detectBoqTypeFromAnalysis(analysisResult);
+        if (clientDetection.confidence !== 'low') {
+          detectedType = clientDetection.type;
+          detectedConf = clientDetection.confidence;
+        }
+      }
+    }
+
+    const suggestedIdx = bd?.suggested_estimated_index ?? 0;
     setBoq({
       ...boq,
-      // Only auto-set type if the user hasn't already chosen
-      boqType:
-        boq.boqType === 'unknown' && bd.boq_type_confidence === 'high'
-          ? bd.boq_type
-          : boq.boqType,
-      boqTypeConfidence: bd.boq_type_confidence,
+      boqType: detectedType,
+      boqTypeConfidence: detectedConf,
       financialCandidates: rawCandidates,
-      suggestedCandidateIndex: bd.suggested_estimated_index ?? 0,
+      suggestedCandidateIndex: suggestedIdx,
       // Pre-fill amount from suggested candidate (still requires confirm)
       estimatedAmount:
         boq.estimatedAmountConfirmed
           ? boq.estimatedAmount
-          : rawCandidates[bd.suggested_estimated_index ?? 0]?.valueNumber ?? null,
+          : rawCandidates[suggestedIdx]?.valueNumber ?? null,
       estimatedAmountPage:
         boq.estimatedAmountConfirmed
           ? boq.estimatedAmountPage
-          : rawCandidates[bd.suggested_estimated_index ?? 0]?.page,
+          : rawCandidates[suggestedIdx]?.page,
       estimatedAmountClause:
         boq.estimatedAmountConfirmed
           ? boq.estimatedAmountClause
-          : rawCandidates[bd.suggested_estimated_index ?? 0]?.clause,
+          : rawCandidates[suggestedIdx]?.clause,
       estimatedAmountText:
         boq.estimatedAmountConfirmed
           ? boq.estimatedAmountText
-          : rawCandidates[bd.suggested_estimated_index ?? 0]?.sourceText,
+          : rawCandidates[suggestedIdx]?.sourceText,
     });
-    if (selectedCandidateIdx === null) setSelectedCandidateIdx(bd.suggested_estimated_index ?? 0);
-  }, [analysisResult]);
+    if (selectedCandidateIdx === null) setSelectedCandidateIdx(suggestedIdx);
+  }, [analysisResult]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Computed values ────────────────────────────────────────────────────────
   const canCompute =
@@ -455,31 +471,44 @@ export default function BOQSection({
           {warnIcon}
           {warnText}
         </div>
+      </div>
+    );
+  };
 
-        {onFinalize && (
-          <div className="px-5 pb-5">
-            {missingCost && (
-              <p className="text-xs text-amber-700 mb-2 flex items-center gap-1">
-                <AlertTriangle className="w-3.5 h-3.5" />
-                Enter your cost estimate below to unlock profit analysis before finalizing.
-              </p>
-            )}
-            <button
-              onClick={handleFinalize}
-              disabled={finalizing || warnings?.level === 'red'}
-              className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-bold text-sm rounded-xl transition-colors flex items-center justify-center gap-2"
-            >
-              {finalizing ? (
-                <span className="animate-spin w-4 h-4 border-2 border-white border-t-transparent rounded-full" />
-              ) : (
-                <Lock className="w-4 h-4" />
-              )}
-              {finalizing ? 'Saving…' : 'Finalize Bid — Lock Snapshot'}
-            </button>
-            {warnings?.level === 'red' && (
-              <p className="text-xs text-red-600 text-center mt-2">Fix the cost error before finalizing.</p>
-            )}
-          </div>
+  // Always renders in the percentage_rate flow; disabled with reason when prereqs unmet.
+  const renderFinalizeButton = () => {
+    let disabledReason: string | null = null;
+    if (!boq.estimatedAmountConfirmed) {
+      disabledReason = 'Confirm the estimated amount to finalise';
+    } else if (boq.percentage == null) {
+      disabledReason = 'Enter your bid percentage to finalise';
+    } else if (!onFinalize) {
+      disabledReason = 'Save as a project to lock bid snapshots';
+    } else if (warnings?.level === 'red') {
+      disabledReason = 'Fix the cost error before finalizing';
+    }
+    const isDisabled = finalizing || disabledReason !== null;
+
+    return (
+      <div className="space-y-2">
+        {onFinalize && totalCost <= 0 && !disabledReason && (
+          <p className="text-xs text-amber-700 flex items-center gap-1">
+            <AlertTriangle className="w-3.5 h-3.5" />
+            Enter your cost estimate below to unlock profit analysis before finalizing.
+          </p>
+        )}
+        <button
+          onClick={handleFinalize}
+          disabled={isDisabled}
+          className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold text-sm rounded-xl transition-colors flex items-center justify-center gap-2"
+        >
+          {finalizing
+            ? <span className="animate-spin w-4 h-4 border-2 border-white border-t-transparent rounded-full" />
+            : <Lock className="w-4 h-4" />}
+          {finalizing ? 'Saving…' : 'Finalize Bid — Lock Snapshot'}
+        </button>
+        {disabledReason && !finalizing && (
+          <p className="text-xs text-slate-500 text-center">{disabledReason}</p>
         )}
       </div>
     );
@@ -538,9 +567,12 @@ export default function BOQSection({
             <h3 className="text-base font-bold text-white">BOQ & Bid Pricing</h3>
             <p className="text-xs text-indigo-200 mt-0.5">Supported: Percentage Rate Tenders · Item Rate and EPC coming later</p>
           </div>
-          {analysisResult?.boq_details?.boq_type_confidence && (
-            <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase shrink-0 ${analysisResult.boq_details.boq_type_confidence === 'high' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
-              {analysisResult.boq_details.boq_type} · {analysisResult.boq_details.boq_type_confidence} conf.
+          {boq.boqType !== 'unknown' && boq.boqTypeConfidence && (
+            <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase shrink-0 ${boq.boqTypeConfidence === 'high' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
+              {boq.boqType === 'percentage_rate' ? 'Percentage Rate'
+                : boq.boqType === 'item_rate' ? 'Item Rate'
+                : boq.boqType === 'lump_sum_epc' ? 'Lump Sum / EPC'
+                : boq.boqType} · {boq.boqTypeConfidence} conf.
             </span>
           )}
         </div>
@@ -583,6 +615,9 @@ export default function BOQSection({
 
             {/* Financial Summary Card */}
             {renderSummaryCard()}
+
+            {/* Finalize button — always visible in percentage_rate flow */}
+            {renderFinalizeButton()}
 
             {/* Revision history */}
             {renderHistory()}

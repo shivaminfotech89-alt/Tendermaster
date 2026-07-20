@@ -8,7 +8,7 @@ import {
   ChevronDown, ChevronUp, RefreshCw, FileText, Sparkles,
 } from "lucide-react";
 
-type ExtractionStatus = 'loading' | 'running' | 'done' | 'failed' | 'no_boq_found';
+type ExtractionStatus = 'loading' | 'running' | 'done' | 'failed' | 'no_boq_found' | 'not_attempted';
 type SortField = 'itemNo' | 'amount' | 'quantity';
 type SortDir = 'asc' | 'desc';
 
@@ -24,6 +24,10 @@ interface BOQMeta {
 interface BOQViewerProps {
   projectId: string;
   onProceedToPricing: () => void;
+  /** Provided when the project was analysed before automatic BOQ extraction existed.
+   *  Called when the user clicks "Extract BOQ". Must write status updates to Firestore
+   *  so the onSnapshot listener updates the viewer automatically. */
+  onManualExtract?: () => Promise<void>;
 }
 
 function fmtIndian(n: number): string {
@@ -37,7 +41,7 @@ function SortIcon({ field, sortField, sortDir }: { field: SortField; sortField: 
     : <ChevronDown className="w-3 h-3 inline" />;
 }
 
-export default function BOQViewer({ projectId, onProceedToPricing }: BOQViewerProps) {
+export default function BOQViewer({ projectId, onProceedToPricing, onManualExtract }: BOQViewerProps) {
   const [status, setStatus] = useState<ExtractionStatus>('loading');
   const [items, setItems] = useState<BoqItem[]>([]);
   const [meta, setMeta] = useState<BOQMeta | null>(null);
@@ -53,7 +57,7 @@ export default function BOQViewer({ projectId, onProceedToPricing }: BOQViewerPr
     const unsub = onSnapshot(
       latestRef,
       (snap) => {
-        if (!snap.exists()) { setStatus('no_boq_found'); return; }
+        if (!snap.exists()) { setStatus('not_attempted'); return; }
         const data = snap.data() as any;
         setStatus(data.status as ExtractionStatus);
         if (data.status === 'done') {
@@ -82,7 +86,7 @@ export default function BOQViewer({ projectId, onProceedToPricing }: BOQViewerPr
     setRefreshing(true);
     try {
       const snap = await getDoc(doc(db, 'saved_tenders', projectId, 'boq_extraction', 'latest'));
-      if (!snap.exists()) { setStatus('no_boq_found'); return; }
+      if (!snap.exists()) { setStatus('not_attempted'); return; }
       const data = snap.data() as any;
       setStatus(data.status as ExtractionStatus);
       if (data.status === 'done') {
@@ -186,6 +190,27 @@ export default function BOQViewer({ projectId, onProceedToPricing }: BOQViewerPr
         <Loader2 className="w-8 h-8 animate-spin text-indigo-500" />
         <p className="font-medium">Extracting BOQ items…</p>
         <p className="text-sm text-slate-400">This may take a few seconds.</p>
+      </div>
+    );
+  }
+
+  if (status === 'not_attempted') {
+    return (
+      <div className="flex flex-col items-center justify-center py-20 gap-4 text-slate-500">
+        <Search className="w-10 h-10 text-slate-300" />
+        <p className="font-semibold text-slate-600">BOQ not yet extracted</p>
+        <p className="text-sm text-center max-w-sm text-slate-400">
+          This project was analysed before automatic BOQ extraction was available.
+        </p>
+        {onManualExtract && (
+          <button
+            onClick={() => { onManualExtract().catch(console.error); }}
+            className="flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 transition-colors"
+          >
+            <Sparkles className="w-4 h-4" />
+            Extract BOQ
+          </button>
+        )}
       </div>
     );
   }

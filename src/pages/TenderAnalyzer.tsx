@@ -82,6 +82,25 @@ function sanitizeDocOutput(raw: string): string {
 }
 const LARGE_FILE_BYTES = 20 * 1024 * 1024;
 
+// ── BOQ candidate scoring ──────────────────────────────────────────────────
+// Retain a PDF's raw bytes for BOQ extraction only if it looks like a BOQ document.
+// This keeps browser memory bounded even for large multi-file ZIPs.
+const BOQ_RETAIN_THRESHOLD = 25;
+const BOQ_BUFFER_CAP_BYTES = 100 * 1024 * 1024; // 100 MB total retained across all candidates
+
+function scoreBOQCandidate(filename: string, text: string): number {
+  let score = 0;
+  if (/\bboq\b|b\.o\.q\.|bill.of.quant/i.test(filename)) score += 50;
+  else if (/\bschedule\b|\bprice[\s_-]?(?:bid|list)?\b|\bquantit/i.test(filename)) score += 30;
+  const s = text.slice(0, 3000);
+  if (/\bboq\b|bill\s+of\s+quant|schedule\s+of\s+(?:rates?|quantit)/i.test(s)) score += 40;
+  if (/sr\.?\s*no\.?\b|item\s*no\.?\b|sl\.?\s*no\.?\b/i.test(s)) score += 20;
+  if (/\bquantit/i.test(s)) score += 10;
+  if (/\bunit\s*rate\b|\best(?:imated)?\s*rate\b/i.test(s)) score += 10;
+  if (/\bamount\b/i.test(s)) score += 5;
+  return score;
+}
+
 function friendlyAnalysisError(raw: string): string {
   if (/exceeds the maximum number of tokens|1048576/i.test(raw))
     return "Your documents are too large to analyze together. Please analyze fewer or smaller documents at a time.";
@@ -174,9 +193,8 @@ export default function TenderAnalyzer() {
   const [boqChangedSinceDocGen, setBoqChangedSinceDocGen] = useState(false);
   // Accumulates raw PDF text during upload for client-side BOQ type detection
   const rawExtractedTextRef = useRef<string>('');
-  // Stores raw PDF bytes for BOQ extraction (single-PDF uploads only)
-  const boqPdfArrayBufferRef = useRef<ArrayBuffer | null>(null);
-  const boqPdfPageCountRef = useRef<number>(0);
+  // BOQ-candidate buffers retained during upload; released immediately after extraction starts
+  const boqPdfCandidatesRef = useRef<Array<{name: string; buffer: ArrayBuffer; score: number; pageCount: number}>>([]);
   const [downloadingDocx, setDownloadingDocx] = useState(false);
   const [printWithoutLetterhead, setPrintWithoutLetterhead] = useState(false);
   const [savedDocs, setSavedDocs] = useState<SavedDoc[]>([]);
@@ -263,14 +281,17 @@ export default function TenderAnalyzer() {
     setProcessingFile(true);
 
     rawExtractedTextRef.current = '';
-    boqPdfArrayBufferRef.current = null;
-    boqPdfPageCountRef.current = 0;
+    boqPdfCandidatesRef.current = [];
     try {
-      for (const [fileIdx, file] of files.entries()) {
+      for (const [, file] of files.entries()) {
         const arrayBuffer = await file.arrayBuffer();
         let dataUri: string;
+        let extractedText = '';
+        let pageCount = 0;
         try {
           const extraction = await extractPdfText(arrayBuffer);
+          extractedText = extraction.text;
+          pageCount = extraction.pageCount;
           if (extraction.isDigital) {
             console.log(`[PDF extraction] ${file.name} → TEXT (${extraction.charsExtracted} non-ws chars across ${extraction.pagesChecked} sampled pages of ${extraction.pageCount})`);
             dataUri = `data:text/plain;base64,${textToBase64(extraction.text)}`;
@@ -279,17 +300,16 @@ export default function TenderAnalyzer() {
             console.log(`[PDF extraction] ${file.name} → IMAGE fallback (${extraction.charsExtracted} non-ws chars across ${extraction.pagesChecked} sampled pages of ${extraction.pageCount})`);
             dataUri = `data:application/pdf;base64,${arrayBufferToBase64(arrayBuffer)}`;
           }
-          if (fileIdx === 0 && files.length === 1) {
-            boqPdfArrayBufferRef.current = arrayBuffer;
-            boqPdfPageCountRef.current = extraction.pageCount;
-          }
         } catch {
           // pdfjs failed — fall back to sending raw PDF bytes
           console.warn(`[PDF extraction] ${file.name} → IMAGE fallback (extraction error)`);
           dataUri = `data:application/pdf;base64,${arrayBufferToBase64(arrayBuffer)}`;
-          if (fileIdx === 0 && files.length === 1) {
-            boqPdfArrayBufferRef.current = arrayBuffer;
-          }
+        }
+        // Single-file uploads always qualify; multi-file uploads are score-gated
+        const score = files.length === 1 ? 100 : scoreBOQCandidate(file.name, extractedText);
+        const totalCandidateBytes = boqPdfCandidatesRef.current.reduce((s, c) => s + c.buffer.byteLength, 0);
+        if (score >= BOQ_RETAIN_THRESHOLD && totalCandidateBytes + arrayBuffer.byteLength <= BOQ_BUFFER_CAP_BYTES) {
+          boqPdfCandidatesRef.current.push({ name: file.name, buffer: arrayBuffer, score, pageCount });
         }
         base64Files.push(dataUri);
       }
@@ -312,6 +332,7 @@ export default function TenderAnalyzer() {
     setZipFileSize(file.size);
     setProcessingFile(true);
     rawExtractedTextRef.current = '';
+    boqPdfCandidatesRef.current = [];
     try {
       const zip = new JSZip();
       const contents = await zip.loadAsync(file);
@@ -326,8 +347,12 @@ export default function TenderAnalyzer() {
           const shortName = filename.split('/').pop() || filename;
           const arrayBuffer = await zipEntry.async("arraybuffer");
           let dataUri: string;
+          let zipEntryText = '';
+          let zipEntryPageCount = 0;
           try {
             const extraction = await extractPdfText(arrayBuffer);
+            zipEntryText = extraction.text;
+            zipEntryPageCount = extraction.pageCount;
             if (extraction.isDigital) {
               console.log(`[PDF extraction] ${shortName} (ZIP) → TEXT (${extraction.charsExtracted} chars / ${extraction.pageCount} pages)`);
               dataUri = `data:text/plain;base64,${textToBase64(extraction.text)}`;
@@ -339,6 +364,12 @@ export default function TenderAnalyzer() {
           } catch {
             console.warn(`[PDF extraction] ${shortName} (ZIP) → IMAGE fallback (extraction error)`);
             dataUri = `data:application/pdf;base64,${arrayBufferToBase64(arrayBuffer)}`;
+          }
+          // Retain buffer only if this file looks like a BOQ document
+          const boqScore = scoreBOQCandidate(shortName, zipEntryText);
+          const boqTotalBytes = boqPdfCandidatesRef.current.reduce((s, c) => s + c.buffer.byteLength, 0);
+          if (boqScore >= BOQ_RETAIN_THRESHOLD && boqTotalBytes + arrayBuffer.byteLength <= BOQ_BUFFER_CAP_BYTES) {
+            boqPdfCandidatesRef.current.push({ name: shortName, buffer: arrayBuffer, score: boqScore, pageCount: zipEntryPageCount });
           }
           fileDataArray.push(dataUri);
           fileNameArray.push(shortName);
@@ -567,39 +598,55 @@ export default function TenderAnalyzer() {
         setPendingProjectName(data.analysis?.tender_simplified?.tender_name || "Untitled Tender");
         setShowNameDialog(true);
 
-        // Trigger BOQ extraction in background for single-PDF uploads.
+        // Trigger BOQ extraction for all upload types when candidates were retained.
         // Always writes back a status — never silently fails.
-        if (inputType === 'pdf' && boqPdfArrayBufferRef.current) {
+        if (boqPdfCandidatesRef.current.length > 0) {
           const projectId = data.projectId;
-          const pdfBuffer = boqPdfArrayBufferRef.current;
-          const pdfPageCount = boqPdfPageCountRef.current;
           const currentUserId = user?.uid ?? null;
+          // Capture and immediately release the ref so buffers can be GC'd after extraction
+          const candidates = boqPdfCandidatesRef.current;
+          boqPdfCandidatesRef.current = [];
           (async () => {
             const latestRef = doc(db, 'saved_tenders', projectId, 'boq_extraction', 'latest');
             try {
               await setDoc(latestRef, removeUndefined({ status: 'running', startedAt: serverTimestamp() }));
-              const result = await extractBoqWithFallback(pdfBuffer);
-              const { extraction, verification, telemetry } = result;
 
-              if (extraction.items.length === 0) {
+              // Run on all candidates (highest-scored first); keep the result with the best verification score
+              let best: Awaited<ReturnType<typeof extractBoqWithFallback>> | null = null;
+              for (const candidate of [...candidates].sort((a, b) => b.score - a.score)) {
+                try {
+                  const result = await extractBoqWithFallback(candidate.buffer);
+                  if (result.extraction.items.length > 0 &&
+                      (!best || result.verification.score > best.verification.score)) {
+                    best = result;
+                  }
+                } catch (e) {
+                  console.warn(`[BOQ] extraction failed for ${candidate.name}:`, e);
+                }
+              }
+
+              if (!best) {
                 await setDoc(latestRef, removeUndefined({ status: 'no_boq_found', updatedAt: serverTimestamp() }));
                 return;
               }
 
-              // Vision fallback guard: if verification failed and page count exceeds cap, record failure
-              if (!verification.pass && telemetry.fallbackReason && pdfPageCount > 0) {
+              const { extraction, verification, telemetry } = best;
+
+              // Vision fallback guard: if verification failed, check page count across candidates
+              if (!verification.pass && telemetry.fallbackReason) {
                 const visionPageCap = 20;
-                if (pdfPageCount > visionPageCap) {
+                const maxPageCount = candidates.reduce((m, c) => Math.max(m, c.pageCount), 0);
+                if (maxPageCount > visionPageCap) {
                   await setDoc(latestRef, removeUndefined({
                     status: 'failed',
-                    reason: `PDF has ${pdfPageCount} pages, which exceeds the ${visionPageCap}-page AI verification limit.`,
+                    reason: `Document has ${maxPageCount} pages, which exceeds the ${visionPageCap}-page AI verification limit.`,
                     updatedAt: serverTimestamp(),
                   }));
                   addDoc(collection(db, 'activity_logs'), removeUndefined({
                     userId: currentUserId,
                     projectId,
                     event: 'boq_vision_fallback_skipped',
-                    reason: `pages=${pdfPageCount} > cap=${visionPageCap}`,
+                    reason: `maxPages=${maxPageCount} > cap=${visionPageCap}`,
                     verificationScore: verification.score,
                     createdAt: serverTimestamp(),
                   })).catch(console.error);

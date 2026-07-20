@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
-import { doc, getDoc, updateDoc, deleteDoc, addDoc, collection, query, where, getDocs, orderBy, writeBatch, serverTimestamp, arrayUnion, Timestamp } from "firebase/firestore";
+import { doc, getDoc, updateDoc, deleteDoc, addDoc, collection, query, where, getDocs, orderBy, writeBatch, serverTimestamp, arrayUnion, Timestamp, setDoc } from "firebase/firestore";
 import { ref as storageRef, uploadBytes, getDownloadURL } from "firebase/storage";
 import { db, storage } from "../lib/firebase";
 import { removeUndefined } from "../lib/firestore";
@@ -19,6 +19,7 @@ import ModeBReviewPanel from "../components/modeb/ModeBReviewPanel";
 import { isTemplated, fillTemplate, saveCandidateTemplate } from "../lib/docTemplates";
 import BOQSection from "../components/boq/BOQSection";
 import BOQViewer from "../components/boq/BOQViewer";
+import { extractBoqWithFallback } from "../services/boqExtractionOrchestrator";
 import type { BOQData, BidSnapshotRow } from "../lib/boq/types";
 import { INITIAL_BOQ } from "../lib/boq/types";
 
@@ -227,6 +228,58 @@ export default function ProjectDetails() {
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [showReanalyzeModal, setShowReanalyzeModal] = useState(false);
   const [showClearChatModal, setShowClearChatModal] = useState(false);
+
+  // Manual BOQ extraction for projects analysed before automatic extraction existed.
+  // Downloads stored PDF files from Firebase Storage and runs the deterministic parser.
+  // NOTE: if Vision fallback is added in future, the credit/entitlement gate belongs here
+  // before calling the extraction, since that path would consume an additional credit.
+  const handleManualBoqExtract = async () => {
+    if (!projectId) return;
+    const rawRef = project?.payloadRef;
+    const urls: string[] = Array.isArray(rawRef)
+      ? (rawRef as string[]).filter((u: any) => typeof u === 'string' && u.startsWith('http'))
+      : typeof rawRef === 'string' && rawRef.startsWith('http')
+      ? [rawRef]
+      : [];
+    if (urls.length === 0) {
+      toast.error('No source documents found. Please re-upload this tender to extract the BOQ.');
+      return;
+    }
+    const latestRef = doc(db, 'saved_tenders', projectId, 'boq_extraction', 'latest');
+    await setDoc(latestRef, removeUndefined({ status: 'running', startedAt: serverTimestamp() }));
+    let best: Awaited<ReturnType<typeof extractBoqWithFallback>> | null = null;
+    for (const url of urls) {
+      try {
+        const resp = await fetch(url);
+        const buffer = await resp.arrayBuffer();
+        const result = await extractBoqWithFallback(buffer);
+        if (result.extraction.items.length > 0 &&
+            (!best || result.verification.score > best.verification.score)) {
+          best = result;
+        }
+      } catch (e) {
+        console.warn('[BOQ] manual extract failed for URL:', e);
+      }
+    }
+    if (!best) {
+      await setDoc(latestRef, removeUndefined({ status: 'no_boq_found', updatedAt: serverTimestamp() }));
+      return;
+    }
+    const { extraction, verification, telemetry } = best;
+    const totalAmount = extraction.items.reduce((s, it) => s + (it.amount ?? 0), 0);
+    await setDoc(latestRef, removeUndefined({
+      status: 'done',
+      items: extraction.items,
+      itemCount: extraction.items.length,
+      totalAmount,
+      engine: telemetry.engine,
+      visionUsed: telemetry.engine === 'vision',
+      verificationScore: verification.score,
+      parserDurationMs: telemetry.parserDurationMs,
+      updatedAt: serverTimestamp(),
+    }));
+    void verification; // referenced via best.verification above; suppress unused-var if tree-shaken
+  };
 
   useEffect(() => {
     if (!projectId) return;
@@ -2786,71 +2839,125 @@ export default function ProjectDetails() {
             </div>
           )}
 
-          {activeTab === 'notes' && (
-            <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6">
-              <h2 className="text-lg font-bold text-slate-800 mb-4">Analysis Notes</h2>
-              {!project?.remarks ? (
-                <div className="text-slate-500 text-sm py-8 text-center">
-                  No analysis notes available for this project.
+          {activeTab === 'notes' && (() => {
+            const remarks = project?.remarks;
+            if (!remarks) {
+              return (
+                <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6">
+                  <h2 className="text-lg font-bold text-slate-800 mb-4">Analysis Notes</h2>
+                  <div className="text-slate-500 text-sm py-8 text-center">No analysis notes available for this project.</div>
                 </div>
-              ) : (
-                <div className="space-y-5">
-                  <div className="grid grid-cols-3 gap-4">
+              );
+            }
+
+            // Build per-file lookup tables from the flat remarks arrays
+            const fileNames: string[] = (project?.payloadRefNames as string[]) || [];
+            const skippedMap = new Map<number, string>(
+              (remarks.filesSkipped || []).map((s: any) => [s.index as number, s.reason as string]),
+            );
+            // Notes are pushed for analyzed files as "file N: ..." (1-indexed)
+            const noteMap = new Map<number, string>();
+            for (const note of (remarks.notes || []) as string[]) {
+              const m = /^file (\d+): (.+)$/i.exec(note);
+              if (m) noteMap.set(parseInt(m[1], 10), m[2]);
+            }
+
+            const totalCount: number = remarks.totalFilesProvided ?? fileNames.length;
+            const skippedCount: number = remarks.filesSkipped?.length ?? 0;
+            const analyzedCount: number = remarks.filesAnalyzed ?? (totalCount - skippedCount);
+
+            // Build per-file rows — use fileNames if available, else synthesise from count
+            const rowCount = Math.max(totalCount, fileNames.length);
+            const fileRows = Array.from({ length: rowCount }, (_, i) => {
+              const name = fileNames[i] ?? `File ${i + 1}`;
+              const skipped = skippedMap.has(i);
+              const skipReason = skippedMap.get(i) ?? '';
+              const noteText = noteMap.get(i + 1) ?? '';
+              const isTextLayer = noteText.startsWith('text-layer');
+              const isImagePath = noteText.startsWith('image/pdf') || noteText.startsWith('image') || noteText.includes('image/pdf');
+              return { name, skipped, skipReason, noteText, isTextLayer, isImagePath };
+            });
+
+            return (
+              <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6 space-y-6">
+                <div>
+                  <h2 className="text-lg font-bold text-slate-800 mb-4">Analysis Notes</h2>
+                  {/* Summary counts */}
+                  <div className="grid grid-cols-3 gap-3 mb-6">
                     <div className="bg-slate-50 rounded-lg p-4 text-center">
-                      <div className="text-2xl font-bold text-slate-800">{project.remarks.totalFilesProvided}</div>
-                      <div className="text-xs text-slate-500 mt-1">Files Provided</div>
+                      <div className="text-2xl font-bold text-slate-800">{totalCount}</div>
+                      <div className="text-xs text-slate-500 mt-1">Files Received</div>
                     </div>
                     <div className="bg-indigo-50 rounded-lg p-4 text-center">
-                      <div className="text-2xl font-bold text-indigo-700">{project.remarks.filesAnalyzed}</div>
-                      <div className="text-xs text-slate-500 mt-1">Files Analyzed</div>
+                      <div className="text-2xl font-bold text-indigo-700">{analyzedCount}</div>
+                      <div className="text-xs text-slate-500 mt-1">Files Analysed</div>
                     </div>
-                    <div className={`rounded-lg p-4 text-center ${project.remarks.filesSkipped?.length > 0 ? 'bg-amber-50' : 'bg-slate-50'}`}>
-                      <div className={`text-2xl font-bold ${project.remarks.filesSkipped?.length > 0 ? 'text-amber-600' : 'text-slate-800'}`}>{project.remarks.filesSkipped?.length ?? 0}</div>
+                    <div className={`rounded-lg p-4 text-center ${skippedCount > 0 ? 'bg-amber-50' : 'bg-slate-50'}`}>
+                      <div className={`text-2xl font-bold ${skippedCount > 0 ? 'text-amber-600' : 'text-slate-800'}`}>{skippedCount}</div>
                       <div className="text-xs text-slate-500 mt-1">Files Skipped</div>
                     </div>
                   </div>
 
-                  {project.remarks.filesSkipped?.length > 0 && (
-                    <div>
-                      <h3 className="text-sm font-semibold text-slate-700 mb-2">Skipped Files</h3>
-                      <ul className="space-y-1">
-                        {project.remarks.filesSkipped.map((s: any, idx: number) => (
-                          <li key={idx} className="flex items-start gap-2 text-sm text-amber-700 bg-amber-50 rounded-lg px-3 py-2">
-                            <span className="font-medium shrink-0">File {s.index + 1}:</span>
-                            <span>{s.reason}</span>
-                          </li>
-                        ))}
-                      </ul>
+                  {/* Per-file breakdown table */}
+                  {rowCount > 0 && (
+                    <div className="overflow-x-auto rounded-lg border border-slate-200">
+                      <table className="min-w-full text-sm">
+                        <thead className="bg-slate-50 border-b border-slate-200">
+                          <tr>
+                            <th className="px-4 py-2.5 text-left font-semibold text-slate-600 w-8">#</th>
+                            <th className="px-4 py-2.5 text-left font-semibold text-slate-600">Filename</th>
+                            <th className="px-4 py-2.5 text-left font-semibold text-slate-600 whitespace-nowrap">Processing Path</th>
+                            <th className="px-4 py-2.5 text-left font-semibold text-slate-600">Status</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {fileRows.map((row, i) => (
+                            <tr key={i} className={row.skipped ? 'bg-amber-50/40' : 'hover:bg-slate-50'}>
+                              <td className="px-4 py-3 text-slate-400 font-mono text-xs">{i + 1}</td>
+                              <td className="px-4 py-3 text-slate-700 font-medium max-w-xs truncate" title={row.name}>{row.name}</td>
+                              <td className="px-4 py-3 whitespace-nowrap">
+                                {row.skipped ? (
+                                  <span className="text-slate-400 text-xs">—</span>
+                                ) : row.isTextLayer ? (
+                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-100 text-emerald-700">
+                                    Text layer
+                                  </span>
+                                ) : row.isImagePath ? (
+                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700">
+                                    Image / PDF
+                                  </span>
+                                ) : (
+                                  <span className="text-slate-400 text-xs">—</span>
+                                )}
+                              </td>
+                              <td className="px-4 py-3">
+                                {row.skipped ? (
+                                  <span className="text-amber-700 text-xs">{row.skipReason || 'Skipped'}</span>
+                                ) : (
+                                  <span className="text-emerald-600 text-xs font-medium">✓ Included in analysis</span>
+                                )}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
                     </div>
                   )}
 
-                  {project.remarks.notes?.length > 0 && (
-                    <div>
-                      <h3 className="text-sm font-semibold text-slate-700 mb-2">Notes</h3>
-                      <ul className="space-y-1">
-                        {project.remarks.notes.map((note: string, idx: number) => (
-                          <li key={idx} className="flex items-start gap-2 text-sm text-slate-600 bg-slate-50 rounded-lg px-3 py-2">
-                            <span className="text-indigo-400 mt-0.5">•</span>
-                            <span>{note}</span>
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  )}
-
-                  {project.remarks.filesSkipped?.length === 0 && project.remarks.notes?.length === 0 && (
+                  {rowCount === 0 && skippedCount === 0 && (
                     <p className="text-sm text-slate-500">All files were analyzed successfully with no issues detected.</p>
                   )}
                 </div>
-              )}
-            </div>
-          )}
+              </div>
+            );
+          })()}
 
           {activeTab === 'boq' && (
             <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6">
               <BOQViewer
                 projectId={projectId!}
                 onProceedToPricing={() => setActiveTab('calculator')}
+                onManualExtract={handleManualBoqExtract}
               />
             </div>
           )}

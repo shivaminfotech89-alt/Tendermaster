@@ -18,6 +18,7 @@ import { useModeBFlow } from "../lib/modeb/useModeBFlow";
 import ModeBReviewPanel from "../components/modeb/ModeBReviewPanel";
 import { isTemplated, fillTemplate, saveCandidateTemplate } from "../lib/docTemplates";
 import BOQSection from "../components/boq/BOQSection";
+import BOQViewer from "../components/boq/BOQViewer";
 import type { BOQData, BidSnapshotRow } from "../lib/boq/types";
 import { INITIAL_BOQ } from "../lib/boq/types";
 
@@ -209,7 +210,7 @@ export default function ProjectDetails() {
   const [comparisonResult, setComparisonResult] = useState<any>(null);
   const [showCompareModal, setShowCompareModal] = useState(false);
   
-  const [activeTab, setActiveTab] = useState<'overview'|'docs'|'calculator'|'account'|'chat'|'saved_docs'|'notes'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview'|'docs'|'calculator'|'account'|'chat'|'saved_docs'|'notes'|'boq'>('overview');
 
   // Account tab — payments
   const [payments, setPayments] = useState<TenderPayment[]>([]);
@@ -1349,6 +1350,7 @@ export default function ProjectDetails() {
            {savedDocs.length > 0 && <span className="bg-indigo-100 text-indigo-700 text-[10px] font-bold px-1.5 py-0.5 rounded-full">{savedDocs.length}</span>}
          </button>
          <button onClick={() => setActiveTab('notes')} className={`px-6 py-3 font-semibold text-sm border-b-2 whitespace-nowrap transition-colors ${activeTab === 'notes' ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>Analysis Notes</button>
+         <button onClick={() => setActiveTab('boq')} className={`px-6 py-3 font-semibold text-sm border-b-2 whitespace-nowrap transition-colors ${activeTab === 'boq' ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>BOQ</button>
       </div>
 
       <div className="flex flex-col gap-8">
@@ -2841,6 +2843,15 @@ export default function ProjectDetails() {
                   )}
                 </div>
               )}
+            </div>
+          )}
+
+          {activeTab === 'boq' && (
+            <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6">
+              <BOQViewer
+                projectId={projectId!}
+                onProceedToPricing={() => setActiveTab('calculator')}
+              />
             </div>
           )}
 

@@ -10,8 +10,8 @@
  *   skip           → ignore
  */
 
-import type { TextRow, BoqItem, LockedColumnMap } from '../../types/boq';
-import { classifyRow, type ClassifiedRow } from './rowClassifier';
+import type { TextRow, BoqItem, LockedColumnMap, ClassifiedRow } from '../../types/boq';
+import { classifyRow } from './rowClassifier';
 import { DEFAULT_SECTION_BREAK_PATTERNS, type SectionBreakPattern } from './sectionBreak';
 
 const NUM_CLEAN_RE = /[^0-9.]/g;

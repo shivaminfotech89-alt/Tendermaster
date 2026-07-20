@@ -1,0 +1,374 @@
+import { useState, useEffect } from "react";
+import { doc, onSnapshot, getDoc } from "firebase/firestore";
+import { db } from "../../lib/firebase";
+import type { BoqItem } from "../../types/boq";
+import * as XLSX from "xlsx";
+import {
+  Loader2, AlertCircle, Search, Download, ArrowRight,
+  ChevronDown, ChevronUp, RefreshCw, FileText, Sparkles,
+} from "lucide-react";
+
+type ExtractionStatus = 'loading' | 'running' | 'done' | 'failed' | 'no_boq_found';
+type SortField = 'itemNo' | 'amount' | 'quantity';
+type SortDir = 'asc' | 'desc';
+
+interface BOQMeta {
+  itemCount: number;
+  totalAmount: number;
+  engine: string;
+  visionUsed: boolean;
+  verificationScore: number;
+  parserDurationMs: number;
+}
+
+interface BOQViewerProps {
+  projectId: string;
+  onProceedToPricing: () => void;
+}
+
+function fmtIndian(n: number): string {
+  return new Intl.NumberFormat('en-IN', { maximumFractionDigits: 2 }).format(n);
+}
+
+function SortIcon({ field, sortField, sortDir }: { field: SortField; sortField: SortField; sortDir: SortDir }) {
+  if (sortField !== field) return <ChevronDown className="w-3 h-3 opacity-30 inline" />;
+  return sortDir === 'asc'
+    ? <ChevronUp className="w-3 h-3 inline" />
+    : <ChevronDown className="w-3 h-3 inline" />;
+}
+
+export default function BOQViewer({ projectId, onProceedToPricing }: BOQViewerProps) {
+  const [status, setStatus] = useState<ExtractionStatus>('loading');
+  const [items, setItems] = useState<BoqItem[]>([]);
+  const [meta, setMeta] = useState<BOQMeta | null>(null);
+  const [failReason, setFailReason] = useState('');
+  const [search, setSearch] = useState('');
+  const [sortField, setSortField] = useState<SortField>('itemNo');
+  const [sortDir, setSortDir] = useState<SortDir>('asc');
+  const [expandedDescs, setExpandedDescs] = useState<Set<string>>(new Set());
+  const [refreshing, setRefreshing] = useState(false);
+
+  useEffect(() => {
+    const latestRef = doc(db, 'saved_tenders', projectId, 'boq_extraction', 'latest');
+    const unsub = onSnapshot(
+      latestRef,
+      (snap) => {
+        if (!snap.exists()) { setStatus('no_boq_found'); return; }
+        const data = snap.data() as any;
+        setStatus(data.status as ExtractionStatus);
+        if (data.status === 'done') {
+          setItems(data.items ?? []);
+          setMeta({
+            itemCount: data.itemCount ?? 0,
+            totalAmount: data.totalAmount ?? 0,
+            engine: data.engine ?? 'deterministic',
+            visionUsed: data.visionUsed ?? false,
+            verificationScore: data.verificationScore ?? 0,
+            parserDurationMs: data.parserDurationMs ?? 0,
+          });
+        }
+        if (data.status === 'failed') setFailReason(data.reason ?? 'Unknown error');
+      },
+      (err) => {
+        console.error('[BOQViewer] snapshot error', err);
+        setStatus('failed');
+        setFailReason('Could not load BOQ data.');
+      },
+    );
+    return () => unsub();
+  }, [projectId]);
+
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    try {
+      const snap = await getDoc(doc(db, 'saved_tenders', projectId, 'boq_extraction', 'latest'));
+      if (!snap.exists()) { setStatus('no_boq_found'); return; }
+      const data = snap.data() as any;
+      setStatus(data.status as ExtractionStatus);
+      if (data.status === 'done') {
+        setItems(data.items ?? []);
+        setMeta({
+          itemCount: data.itemCount ?? 0,
+          totalAmount: data.totalAmount ?? 0,
+          engine: data.engine ?? 'deterministic',
+          visionUsed: data.visionUsed ?? false,
+          verificationScore: data.verificationScore ?? 0,
+          parserDurationMs: data.parserDurationMs ?? 0,
+        });
+      }
+      if (data.status === 'failed') setFailReason(data.reason ?? 'Unknown error');
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
+  const handleSort = (field: SortField) => {
+    if (sortField === field) {
+      setSortDir(d => d === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortField(field);
+      setSortDir('asc');
+    }
+  };
+
+  const filtered = items.filter(it =>
+    !search ||
+    it.itemNo.toLowerCase().includes(search.toLowerCase()) ||
+    it.description.toLowerCase().includes(search.toLowerCase()),
+  );
+
+  const sorted = [...filtered].sort((a, b) => {
+    let cmp = 0;
+    if (sortField === 'itemNo') {
+      const an = parseFloat(a.itemNo) || 0;
+      const bn = parseFloat(b.itemNo) || 0;
+      cmp = an !== bn ? an - bn : a.itemNo.localeCompare(b.itemNo);
+    } else if (sortField === 'amount') {
+      cmp = (a.amount ?? 0) - (b.amount ?? 0);
+    } else {
+      cmp = a.quantity - b.quantity;
+    }
+    return sortDir === 'asc' ? cmp : -cmp;
+  });
+
+  const toggleDesc = (id: string) => {
+    setExpandedDescs(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const exportCsv = () => {
+    const rows = [
+      ['Item No', 'Description', 'Unit', 'Quantity', 'Est. Rate (Rs)', 'Amount (Rs)'],
+      ...sorted.map(it => [
+        it.itemNo, it.description, it.unit, it.quantity,
+        it.estimatedRate ?? '', it.amount ?? '',
+      ]),
+    ];
+    const csv = rows.map(r =>
+      r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(','),
+    ).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = 'boq.csv'; a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const exportExcel = () => {
+    const data = sorted.map(it => ({
+      'Item No': it.itemNo,
+      'Description': it.description,
+      'Unit': it.unit,
+      'Quantity': it.quantity,
+      'Est. Rate (Rs)': it.estimatedRate ?? '',
+      'Amount (Rs)': it.amount ?? '',
+    }));
+    const ws = XLSX.utils.json_to_sheet(data);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'BOQ');
+    XLSX.writeFile(wb, 'boq.xlsx');
+  };
+
+  if (status === 'loading') {
+    return (
+      <div className="flex items-center justify-center py-20">
+        <Loader2 className="w-6 h-6 animate-spin text-indigo-500" />
+      </div>
+    );
+  }
+
+  if (status === 'running') {
+    return (
+      <div className="flex flex-col items-center justify-center py-20 gap-4 text-slate-500">
+        <Loader2 className="w-8 h-8 animate-spin text-indigo-500" />
+        <p className="font-medium">Extracting BOQ items…</p>
+        <p className="text-sm text-slate-400">This may take a few seconds.</p>
+      </div>
+    );
+  }
+
+  if (status === 'no_boq_found') {
+    return (
+      <div className="flex flex-col items-center justify-center py-20 gap-3 text-slate-500">
+        <FileText className="w-10 h-10 text-slate-300" />
+        <p className="font-semibold text-slate-600">No BOQ detected</p>
+        <p className="text-sm text-center max-w-sm text-slate-400">
+          This tender document does not appear to contain a structured Bill of Quantities.
+        </p>
+      </div>
+    );
+  }
+
+  if (status === 'failed') {
+    return (
+      <div className="flex flex-col items-center justify-center py-20 gap-4">
+        <AlertCircle className="w-10 h-10 text-amber-400" />
+        <p className="font-semibold text-slate-700">BOQ extraction failed</p>
+        {failReason && (
+          <p className="text-sm text-slate-500 text-center max-w-md">{failReason}</p>
+        )}
+        <button
+          onClick={handleRefresh}
+          disabled={refreshing}
+          className="flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg border border-slate-300 hover:bg-slate-50 transition-colors disabled:opacity-50"
+        >
+          <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
+          Refresh
+        </button>
+      </div>
+    );
+  }
+
+  // status === 'done'
+  const totalFiltered = sorted.reduce((s, it) => s + (it.amount ?? 0), 0);
+
+  return (
+    <div className="space-y-6">
+      {/* Summary cards */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+        <div className="bg-indigo-50 rounded-xl p-4">
+          <p className="text-xs font-medium text-indigo-500 uppercase tracking-wide mb-1">Items</p>
+          <p className="text-2xl font-bold text-indigo-700">{meta?.itemCount ?? items.length}</p>
+        </div>
+        <div className="bg-amber-50 rounded-xl p-4 col-span-1 sm:col-span-1">
+          <p className="text-xs font-medium text-amber-600 uppercase tracking-wide mb-1">Total (₹)</p>
+          <p className="text-xl font-bold text-amber-700 break-all">{fmtIndian(meta?.totalAmount ?? 0)}</p>
+        </div>
+        <div className="bg-slate-50 rounded-xl p-4">
+          <p className="text-xs font-medium text-slate-500 uppercase tracking-wide mb-1">Engine</p>
+          <div className="flex items-center gap-1 mt-1">
+            <p className="text-sm font-semibold text-slate-700">
+              {meta?.visionUsed ? 'AI Assisted Extraction' : 'Parser'}
+            </p>
+            {meta?.visionUsed && <Sparkles className="w-3.5 h-3.5 text-indigo-400" />}
+          </div>
+        </div>
+        <div className="bg-slate-50 rounded-xl p-4">
+          <p className="text-xs font-medium text-slate-500 uppercase tracking-wide mb-1">Confidence</p>
+          <p className="text-sm font-semibold text-slate-700 mt-1">{meta?.verificationScore ?? 0}/100</p>
+        </div>
+        <div className="bg-slate-50 rounded-xl p-4">
+          <p className="text-xs font-medium text-slate-500 uppercase tracking-wide mb-1">Parse Time</p>
+          <p className="text-sm font-semibold text-slate-700 mt-1">
+            {((meta?.parserDurationMs ?? 0) / 1000).toFixed(1)}s
+          </p>
+        </div>
+      </div>
+
+      {/* Toolbar */}
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="relative flex-1 min-w-[180px]">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+          <input
+            type="text"
+            placeholder="Search items or descriptions…"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            className="w-full pl-9 pr-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-300"
+          />
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            onClick={exportCsv}
+            className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium rounded-lg border border-slate-200 hover:bg-slate-50 transition-colors"
+          >
+            <Download className="w-4 h-4" /> CSV
+          </button>
+          <button
+            onClick={exportExcel}
+            className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium rounded-lg border border-slate-200 hover:bg-slate-50 transition-colors"
+          >
+            <Download className="w-4 h-4" /> Excel
+          </button>
+          <button
+            onClick={onProceedToPricing}
+            className="flex items-center gap-1.5 px-4 py-2 text-sm font-semibold rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 transition-colors"
+          >
+            Proceed to Pricing <ArrowRight className="w-4 h-4" />
+          </button>
+        </div>
+      </div>
+
+      {/* Table */}
+      <div className="overflow-x-auto rounded-xl border border-slate-200 shadow-sm">
+        <table className="min-w-full text-sm">
+          <thead className="bg-slate-50 border-b border-slate-200">
+            <tr>
+              <th className="px-4 py-3 text-left font-semibold text-slate-600 whitespace-nowrap">
+                <button className="flex items-center gap-1" onClick={() => handleSort('itemNo')}>
+                  Item No <SortIcon field="itemNo" sortField={sortField} sortDir={sortDir} />
+                </button>
+              </th>
+              <th className="px-4 py-3 text-left font-semibold text-slate-600 min-w-[200px]">Description</th>
+              <th className="px-4 py-3 text-left font-semibold text-slate-600 whitespace-nowrap">Unit</th>
+              <th className="px-4 py-3 text-right font-semibold text-slate-600 whitespace-nowrap">
+                <button className="flex items-center gap-1 ml-auto" onClick={() => handleSort('quantity')}>
+                  Quantity <SortIcon field="quantity" sortField={sortField} sortDir={sortDir} />
+                </button>
+              </th>
+              <th className="px-4 py-3 text-right font-semibold text-slate-600 whitespace-nowrap">Est. Rate (₹)</th>
+              <th className="px-4 py-3 text-right font-semibold text-slate-600 whitespace-nowrap">
+                <button className="flex items-center gap-1 ml-auto" onClick={() => handleSort('amount')}>
+                  Amount (₹) <SortIcon field="amount" sortField={sortField} sortDir={sortDir} />
+                </button>
+              </th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            {sorted.length === 0 ? (
+              <tr>
+                <td colSpan={6} className="px-4 py-10 text-center text-slate-400">
+                  No items match your search.
+                </td>
+              </tr>
+            ) : sorted.map(item => {
+              const expanded = expandedDescs.has(item.id);
+              const longDesc = item.description.length > 80;
+              return (
+                <tr key={item.id} className="hover:bg-slate-50 transition-colors">
+                  <td className="px-4 py-3 font-mono text-slate-600 whitespace-nowrap align-top">{item.itemNo}</td>
+                  <td className="px-4 py-3 text-slate-700 max-w-xs">
+                    <div className={expanded ? '' : 'line-clamp-2'}>{item.description}</div>
+                    {longDesc && (
+                      <button
+                        onClick={() => toggleDesc(item.id)}
+                        className="text-xs text-indigo-500 hover:underline mt-0.5 flex items-center gap-0.5"
+                      >
+                        {expanded
+                          ? <><ChevronUp className="w-3 h-3" />Show less</>
+                          : <><ChevronDown className="w-3 h-3" />Show more</>}
+                      </button>
+                    )}
+                  </td>
+                  <td className="px-4 py-3 text-slate-600 whitespace-nowrap align-top">{item.unit}</td>
+                  <td className="px-4 py-3 text-right text-slate-600 whitespace-nowrap align-top">{item.quantity}</td>
+                  <td className="px-4 py-3 text-right text-slate-600 whitespace-nowrap align-top">
+                    {item.estimatedRate !== undefined ? fmtIndian(item.estimatedRate) : '—'}
+                  </td>
+                  <td className="px-4 py-3 text-right font-medium text-slate-700 whitespace-nowrap align-top">
+                    {item.amount !== undefined ? fmtIndian(item.amount) : '—'}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+          {sorted.length > 0 && (
+            <tfoot className="bg-slate-50 border-t border-slate-200">
+              <tr>
+                <td colSpan={5} className="px-4 py-3 text-right text-sm font-semibold text-slate-600">
+                  {search ? `${sorted.length} of ${items.length} items` : `${sorted.length} items`}
+                </td>
+                <td className="px-4 py-3 text-right font-bold text-slate-800 whitespace-nowrap">
+                  ₹{fmtIndian(totalFiltered)}
+                </td>
+              </tr>
+            </tfoot>
+          )}
+        </table>
+      </div>
+    </div>
+  );
+}

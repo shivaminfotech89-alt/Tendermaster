@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import { useAuth } from "../auth/AuthProvider";
 import { useAnalyzerStore } from "../context/AnalyzerContext";
 import { Upload, X, Loader2, Sparkles, AlertCircle, FileText, CheckCircle2, ChevronRight, Activity, CalendarDays, File, MessageSquare, Send, Calculator, Building, Target, Download, Edit2, Trash2, Plus, Minus, ArrowLeft, Info, Save, Scan } from "lucide-react";
-import { collection, getDocs, query, addDoc, orderBy, serverTimestamp, doc, updateDoc, Timestamp } from "firebase/firestore";
+import { collection, getDocs, query, addDoc, orderBy, serverTimestamp, doc, updateDoc, setDoc, Timestamp } from "firebase/firestore";
 import { ref as storageRef, uploadBytes, getDownloadURL } from "firebase/storage";
 import { db, storage } from "../lib/firebase";
 import Markdown from "react-markdown";
@@ -23,6 +23,7 @@ import type { BOQData } from "../lib/boq/types";
 import { INITIAL_BOQ } from "../lib/boq/types";
 import { detectBoqTypeFromText } from "../lib/boq/detectBoqType";
 import { removeUndefined } from "../lib/firestore";
+import { extractBoqWithFallback } from "../services/boqExtractionOrchestrator";
 
 const CollapsibleSection = ({ title, defaultOpen = true, children }: { title: string, defaultOpen?: boolean, children: React.ReactNode }) => {
   const [isOpen, setIsOpen] = useState(defaultOpen);
@@ -173,6 +174,9 @@ export default function TenderAnalyzer() {
   const [boqChangedSinceDocGen, setBoqChangedSinceDocGen] = useState(false);
   // Accumulates raw PDF text during upload for client-side BOQ type detection
   const rawExtractedTextRef = useRef<string>('');
+  // Stores raw PDF bytes for BOQ extraction (single-PDF uploads only)
+  const boqPdfArrayBufferRef = useRef<ArrayBuffer | null>(null);
+  const boqPdfPageCountRef = useRef<number>(0);
   const [downloadingDocx, setDownloadingDocx] = useState(false);
   const [printWithoutLetterhead, setPrintWithoutLetterhead] = useState(false);
   const [savedDocs, setSavedDocs] = useState<SavedDoc[]>([]);
@@ -259,8 +263,10 @@ export default function TenderAnalyzer() {
     setProcessingFile(true);
 
     rawExtractedTextRef.current = '';
+    boqPdfArrayBufferRef.current = null;
+    boqPdfPageCountRef.current = 0;
     try {
-      for (const file of files) {
+      for (const [fileIdx, file] of files.entries()) {
         const arrayBuffer = await file.arrayBuffer();
         let dataUri: string;
         try {
@@ -273,10 +279,17 @@ export default function TenderAnalyzer() {
             console.log(`[PDF extraction] ${file.name} → IMAGE fallback (${extraction.charsExtracted} non-ws chars across ${extraction.pagesChecked} sampled pages of ${extraction.pageCount})`);
             dataUri = `data:application/pdf;base64,${arrayBufferToBase64(arrayBuffer)}`;
           }
+          if (fileIdx === 0 && files.length === 1) {
+            boqPdfArrayBufferRef.current = arrayBuffer;
+            boqPdfPageCountRef.current = extraction.pageCount;
+          }
         } catch {
           // pdfjs failed — fall back to sending raw PDF bytes
           console.warn(`[PDF extraction] ${file.name} → IMAGE fallback (extraction error)`);
           dataUri = `data:application/pdf;base64,${arrayBufferToBase64(arrayBuffer)}`;
+          if (fileIdx === 0 && files.length === 1) {
+            boqPdfArrayBufferRef.current = arrayBuffer;
+          }
         }
         base64Files.push(dataUri);
       }
@@ -553,6 +566,68 @@ export default function TenderAnalyzer() {
         setSavedProjectId(data.projectId);
         setPendingProjectName(data.analysis?.tender_simplified?.tender_name || "Untitled Tender");
         setShowNameDialog(true);
+
+        // Trigger BOQ extraction in background for single-PDF uploads.
+        // Always writes back a status — never silently fails.
+        if (inputType === 'pdf' && boqPdfArrayBufferRef.current) {
+          const projectId = data.projectId;
+          const pdfBuffer = boqPdfArrayBufferRef.current;
+          const pdfPageCount = boqPdfPageCountRef.current;
+          const currentUserId = user?.uid ?? null;
+          (async () => {
+            const latestRef = doc(db, 'saved_tenders', projectId, 'boq_extraction', 'latest');
+            try {
+              await setDoc(latestRef, removeUndefined({ status: 'running', startedAt: serverTimestamp() }));
+              const result = await extractBoqWithFallback(pdfBuffer);
+              const { extraction, verification, telemetry } = result;
+
+              if (extraction.items.length === 0) {
+                await setDoc(latestRef, removeUndefined({ status: 'no_boq_found', updatedAt: serverTimestamp() }));
+                return;
+              }
+
+              // Vision fallback guard: if verification failed and page count exceeds cap, record failure
+              if (!verification.pass && telemetry.fallbackReason && pdfPageCount > 0) {
+                const visionPageCap = 20;
+                if (pdfPageCount > visionPageCap) {
+                  await setDoc(latestRef, removeUndefined({
+                    status: 'failed',
+                    reason: `PDF has ${pdfPageCount} pages, which exceeds the ${visionPageCap}-page AI verification limit.`,
+                    updatedAt: serverTimestamp(),
+                  }));
+                  addDoc(collection(db, 'activity_logs'), removeUndefined({
+                    userId: currentUserId,
+                    projectId,
+                    event: 'boq_vision_fallback_skipped',
+                    reason: `pages=${pdfPageCount} > cap=${visionPageCap}`,
+                    verificationScore: verification.score,
+                    createdAt: serverTimestamp(),
+                  })).catch(console.error);
+                  return;
+                }
+              }
+
+              const totalAmount = extraction.items.reduce((s, it) => s + (it.amount ?? 0), 0);
+              await setDoc(latestRef, removeUndefined({
+                status: 'done',
+                items: extraction.items,
+                itemCount: extraction.items.length,
+                totalAmount,
+                engine: telemetry.engine,
+                visionUsed: telemetry.engine === 'vision',
+                verificationScore: verification.score,
+                parserDurationMs: telemetry.parserDurationMs,
+                updatedAt: serverTimestamp(),
+              }));
+            } catch (err: any) {
+              setDoc(latestRef, removeUndefined({
+                status: 'failed',
+                reason: err?.message ?? 'BOQ extraction failed.',
+                updatedAt: serverTimestamp(),
+              })).catch(() => {});
+            }
+          })();
+        }
       }
 
     } catch (err: any) {

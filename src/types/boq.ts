@@ -97,3 +97,74 @@ export interface PendingExtraction {
   tables: DetectedTable[];
   rawText: string;
 }
+
+// ── Phase 2: linear extraction ─────────────────────────────────────────────
+
+/** x-range for one role column, derived from the anchor header row */
+export interface ColumnBoundary {
+  role: ColumnRole;
+  x: number;      // anchor block x (centre reference)
+  minX: number;   // inclusive left edge for data-row matching
+  maxX: number;   // exclusive right edge for data-row matching
+}
+
+/** Column map locked after the anchor row is found at high confidence */
+export interface LockedColumnMap {
+  anchorRowIndex: number;
+  anchorConfidence: number;
+  boundaries: ColumnBoundary[];   // sorted by x ascending
+  headerText: string;             // full text of anchor row (repeated-header detection)
+}
+
+export type RowClass =
+  | 'new_item'        // first column has a valid item number
+  | 'continuation'    // no item number, has description text → append to current item
+  | 'repeated_header' // exact/near-duplicate of the anchor row → skip
+  | 'section_break'   // title matches a section-break pattern → stop BOQ
+  | 'skip';           // empty or irrelevant row
+
+export interface ClassifiedRow {
+  rowClass: RowClass;
+  cells: Partial<Record<ColumnRole, string>>;
+  row: TextRow;
+  sectionBreakReason?: string;
+}
+
+// ── Verification ───────────────────────────────────────────────────────────
+
+export interface VerificationCheck {
+  name: string;
+  pass: boolean;
+  critical: boolean;   // critical=true → failure makes the whole result FAIL
+  detail: string[];
+}
+
+export interface VerificationResult {
+  pass: boolean;
+  checks: VerificationCheck[];
+  criticalFailures: string[];
+  statedTotal: number | null;
+  computedTotal: number;
+  score: number;   // 0–100
+}
+
+// ── Orchestrator / telemetry ───────────────────────────────────────────────
+
+export type ExtractionEngine = 'deterministic' | 'vision';
+
+export interface ExtractionTelemetry {
+  engine: ExtractionEngine;
+  parserDurationMs: number;
+  verificationDurationMs: number;
+  visionDurationMs?: number;
+  verificationScore: number;
+  fallbackReason?: string;
+  pagesProcessed: number;
+  itemsExtracted: number;
+}
+
+export interface OrchestratorResult {
+  extraction: ExtractionResult;
+  verification: VerificationResult;
+  telemetry: ExtractionTelemetry;
+}

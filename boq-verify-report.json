@@ -1,0 +1,401 @@
+{
+  "pdfPath": "C:\\Users\\Administrator\\Downloads\\part1.pdf",
+  "totalItems": 0,
+  "computedTotal": 0,
+  "expectedTotal": 48265.33,
+  "diff": 48265.33,
+  "missingItems": [
+    "1",
+    "2",
+    "3",
+    "4",
+    "5",
+    "6",
+    "7",
+    "8",
+    "9",
+    "10",
+    "11",
+    "12",
+    "13",
+    "14",
+    "15",
+    "16",
+    "17",
+    "18",
+    "19",
+    "20",
+    "21",
+    "22",
+    "23",
+    "24",
+    "25",
+    "26",
+    "27",
+    "28",
+    "29",
+    "30",
+    "31",
+    "32",
+    "33",
+    "34",
+    "35",
+    "36",
+    "37",
+    "38",
+    "39",
+    "40",
+    "41"
+  ],
+  "duplicateItems": [],
+  "tables": [
+    {
+      "type": "other",
+      "itemCount": 0
+    },
+    {
+      "type": "other",
+      "title": "BAREJA, DIST.: AHMEDABABD.",
+      "itemCount": 0,
+      "headerConfidence": 80.80000000000001,
+      "mapping": {
+        "0": "schedule",
+        "2": "description",
+        "3": "amount"
+      }
+    },
+    {
+      "type": "boq_schedule",
+      "title": "BAREJA NAGARPLAIKA AREA",
+      "itemCount": 0
+    },
+    {
+      "type": "other",
+      "title": "Say Amount Rs. 48266.00",
+      "itemCount": 0
+    },
+    {
+      "type": "other",
+      "title": "(In Words (In Words",
+      "itemCount": 0
+    },
+    {
+      "type": "other",
+      "title": "rate mentioned in all the tender.",
+      "itemCount": 0
+    },
+    {
+      "type": "other",
+      "title": "6. Bidder has to quote rates without GST, GST will be applicable extra on tender rate.",
+      "itemCount": 0
+    },
+    {
+      "type": "other",
+      "title": "Ahmedabad Bareja",
+      "itemCount": 0
+    },
+    {
+      "type": "boq_schedule",
+      "title": "Bareja",
+      "itemCount": 0,
+      "headerConfidence": 71.52571428571429,
+      "mapping": {
+        "4": "description",
+        "7": "quantity",
+        "10": "unit",
+        "11": "estimated_rate",
+        "12": "amount"
+      }
+    },
+    {
+      "type": "other",
+      "title": "2.00 unserviceable materials with all lead and lift. (i) R.C.C. work 1.00 Cu.M 1030.81 1030.81",
+      "itemCount": 0,
+      "headerConfidence": 51.13535353535353,
+      "mapping": {
+        "1": "description",
+        "5": "bid_rate"
+      }
+    },
+    {
+      "type": "other",
+      "title": "6.00 materilas and disposal of unserviceable materials with all leadand lift. 1.00 Sqm 47.72 47.72",
+      "itemCount": 0,
+      "headerConfidence": 58.58571428571429,
+      "mapping": {
+        "3": "amount",
+        "8": "remarks",
+        "10": "bid_rate"
+      }
+    },
+    {
+      "type": "other",
+      "title": "and sand paper with ready mixed priming paint brushing red lead.",
+      "itemCount": 0
+    },
+    {
+      "type": "other",
+      "title": "on the road side slope as directed upto 50Mt.lead.",
+      "itemCount": 0
+    },
+    {
+      "type": "other",
+      "title": "directed by engineer - in- charge. (a) 5.00 KM LEAD",
+      "itemCount": 0
+    },
+    {
+      "type": "boq_schedule",
+      "title": "desired compaction complete as per MORT & H clause 401",
+      "itemCount": 0,
+      "headerConfidence": 71.52571428571429,
+      "mapping": {
+        "4": "description",
+        "7": "quantity",
+        "10": "unit",
+        "11": "estimated_rate",
+        "12": "amount"
+      }
+    },
+    {
+      "type": "other",
+      "title": "aggregate watering and compacting to the required density.",
+      "itemCount": 0
+    },
+    {
+      "type": "boq_schedule",
+      "title": "desired density.",
+      "itemCount": 0,
+      "headerConfidence": 64.33333333333333,
+      "mapping": {
+        "1": "item_no",
+        "3": "unit"
+      }
+    },
+    {
+      "type": "other",
+      "title": "curing and filling in joints with bitumen complete.",
+      "itemCount": 0
+    },
+    {
+      "type": "other",
+      "title": "21.00 1.00 Cu.M 553.79 553.79",
+      "itemCount": 0
+    },
+    {
+      "type": "other",
+      "title": "22.00 1.00 Cu.M 611.13 611.13",
+      "itemCount": 0
+    },
+    {
+      "type": "other",
+      "title": "23.00 1.00 Cu.M 802.87 802.87",
+      "itemCount": 0
+    },
+    {
+      "type": "other",
+      "title": "25.00 bending, binding and placing in position complete upto floor two level 1.00 kg 76.52 76.52",
+      "itemCount": 0
+    },
+    {
+      "type": "boq_schedule",
+      "title": "line and level as per guidlines of IRC : SP 63-2018 etc. Complete.",
+      "itemCount": 0,
+      "headerConfidence": 71.52571428571429,
+      "mapping": {
+        "4": "description",
+        "7": "quantity",
+        "10": "unit",
+        "11": "estimated_rate",
+        "12": "amount"
+      }
+    },
+    {
+      "type": "other",
+      "title": "line and level as per guidlines of IRC : SP 63-2018 etc. Complete.",
+      "itemCount": 0,
+      "headerConfidence": 68.83333333333333,
+      "mapping": {
+        "1": "gst",
+        "3": "quantity"
+      }
+    },
+    {
+      "type": "other",
+      "title": "level,filling the joint with C:M 1:3 (1cement:3fine sand) etc complete.",
+      "itemCount": 0
+    },
+    {
+      "type": "other",
+      "title": "with 500mm clear dia and 0.40 mt. av. ht.",
+      "itemCount": 0
+    },
+    {
+      "type": "other",
+      "title": "curing mold work etc.- Heavy Duty - Frame suitable for 50cm opening of MH",
+      "itemCount": 0
+    },
+    {
+      "type": "other",
+      "title": "curing mold work etc.- Heavy Duty - Cover suitable for 50cm opening of MH",
+      "itemCount": 0,
+      "headerConfidence": 68.83333333333333,
+      "mapping": {
+        "1": "amount",
+        "3": "quantity"
+      }
+    },
+    {
+      "type": "other",
+      "title": "32.00 excluding cost of R. C. C. 1.00 Nos. 320.850 320.85",
+      "itemCount": 0
+    },
+    {
+      "type": "boq_schedule",
+      "title": "hardner)",
+      "itemCount": 0,
+      "headerConfidence": 71.52571428571429,
+      "mapping": {
+        "4": "description",
+        "7": "quantity",
+        "10": "unit",
+        "11": "estimated_rate",
+        "12": "amount"
+      }
+    },
+    {
+      "type": "other",
+      "title": "years.",
+      "itemCount": 0
+    },
+    {
+      "type": "other",
+      "title": "accordance with the required specification.",
+      "itemCount": 0
+    },
+    {
+      "type": "other",
+      "title": "contractors own machineries.",
+      "itemCount": 0
+    },
+    {
+      "type": "other",
+      "title": "plant and machineries.",
+      "itemCount": 0
+    },
+    {
+      "type": "boq_schedule",
+      "title": "sparying primer at the rate of 7.50 Kg. / 10 Smt using mechanical means.",
+      "itemCount": 0,
+      "headerConfidence": 72.6246153846154,
+      "mapping": {
+        "4": "description",
+        "7": "quantity",
+        "10": "unit",
+        "11": "estimated_rate",
+        "12": "amount"
+      }
+    },
+    {
+      "type": "other",
+      "title": "Stamp with signature of contractor",
+      "itemCount": 0
+    },
+    {
+      "type": "boq_schedule",
+      "title": "(B)Lead for Bulk Asphalt 60 km",
+      "itemCount": 0,
+      "headerConfidence": 68.88888888888889,
+      "mapping": {
+        "0": "item_no",
+        "6": "quantity",
+        "8": "estimated_rate",
+        "11": "amount"
+      }
+    },
+    {
+      "type": "boq_schedule",
+      "title": "(A) Total 1457.34",
+      "itemCount": 0,
+      "headerConfidence": 77.77777777777777,
+      "mapping": {
+        "0": "item_no",
+        "4": "quantity",
+        "5": "estimated_rate",
+        "7": "amount"
+      }
+    },
+    {
+      "type": "other",
+      "title": "Total = (A) + (B) 1693.26 Rs/Cmt",
+      "itemCount": 0
+    },
+    {
+      "type": "other",
+      "title": "and compacting to the required density.",
+      "itemCount": 0,
+      "headerConfidence": 63.97142857142857,
+      "mapping": {
+        "1": "item_no",
+        "2": "estimated_rate",
+        "12": "description"
+      }
+    },
+    {
+      "type": "boq_schedule",
+      "title": "Cost for 225 Cum",
+      "itemCount": 0,
+      "headerConfidence": 85,
+      "mapping": {
+        "2": "item_no",
+        "3": "quantity",
+        "4": "unit",
+        "5": "estimated_rate",
+        "6": "amount"
+      }
+    },
+    {
+      "type": "other",
+      "title": "Total 6824.40",
+      "itemCount": 0
+    },
+    {
+      "type": "other",
+      "title": "(C) Material",
+      "itemCount": 0,
+      "headerConfidence": 65.33333333333333,
+      "mapping": {
+        "0": "item_no",
+        "13": "estimated_rate"
+      }
+    },
+    {
+      "type": "other",
+      "title": "3 2.36mm to 75 micron Stone dust @ 30% 149.63 81.80 91.00 6.77 697.87",
+      "itemCount": 0,
+      "headerConfidence": 70.9090909090909,
+      "mapping": {
+        "4": "quantity",
+        "8": "unit",
+        "9": "amount"
+      }
+    },
+    {
+      "type": "other",
+      "title": "1 M/c B.T. Metal 45mm To 22.4 mm @ 30% 67.50 1200.90 Cum 81060.75",
+      "itemCount": 0
+    },
+    {
+      "type": "other",
+      "title": "Total 240390.6",
+      "itemCount": 0,
+      "headerConfidence": 68.80000000000001,
+      "mapping": {
+        "0": "description",
+        "1": "amount",
+        "2": "item_no"
+      }
+    }
+  ],
+  "items": [],
+  "checksPassedCount": 2
+}

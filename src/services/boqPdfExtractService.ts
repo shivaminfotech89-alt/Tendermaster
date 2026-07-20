@@ -5,9 +5,10 @@ import type {
 import { groupIntoRows, estimateMedianLineHeight, detectRowGap, rowText } from '../utils/boq/rowGrouping';
 import { detectColumns } from '../utils/boq/columnGrouping';
 import { detectHeader, isRepeatedHeader } from '../utils/boq/headerDetection';
-import { reconstructBoqItems } from '../utils/boq/tableReconstruction';
 import { calculateConfidence } from '../utils/boq/confidenceScoring';
 import { classifyTable, detectTenderBoqType } from './boqClassifierService';
+import { findAnchorRow } from '../utils/boq/anchorDetection';
+import { reconstructBoqLinear } from '../utils/boq/linearReconstruction';
 
 function isTextItem(item: unknown): item is { str: string; transform: number[]; width: number; height: number } {
   return (
@@ -98,12 +99,23 @@ export async function extractBoqFromPdf(arrayBuffer: ArrayBuffer): Promise<Extra
   }
 
   const rows = groupIntoRows(allBlocks);
+
+  // ── Phase A: find BOQ anchor row (global scan, no region splitting) ────────
+  const lockedMap = findAnchorRow(rows, 60);
+
+  // ── Phase B: linear item reconstruction ───────────────────────────────────
+  const { items, warnings: reconWarnings } = lockedMap
+    ? reconstructBoqLinear(rows, lockedMap)
+    : { items: [], warnings: ['No BOQ column header found — cannot reconstruct items.'] };
+
+  // ── Phase C: region-based table classification (for display / RA detection)
+  //    Items are NOT reconstructed here; they come from Phase B above.
   const medianLineHeight = estimateMedianLineHeight(rows);
   const regions = splitIntoRegions(rows, medianLineHeight);
 
   const tables: DetectedTable[] = [];
-  const warnings: string[] = [];
-  let globalHeaderText: string | null = null;
+  const classificationWarnings: string[] = [];
+  let globalHeaderText: string | null = lockedMap?.headerText ?? null;
 
   for (let regionIdx = 0; regionIdx < regions.length; regionIdx++) {
     const region = regions[regionIdx];
@@ -112,12 +124,11 @@ export async function extractBoqFromPdf(arrayBuffer: ArrayBuffer): Promise<Extra
     const columns: ColumnAnchor[] = detectColumns(region);
     if (columns.length < 2) continue;
 
-    // Filter out repeated headers
     const filteredRows = region.filter(row => {
       if (!globalHeaderText) return true;
       const fakeHeader = { headerRowIndex: 0, mapping: {}, confidence: 0, mappedCount: 0, totalColumns: 0, headerText: globalHeaderText };
       if (isRepeatedHeader(row, fakeHeader)) {
-        warnings.push('Repeated header row removed.');
+        classificationWarnings.push('Repeated header row removed.');
         return false;
       }
       return true;
@@ -126,18 +137,11 @@ export async function extractBoqFromPdf(arrayBuffer: ArrayBuffer): Promise<Extra
     if (filteredRows.length < 2) continue;
 
     const header = detectHeader(filteredRows, columns);
-
-    // Title rows: last 3 rows of previous region
     const titleRows = regionIdx > 0 ? regions[regionIdx - 1].slice(-3) : [];
     const tableType = classifyTable(header, titleRows);
 
     if (!globalHeaderText && header) {
       globalHeaderText = rowText(filteredRows[header.headerRowIndex]);
-    }
-
-    let items: DetectedTable['items'] = [];
-    if (tableType === 'boq_schedule' && header && (header.confidence >= 60)) {
-      items = reconstructBoqItems(filteredRows, columns, header);
     }
 
     const titleText = titleRows.length > 0 ? rowText(titleRows[titleRows.length - 1]) : undefined;
@@ -148,19 +152,43 @@ export async function extractBoqFromPdf(arrayBuffer: ArrayBuffer): Promise<Extra
       startRowIndex: 0,
       endRowIndex: filteredRows.length - 1,
       header: header ?? undefined,
-      items,
+      // Items come from Phase B linear reconstruction, not per-region reconstruction.
+      // Keep items empty here so the top-level result.items is the single source.
+      items: [],
       rateAnalyses: [],
     });
   }
 
-  const allItems = tables.flatMap(t => t.items);
-  const allRateAnalyses = tables.flatMap(t => t.rateAnalyses);
-  const confidence = calculateConfidence(tables, warnings);
+  // Inject the linearly-extracted items into a synthetic BOQ table entry so
+  // confidence scoring and the debug view can see them.
+  if (lockedMap && items.length > 0) {
+    const syntheticMapping: Record<number, (typeof lockedMap.boundaries)[number]['role']> = {};
+    lockedMap.boundaries.forEach((b, i) => { syntheticMapping[i] = b.role; });
+
+    tables.unshift({
+      type: 'boq_schedule',
+      title: 'BOQ Schedule (linear extraction)',
+      startRowIndex: lockedMap.anchorRowIndex,
+      endRowIndex: rows.length - 1,
+      header: {
+        headerRowIndex: lockedMap.anchorRowIndex,
+        mapping: syntheticMapping,
+        confidence: lockedMap.anchorConfidence,
+        mappedCount: lockedMap.boundaries.length,
+        totalColumns: lockedMap.boundaries.length,
+      },
+      items,   // populated from Phase B
+      rateAnalyses: [],
+    });
+  }
+
+  const allWarnings = [...reconWarnings, ...classificationWarnings];
+  const confidence = calculateConfidence(tables, allWarnings);
   const detectedBoqType = detectTenderBoqType(rawText, tables);
 
   return {
-    items: allItems,
-    rateAnalyses: allRateAnalyses,
+    items,
+    rateAnalyses: [],   // Phase 2 RA extraction is a future milestone
     tables,
     detectedBoqType,
     isScanned: false,

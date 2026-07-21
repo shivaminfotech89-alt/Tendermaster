@@ -338,6 +338,20 @@ export default function ProjectDetails() {
       }
 
       const { extraction, verification, telemetry } = best;
+
+      // Never display a failed-verification result — score 0 means a critical check failed
+      // (e.g. reconciliation mismatch) and the extracted data is untrustworthy.
+      if (!verification.pass) {
+        const reason = `Could not reliably extract the BOQ from this document (verification score: ${verification.score}/100, failures: ${verification.criticalFailures.join(', ')}). Click Retry to try again.`;
+        await setDoc(latestRef, removeUndefined({ status: 'failed', reason, updatedAt: serverTimestamp() }));
+        console.log('[BOQ] done — verification failed, not showing result', {
+          verificationScore: verification.score,
+          criticalFailures: verification.criticalFailures,
+          durationMs: Date.now() - t0,
+        });
+        return;
+      }
+
       const totalAmount = extraction.items.reduce((s, it) => s + (it.amount ?? 0), 0);
       await setDoc(latestRef, removeUndefined({
         status: 'done',
@@ -352,6 +366,7 @@ export default function ProjectDetails() {
       }));
       console.log('[BOQ] done — extraction succeeded', {
         items: extraction.items.length,
+        verificationScore: verification.score,
         durationMs: Date.now() - t0,
       });
     } catch (err: any) {

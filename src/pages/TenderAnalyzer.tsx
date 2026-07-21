@@ -310,10 +310,14 @@ export default function TenderAnalyzer() {
           console.warn(`[PDF extraction] ${file.name} → IMAGE fallback (extraction error)`);
           dataUri = `data:application/pdf;base64,${arrayBufferToBase64(arrayBuffer)}`;
         }
-        // Single-file uploads always qualify; multi-file uploads are score-gated
+        // Single-file uploads always qualify; multi-file uploads are score-gated.
+        // Image PDFs can't be text-scored (no extractable text) so they bypass the threshold —
+        // the parser will attempt extraction and the verification score determines selection.
         const score = files.length === 1 ? 100 : scoreBOQCandidate(file.name, extractedText);
         const totalCandidateBytes = boqPdfCandidatesRef.current.reduce((s, c) => s + c.buffer.byteLength, 0);
-        const isBoqCandidate = score >= BOQ_RETAIN_THRESHOLD && totalCandidateBytes + arrayBuffer.byteLength <= BOQ_BUFFER_CAP_BYTES;
+        const underCap = totalCandidateBytes + arrayBuffer.byteLength <= BOQ_BUFFER_CAP_BYTES;
+        const isBoqCandidate = underCap && (isDigital ? score >= BOQ_RETAIN_THRESHOLD : true);
+        console.log(`[BOQ] candidate eval: ${file.name}`, { score, isDigital, pageCount, isBoqCandidate });
         if (isBoqCandidate) {
           boqPdfCandidatesRef.current.push({ name: file.name, buffer: arrayBuffer, score, pageCount });
         }
@@ -378,10 +382,13 @@ export default function TenderAnalyzer() {
             console.warn(`[PDF extraction] ${shortName} (ZIP) → IMAGE fallback (extraction error)`);
             dataUri = `data:application/pdf;base64,${arrayBufferToBase64(arrayBuffer)}`;
           }
-          // Retain buffer only if this file looks like a BOQ document
+          // Image PDFs bypass the text-score gate — the parser attempts extraction and
+          // the verification score determines which candidate wins.
           const boqScore = scoreBOQCandidate(shortName, zipEntryText);
           const boqTotalBytes = boqPdfCandidatesRef.current.reduce((s, c) => s + c.buffer.byteLength, 0);
-          const isZipBoqCandidate = boqScore >= BOQ_RETAIN_THRESHOLD && boqTotalBytes + arrayBuffer.byteLength <= BOQ_BUFFER_CAP_BYTES;
+          const zipUnderCap = boqTotalBytes + arrayBuffer.byteLength <= BOQ_BUFFER_CAP_BYTES;
+          const isZipBoqCandidate = zipUnderCap && (isZipDigital ? boqScore >= BOQ_RETAIN_THRESHOLD : true);
+          console.log(`[BOQ] candidate eval: ${shortName} (ZIP)`, { boqScore, isZipDigital, zipEntryPageCount, isZipBoqCandidate });
           if (isZipBoqCandidate) {
             boqPdfCandidatesRef.current.push({ name: shortName, buffer: arrayBuffer, score: boqScore, pageCount: zipEntryPageCount });
           }
@@ -653,14 +660,25 @@ export default function TenderAnalyzer() {
             try {
               await setDoc(latestRef, removeUndefined({ status: 'running', startedAt: serverTimestamp() }));
 
-              // Run on all candidates (highest-scored first); keep the result with the best verification score
+              // Run on all candidates; keep the result with the highest verification score.
+              // Candidates are pre-sorted by BOQ content score but the FINAL selector is
+              // verification score — a well-structured BOQ beats a high filename score.
               let best: Awaited<ReturnType<typeof extractBoqWithFallback>> | null = null;
+              let bestCandidateName = '';
               for (const candidate of [...candidates].sort((a, b) => b.score - a.score)) {
                 try {
                   const result = await extractBoqWithFallback(candidate.buffer);
+                  console.log(`[BOQ] extracted from ${candidate.name}`, {
+                    items: result.extraction.items.length,
+                    verificationScore: result.verification.score,
+                    verificationPass: result.verification.pass,
+                    criticalFailures: result.verification.criticalFailures,
+                    candidateScore: candidate.score,
+                  });
                   if (result.extraction.items.length > 0 &&
                       (!best || result.verification.score > best.verification.score)) {
                     best = result;
+                    bestCandidateName = candidate.name;
                   }
                 } catch (e) {
                   console.warn(`[BOQ] extraction failed for ${candidate.name}:`, e);
@@ -672,28 +690,43 @@ export default function TenderAnalyzer() {
                 return;
               }
 
-              const { extraction, verification, telemetry } = best;
+              console.log(`[BOQ] selected candidate: ${bestCandidateName}`, {
+                items: best.extraction.items.length,
+                verificationScore: best.verification.score,
+                verificationPass: best.verification.pass,
+              });
 
-              // Vision fallback guard: if verification failed, check page count across candidates
-              if (!verification.pass && telemetry.fallbackReason) {
-                const visionPageCap = 20;
-                const maxPageCount = candidates.reduce((m, c) => Math.max(m, c.pageCount), 0);
+              const { extraction, verification, telemetry } = best;
+              const visionPageCap = 20;
+              const maxPageCount = candidates.reduce((m, c) => Math.max(m, c.pageCount), 0);
+
+              // Never display a failed-verification result — it means the extracted data is
+              // untrustworthy (score 0 = critical check failed, e.g. reconciliation mismatch).
+              if (!verification.pass) {
                 if (maxPageCount > visionPageCap) {
                   await setDoc(latestRef, removeUndefined({
                     status: 'failed',
                     reason: `Document has ${maxPageCount} pages, which exceeds the ${visionPageCap}-page AI verification limit.`,
                     updatedAt: serverTimestamp(),
                   }));
-                  addDoc(collection(db, 'activity_logs'), removeUndefined({
-                    userId: currentUserId,
-                    projectId,
-                    event: 'boq_vision_fallback_skipped',
-                    reason: `maxPages=${maxPageCount} > cap=${visionPageCap}`,
-                    verificationScore: verification.score,
-                    createdAt: serverTimestamp(),
-                  })).catch(console.error);
-                  return;
+                } else {
+                  // Within the Vision page cap but Vision isn't implemented yet — report as
+                  // failed with a clear message rather than showing untrustworthy data.
+                  await setDoc(latestRef, removeUndefined({
+                    status: 'failed',
+                    reason: `Could not reliably extract the BOQ from this document (verification score: ${verification.score}/100, failures: ${verification.criticalFailures.join(', ')}). Click Retry to try again.`,
+                    updatedAt: serverTimestamp(),
+                  }));
                 }
+                addDoc(collection(db, 'activity_logs'), removeUndefined({
+                  userId: currentUserId,
+                  projectId,
+                  event: 'boq_verification_failed',
+                  reason: `score=${verification.score} failures=${verification.criticalFailures.join(',')} maxPages=${maxPageCount}`,
+                  verificationScore: verification.score,
+                  createdAt: serverTimestamp(),
+                })).catch(console.error);
+                return;
               }
 
               const totalAmount = extraction.items.reduce((s, it) => s + (it.amount ?? 0), 0);

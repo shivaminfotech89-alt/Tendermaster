@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { doc, getDoc, updateDoc, deleteDoc, addDoc, collection, query, where, getDocs, orderBy, writeBatch, serverTimestamp, arrayUnion, Timestamp, setDoc } from "firebase/firestore";
-import { ref as storageRef, uploadBytes, getDownloadURL, getBytes } from "firebase/storage";
+import { ref as storageRef, uploadBytes, getDownloadURL } from "firebase/storage";
 import { db, storage } from "../lib/firebase";
 import { removeUndefined } from "../lib/firestore";
 import { ArrowLeft, AlertCircle, Calculator, Building, Activity, Upload, FileText, Download, Loader2, Save, Plus, Target, CheckCircle, CheckCircle2, ListTodo, Calendar, MessageSquare, Send, X, Trash2, RefreshCw, Edit2, Check, ChevronRight, Info, IndianRupee, Wallet, Receipt, CreditCard, RotateCcw, BadgeCheck, Clock, Copy, ArrowUpRight, Scan } from "lucide-react";
@@ -229,20 +229,6 @@ export default function ProjectDetails() {
   const [showReanalyzeModal, setShowReanalyzeModal] = useState(false);
   const [showClearChatModal, setShowClearChatModal] = useState(false);
 
-  // Manual BOQ extraction for projects analysed before automatic extraction existed.
-  // Downloads stored PDF files from Firebase Storage and runs the deterministic parser.
-  // Parse a Firebase Storage download URL back into a StorageReference so we can use
-  // getBytes() — which goes through the authenticated SDK and avoids CORS entirely.
-  // bare fetch() on firebasestorage.googleapis.com fails without explicit gsutil CORS config.
-  function storageRefFromDownloadUrl(url: string) {
-    try {
-      const u = new URL(url);
-      const match = u.pathname.match(/^\/v0\/b\/([^/]+)\/o\/(.+)$/);
-      if (!match) return null;
-      return storageRef(storage, `gs://${match[1]}/${decodeURIComponent(match[2])}`);
-    } catch { return null; }
-  }
-
   // NOTE: if Vision fallback is added in future, the credit/entitlement gate belongs here
   // before calling the extraction, since that path would consume an additional credit.
   const handleManualBoqExtract = async () => {
@@ -275,16 +261,13 @@ export default function ProjectDetails() {
       for (const url of urls) {
         try {
           console.log('[BOQ] downloading PDF', { url: url.slice(0, 80) });
-          let buffer: ArrayBuffer;
-          const sRef = storageRefFromDownloadUrl(url);
-          if (sRef) {
-            buffer = await getBytes(sRef);
-          } else {
-            // Non-storage URL — bare fetch as fallback
-            const resp = await fetch(url);
-            if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-            buffer = await resp.arrayBuffer();
-          }
+          // payloadRef stores Firebase Storage download URLs that include ?token=
+          // Firebase serves these with Access-Control-Allow-Origin: * so no CORS config needed.
+          // Do NOT use getBytes(storageRef) — that sends an authenticated XHR which
+          // requires explicit gsutil CORS configuration on the bucket.
+          const resp = await fetch(url);
+          if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+          const buffer = await resp.arrayBuffer();
           fetchedCount++;
           console.log('[BOQ] PDF downloaded', { bytes: buffer.byteLength });
 

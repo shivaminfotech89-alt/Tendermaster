@@ -237,12 +237,25 @@ export default function ProjectDetails() {
     const t0 = Date.now();
     console.log('[BOQ] manual extraction started', { projectId });
 
-    const rawRef = project?.payloadRef;
-    const urls: string[] = Array.isArray(rawRef)
-      ? (rawRef as string[]).filter((u: any) => typeof u === 'string' && u.startsWith('http'))
-      : typeof rawRef === 'string' && rawRef.startsWith('http')
-      ? [rawRef]
+    // payloadRefRaw holds raw PDF bytes for digital-PDF BOQ candidates (written by TenderAnalyzer
+    // after the feature was added). payloadRef holds text for digital PDFs or PDF bytes for image PDFs.
+    // Prefer payloadRefRaw so pdf.js always receives actual PDF bytes.
+    const rawPdfRef = project?.payloadRefRaw;
+    const rawPdfUrls: string[] = Array.isArray(rawPdfRef)
+      ? (rawPdfRef as string[]).filter((u: any) => typeof u === 'string' && u.startsWith('http'))
+      : typeof rawPdfRef === 'string' && rawPdfRef.startsWith('http')
+      ? [rawPdfRef]
       : [];
+
+    const payloadRef = project?.payloadRef;
+    const payloadUrls: string[] = Array.isArray(payloadRef)
+      ? (payloadRef as string[]).filter((u: any) => typeof u === 'string' && u.startsWith('http'))
+      : typeof payloadRef === 'string' && payloadRef.startsWith('http')
+      ? [payloadRef]
+      : [];
+
+    const urls = rawPdfUrls.length > 0 ? rawPdfUrls : payloadUrls;
+    const usingRawUrls = rawPdfUrls.length > 0;
 
     if (urls.length === 0) {
       toast.error('No source documents found. Please re-upload this tender to extract the BOQ.');
@@ -251,26 +264,36 @@ export default function ProjectDetails() {
 
     const latestRef = doc(db, 'saved_tenders', projectId, 'boq_extraction', 'latest');
     await setDoc(latestRef, removeUndefined({ status: 'running', startedAt: serverTimestamp() }));
-    console.log('[BOQ] status set to running', { urlCount: urls.length });
+    console.log('[BOQ] status set to running', { urlCount: urls.length, usingRawUrls });
 
     try {
       let fetchedCount = 0;
+      let textOnlyCount = 0;
       let best: Awaited<ReturnType<typeof extractBoqWithFallback>> | null = null;
       let lastDownloadError: string | null = null;
 
       for (const url of urls) {
         try {
           console.log('[BOQ] downloading PDF', { url: url.slice(0, 80) });
-          // payloadRef stores Firebase Storage download URLs that include ?token=
-          // Firebase serves these with Access-Control-Allow-Origin: * so no CORS config needed.
-          // Do NOT use getBytes(storageRef) — that sends an authenticated XHR which
-          // requires explicit gsutil CORS configuration on the bucket.
+          // payloadRef/payloadRefRaw store Firebase Storage download URLs with ?token=
+          // Firebase serves these with Access-Control-Allow-Origin: * — no CORS config needed.
+          // Do NOT use getBytes(storageRef) — that sends authenticated XHR requiring gsutil CORS.
           const resp = await fetch(url);
           if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
           const buffer = await resp.arrayBuffer();
           fetchedCount++;
-          console.log('[BOQ] PDF downloaded', { bytes: buffer.byteLength });
 
+          // Verify the content is actually a PDF (magic bytes %PDF-).
+          // payloadRef for digital PDFs stores text/plain (cost-optimised for Gemini).
+          const magic = new Uint8Array(buffer, 0, 5);
+          const isPdf = magic[0] === 0x25 && magic[1] === 0x50 && magic[2] === 0x44 && magic[3] === 0x46;
+          if (!isPdf) {
+            textOnlyCount++;
+            console.log('[BOQ] skipping non-PDF content (text-extracted digital PDF stored in payloadRef)');
+            continue;
+          }
+
+          console.log('[BOQ] PDF downloaded', { bytes: buffer.byteLength });
           console.log('[BOQ] parser start');
           const result = await extractBoqWithFallback(buffer);
           console.log('[BOQ] parser done', {
@@ -288,6 +311,15 @@ export default function ProjectDetails() {
           lastDownloadError = e?.message ?? String(e);
           console.warn('[BOQ] PDF/extraction failed for URL:', lastDownloadError);
         }
+      }
+
+      // All downloaded files were text (digital PDFs stored without raw backup).
+      // This happens for projects analysed before payloadRefRaw was introduced.
+      if (!best && fetchedCount > 0 && textOnlyCount === fetchedCount && !usingRawUrls) {
+        const reason = 'The original PDF is not available for re-extraction on this project. Re-analyse the tender to enable BOQ extraction.';
+        await setDoc(latestRef, removeUndefined({ status: 'failed', reason, updatedAt: serverTimestamp() }));
+        console.log('[BOQ] done — text-only content, no raw PDF available', { durationMs: Date.now() - t0 });
+        return;
       }
 
       if (!best) {

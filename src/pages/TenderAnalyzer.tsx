@@ -195,6 +195,8 @@ export default function TenderAnalyzer() {
   const rawExtractedTextRef = useRef<string>('');
   // BOQ-candidate buffers retained during upload; released immediately after extraction starts
   const boqPdfCandidatesRef = useRef<Array<{name: string; buffer: ArrayBuffer; score: number; pageCount: number}>>([]);
+  // Raw PDF bytes for digital-PDF BOQ candidates; parallel to the file list (null = not a candidate or image PDF)
+  const boqRawPdfBuffersRef = useRef<(ArrayBuffer | null)[]>([]);
   const [downloadingDocx, setDownloadingDocx] = useState(false);
   const [printWithoutLetterhead, setPrintWithoutLetterhead] = useState(false);
   const [savedDocs, setSavedDocs] = useState<SavedDoc[]>([]);
@@ -282,16 +284,19 @@ export default function TenderAnalyzer() {
 
     rawExtractedTextRef.current = '';
     boqPdfCandidatesRef.current = [];
+    boqRawPdfBuffersRef.current = [];
     try {
       for (const [, file] of files.entries()) {
         const arrayBuffer = await file.arrayBuffer();
         let dataUri: string;
         let extractedText = '';
         let pageCount = 0;
+        let isDigital = false;
         try {
           const extraction = await extractPdfText(arrayBuffer);
           extractedText = extraction.text;
           pageCount = extraction.pageCount;
+          isDigital = extraction.isDigital;
           if (extraction.isDigital) {
             console.log(`[PDF extraction] ${file.name} → TEXT (${extraction.charsExtracted} non-ws chars across ${extraction.pagesChecked} sampled pages of ${extraction.pageCount})`);
             dataUri = `data:text/plain;base64,${textToBase64(extraction.text)}`;
@@ -308,9 +313,14 @@ export default function TenderAnalyzer() {
         // Single-file uploads always qualify; multi-file uploads are score-gated
         const score = files.length === 1 ? 100 : scoreBOQCandidate(file.name, extractedText);
         const totalCandidateBytes = boqPdfCandidatesRef.current.reduce((s, c) => s + c.buffer.byteLength, 0);
-        if (score >= BOQ_RETAIN_THRESHOLD && totalCandidateBytes + arrayBuffer.byteLength <= BOQ_BUFFER_CAP_BYTES) {
+        const isBoqCandidate = score >= BOQ_RETAIN_THRESHOLD && totalCandidateBytes + arrayBuffer.byteLength <= BOQ_BUFFER_CAP_BYTES;
+        if (isBoqCandidate) {
           boqPdfCandidatesRef.current.push({ name: file.name, buffer: arrayBuffer, score, pageCount });
         }
+        // For digital PDFs, retain the raw bytes for parallel Storage upload so manual
+        // re-extraction can fetch actual PDF bytes (not the text-extracted substitute).
+        // Image PDFs are already stored as PDF bytes in payloadRef — no raw upload needed.
+        boqRawPdfBuffersRef.current.push(isBoqCandidate && isDigital ? arrayBuffer : null);
         base64Files.push(dataUri);
       }
       setTenderPdfBase64(base64Files as any);
@@ -333,6 +343,7 @@ export default function TenderAnalyzer() {
     setProcessingFile(true);
     rawExtractedTextRef.current = '';
     boqPdfCandidatesRef.current = [];
+    boqRawPdfBuffersRef.current = [];
     try {
       const zip = new JSZip();
       const contents = await zip.loadAsync(file);
@@ -349,10 +360,12 @@ export default function TenderAnalyzer() {
           let dataUri: string;
           let zipEntryText = '';
           let zipEntryPageCount = 0;
+          let isZipDigital = false;
           try {
             const extraction = await extractPdfText(arrayBuffer);
             zipEntryText = extraction.text;
             zipEntryPageCount = extraction.pageCount;
+            isZipDigital = extraction.isDigital;
             if (extraction.isDigital) {
               console.log(`[PDF extraction] ${shortName} (ZIP) → TEXT (${extraction.charsExtracted} chars / ${extraction.pageCount} pages)`);
               dataUri = `data:text/plain;base64,${textToBase64(extraction.text)}`;
@@ -368,9 +381,11 @@ export default function TenderAnalyzer() {
           // Retain buffer only if this file looks like a BOQ document
           const boqScore = scoreBOQCandidate(shortName, zipEntryText);
           const boqTotalBytes = boqPdfCandidatesRef.current.reduce((s, c) => s + c.buffer.byteLength, 0);
-          if (boqScore >= BOQ_RETAIN_THRESHOLD && boqTotalBytes + arrayBuffer.byteLength <= BOQ_BUFFER_CAP_BYTES) {
+          const isZipBoqCandidate = boqScore >= BOQ_RETAIN_THRESHOLD && boqTotalBytes + arrayBuffer.byteLength <= BOQ_BUFFER_CAP_BYTES;
+          if (isZipBoqCandidate) {
             boqPdfCandidatesRef.current.push({ name: shortName, buffer: arrayBuffer, score: boqScore, pageCount: zipEntryPageCount });
           }
+          boqRawPdfBuffersRef.current.push(isZipBoqCandidate && isZipDigital ? arrayBuffer : null);
           fileDataArray.push(dataUri);
           fileNameArray.push(shortName);
         } else if (lowerFilename.endsWith('.xlsx') || lowerFilename.endsWith('.xls') || lowerFilename.endsWith('.csv')) {
@@ -390,6 +405,7 @@ export default function TenderAnalyzer() {
             const base64Text = btoa(String.fromCharCode(...utf8Bytes));
             fileDataArray.push(`data:text/plain;base64,${base64Text}`);
             fileNameArray.push(filename.split('/').pop() || filename);
+            boqRawPdfBuffersRef.current.push(null); // spreadsheets never need raw PDF upload
           } catch (err) {
             console.error(`Failed to parse spreadsheet ${filename}:`, err);
           }
@@ -489,6 +505,7 @@ export default function TenderAnalyzer() {
 
       let processedPayload = payload;
       let finalTenderType: string = inputType;
+      const rawPdfUploadedUrls: string[] = [];
 
       if (inputType === 'pdf' || inputType === 'zip') {
         const dataUris = Array.isArray(payload) ? payload : [payload];
@@ -521,6 +538,22 @@ export default function TenderAnalyzer() {
             );
           });
           uploadedUrls.push(url);
+        }
+
+        // Upload raw PDF bytes for digital BOQ candidates alongside the text-extracted versions.
+        // payloadRef stores text (for Gemini cost savings); payloadRefRaw stores the original PDF
+        // bytes so manual re-extraction can pass real PDF data to pdf.js instead of text.
+        for (let i = 0; i < boqRawPdfBuffersRef.current.length; i++) {
+          const buf = boqRawPdfBuffersRef.current[i];
+          if (!buf) continue;
+          try {
+            const rawFileRef = storageRef(storage, `users/${user?.uid || 'anon'}/tenders/${Date.now()}_${i}_raw`);
+            await uploadBytes(rawFileRef, new Uint8Array(buf), { contentType: 'application/pdf' });
+            rawPdfUploadedUrls.push(await getDownloadURL(rawFileRef));
+            console.log(`[BOQ] raw PDF uploaded for slot ${i} (${buf.byteLength} bytes)`);
+          } catch (e) {
+            console.warn(`[BOQ] raw PDF upload failed for slot ${i}:`, e);
+          }
         }
 
         setAnalyzeStage('analyzing');
@@ -597,6 +630,15 @@ export default function TenderAnalyzer() {
         setSavedProjectId(data.projectId);
         setPendingProjectName(data.analysis?.tender_simplified?.tender_name || "Untitled Tender");
         setShowNameDialog(true);
+
+        // Persist raw PDF Storage URLs so ProjectDetails can use them for manual re-extraction.
+        // These are only present for digital PDFs above the BOQ threshold — image PDFs and
+        // non-candidate files have their payloadRef URL pointing to actual PDF bytes already.
+        if (rawPdfUploadedUrls.length > 0) {
+          updateDoc(doc(db, 'saved_tenders', data.projectId), {
+            payloadRefRaw: rawPdfUploadedUrls,
+          }).catch(console.error);
+        }
 
         // Trigger BOQ extraction for all upload types when candidates were retained.
         // Always writes back a status — never silently fails.

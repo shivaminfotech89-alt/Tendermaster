@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { doc, onSnapshot, getDoc } from "firebase/firestore";
 import { db } from "../../lib/firebase";
 import type { BoqItem } from "../../types/boq";
@@ -11,6 +11,8 @@ import {
 type ExtractionStatus = 'loading' | 'running' | 'done' | 'failed' | 'no_boq_found' | 'not_attempted';
 type SortField = 'itemNo' | 'amount' | 'quantity';
 type SortDir = 'asc' | 'desc';
+
+const BOQ_TIMEOUT_MS = 60_000;
 
 interface BOQMeta {
   itemCount: number;
@@ -25,8 +27,7 @@ interface BOQViewerProps {
   projectId: string;
   onProceedToPricing: () => void;
   /** Provided when the project was analysed before automatic BOQ extraction existed.
-   *  Called when the user clicks "Extract BOQ". Must write status updates to Firestore
-   *  so the onSnapshot listener updates the viewer automatically. */
+   *  Must write status updates to Firestore so the onSnapshot listener updates automatically. */
   onManualExtract?: () => Promise<void>;
 }
 
@@ -41,6 +42,61 @@ function SortIcon({ field, sortField, sortDir }: { field: SortField; sortField: 
     : <ChevronDown className="w-3 h-3 inline" />;
 }
 
+function humaniseReason(raw: string): string {
+  if (/download|fetch|cors|network|http \d{3}/i.test(raw)) return "Couldn't download the tender PDF.";
+  if (/permission|unauthorized|insufficient/i.test(raw)) return "Permission denied. Please try signing out and back in.";
+  if (/timeout|timed out/i.test(raw)) return "The extraction took too long and was stopped.";
+  return raw;
+}
+
+function ErrorUI({
+  title,
+  reason,
+  onRetry,
+  retrying,
+}: {
+  title: string;
+  reason: string;
+  onRetry: () => void;
+  retrying?: boolean;
+}) {
+  const [showDetails, setShowDetails] = useState(false);
+  return (
+    <div className="flex flex-col items-center justify-center py-20 gap-4">
+      <AlertCircle className="w-10 h-10 text-rose-400" />
+      <div className="text-center">
+        <p className="font-semibold text-slate-700">{title}</p>
+        {reason && (
+          <p className="text-sm text-slate-500 mt-1 max-w-md">{humaniseReason(reason)}</p>
+        )}
+      </div>
+      <div className="flex items-center gap-2">
+        <button
+          onClick={onRetry}
+          disabled={retrying}
+          className="flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50 transition-colors"
+        >
+          <RefreshCw className={`w-4 h-4 ${retrying ? 'animate-spin' : ''}`} />
+          Retry
+        </button>
+        {reason && (
+          <button
+            onClick={() => setShowDetails(v => !v)}
+            className="px-4 py-2 text-sm font-medium rounded-lg border border-slate-200 hover:bg-slate-50 transition-colors"
+          >
+            {showDetails ? 'Hide details' : 'Details'}
+          </button>
+        )}
+      </div>
+      {showDetails && (
+        <pre className="text-xs text-slate-400 bg-slate-50 border border-slate-200 rounded-lg p-3 max-w-md w-full overflow-auto whitespace-pre-wrap">
+          {reason}
+        </pre>
+      )}
+    </div>
+  );
+}
+
 export default function BOQViewer({ projectId, onProceedToPricing, onManualExtract }: BOQViewerProps) {
   const [status, setStatus] = useState<ExtractionStatus>('loading');
   const [items, setItems] = useState<BoqItem[]>([]);
@@ -51,6 +107,12 @@ export default function BOQViewer({ projectId, onProceedToPricing, onManualExtra
   const [sortDir, setSortDir] = useState<SortDir>('asc');
   const [expandedDescs, setExpandedDescs] = useState<Set<string>>(new Set());
   const [refreshing, setRefreshing] = useState(false);
+  const [timedOut, setTimedOut] = useState(false);
+  const [isExtracting, setIsExtracting] = useState(false);
+  const [extractError, setExtractError] = useState('');
+
+  // Track when 'running' started so the timeout is scoped to one attempt
+  const runningStartRef = useRef<number | null>(null);
 
   useEffect(() => {
     const latestRef = doc(db, 'saved_tenders', projectId, 'boq_extraction', 'latest');
@@ -59,8 +121,9 @@ export default function BOQViewer({ projectId, onProceedToPricing, onManualExtra
       (snap) => {
         if (!snap.exists()) { setStatus('not_attempted'); return; }
         const data = snap.data() as any;
-        setStatus(data.status as ExtractionStatus);
-        if (data.status === 'done') {
+        const s = data.status as ExtractionStatus;
+        setStatus(s);
+        if (s === 'done') {
           setItems(data.items ?? []);
           setMeta({
             itemCount: data.itemCount ?? 0,
@@ -71,25 +134,41 @@ export default function BOQViewer({ projectId, onProceedToPricing, onManualExtra
             parserDurationMs: data.parserDurationMs ?? 0,
           });
         }
-        if (data.status === 'failed') setFailReason(data.reason ?? 'Unknown error');
+        if (s === 'failed') setFailReason(data.reason ?? 'Unknown error');
       },
       (err) => {
         console.error('[BOQViewer] snapshot error', err);
         setStatus('failed');
-        setFailReason('Could not load BOQ data.');
+        setFailReason('Could not load BOQ data: ' + (err.message ?? ''));
       },
     );
     return () => unsub();
   }, [projectId]);
 
+  // 60-second timeout guard: if status stays 'running' too long, surface an error
+  useEffect(() => {
+    if (status !== 'running') {
+      runningStartRef.current = null;
+      setTimedOut(false);
+      return;
+    }
+    if (!runningStartRef.current) runningStartRef.current = Date.now();
+    const elapsed = Date.now() - runningStartRef.current;
+    const remaining = Math.max(0, BOQ_TIMEOUT_MS - elapsed);
+    const t = setTimeout(() => setTimedOut(true), remaining);
+    return () => clearTimeout(t);
+  }, [status]);
+
   const handleRefresh = async () => {
     setRefreshing(true);
+    setTimedOut(false);
     try {
       const snap = await getDoc(doc(db, 'saved_tenders', projectId, 'boq_extraction', 'latest'));
       if (!snap.exists()) { setStatus('not_attempted'); return; }
       const data = snap.data() as any;
-      setStatus(data.status as ExtractionStatus);
-      if (data.status === 'done') {
+      const s = data.status as ExtractionStatus;
+      setStatus(s);
+      if (s === 'done') {
         setItems(data.items ?? []);
         setMeta({
           itemCount: data.itemCount ?? 0,
@@ -100,9 +179,27 @@ export default function BOQViewer({ projectId, onProceedToPricing, onManualExtra
           parserDurationMs: data.parserDurationMs ?? 0,
         });
       }
-      if (data.status === 'failed') setFailReason(data.reason ?? 'Unknown error');
+      if (s === 'failed') setFailReason(data.reason ?? 'Unknown error');
+    } catch (e: any) {
+      setStatus('failed');
+      setFailReason(e?.message ?? 'Refresh failed');
     } finally {
       setRefreshing(false);
+    }
+  };
+
+  const handleExtractClick = async () => {
+    if (!onManualExtract || isExtracting) return;
+    setIsExtracting(true);
+    setExtractError('');
+    try {
+      await onManualExtract();
+      // status transitions automatically via onSnapshot
+    } catch (err: any) {
+      // Only shown if extraction failed before writing 'running' to Firestore
+      setExtractError(err?.message ?? 'Extraction failed. Please try again.');
+    } finally {
+      setIsExtracting(false);
     }
   };
 
@@ -176,6 +273,8 @@ export default function BOQViewer({ projectId, onProceedToPricing, onManualExtra
     XLSX.writeFile(wb, 'boq.xlsx');
   };
 
+  // ── Status renders ─────────────────────────────────────────────────────────
+
   if (status === 'loading') {
     return (
       <div className="flex items-center justify-center py-20">
@@ -185,6 +284,16 @@ export default function BOQViewer({ projectId, onProceedToPricing, onManualExtra
   }
 
   if (status === 'running') {
+    if (timedOut) {
+      return (
+        <ErrorUI
+          title="Unable to extract BOQ"
+          reason="BOQ extraction timed out."
+          onRetry={handleRefresh}
+          retrying={refreshing}
+        />
+      );
+    }
     return (
       <div className="flex flex-col items-center justify-center py-20 gap-4 text-slate-500">
         <Loader2 className="w-8 h-8 animate-spin text-indigo-500" />
@@ -202,13 +311,18 @@ export default function BOQViewer({ projectId, onProceedToPricing, onManualExtra
         <p className="text-sm text-center max-w-sm text-slate-400">
           This project was analysed before automatic BOQ extraction was available.
         </p>
+        {extractError && (
+          <p className="text-sm text-rose-600 text-center max-w-sm">{humaniseReason(extractError)}</p>
+        )}
         {onManualExtract && (
           <button
-            onClick={() => { onManualExtract().catch(console.error); }}
-            className="flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 transition-colors"
+            onClick={handleExtractClick}
+            disabled={isExtracting}
+            className="flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-60 transition-colors"
           >
-            <Sparkles className="w-4 h-4" />
-            Extract BOQ
+            {isExtracting
+              ? <><Loader2 className="w-4 h-4 animate-spin" />Extracting…</>
+              : <><Sparkles className="w-4 h-4" />Extract BOQ</>}
           </button>
         )}
       </div>
@@ -229,25 +343,16 @@ export default function BOQViewer({ projectId, onProceedToPricing, onManualExtra
 
   if (status === 'failed') {
     return (
-      <div className="flex flex-col items-center justify-center py-20 gap-4">
-        <AlertCircle className="w-10 h-10 text-amber-400" />
-        <p className="font-semibold text-slate-700">BOQ extraction failed</p>
-        {failReason && (
-          <p className="text-sm text-slate-500 text-center max-w-md">{failReason}</p>
-        )}
-        <button
-          onClick={handleRefresh}
-          disabled={refreshing}
-          className="flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg border border-slate-300 hover:bg-slate-50 transition-colors disabled:opacity-50"
-        >
-          <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
-          Refresh
-        </button>
-      </div>
+      <ErrorUI
+        title="Unable to extract BOQ"
+        reason={failReason}
+        onRetry={handleRefresh}
+        retrying={refreshing}
+      />
     );
   }
 
-  // status === 'done'
+  // ── status === 'done' ──────────────────────────────────────────────────────
   const totalFiltered = sorted.reduce((s, it) => s + (it.amount ?? 0), 0);
 
   return (
@@ -266,7 +371,7 @@ export default function BOQViewer({ projectId, onProceedToPricing, onManualExtra
           <p className="text-xs font-medium text-slate-500 uppercase tracking-wide mb-1">Engine</p>
           <div className="flex items-center gap-1 mt-1">
             <p className="text-sm font-semibold text-slate-700">
-              {meta?.visionUsed ? 'AI Assisted Extraction' : 'Parser'}
+              {meta?.visionUsed ? 'AI Assisted' : 'Parser'}
             </p>
             {meta?.visionUsed && <Sparkles className="w-3.5 h-3.5 text-indigo-400" />}
           </div>

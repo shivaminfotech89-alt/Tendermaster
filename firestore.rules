@@ -119,7 +119,7 @@ service cloud.firestore {
     }
 
     match /saved_tenders/{savedId}/boq_extraction/{docId} {
-      allow read, create: if isSignedIn()
+      allow read, create, update: if isSignedIn()
         && get(/databases/$(database)/documents/saved_tenders/$(savedId)).data.userId == request.auth.uid;
     }
 

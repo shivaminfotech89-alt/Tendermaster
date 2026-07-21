@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { doc, getDoc, updateDoc, deleteDoc, addDoc, collection, query, where, getDocs, orderBy, writeBatch, serverTimestamp, arrayUnion, Timestamp, setDoc } from "firebase/firestore";
-import { ref as storageRef, uploadBytes, getDownloadURL } from "firebase/storage";
+import { ref as storageRef, uploadBytes, getDownloadURL, getBytes } from "firebase/storage";
 import { db, storage } from "../lib/firebase";
 import { removeUndefined } from "../lib/firestore";
 import { ArrowLeft, AlertCircle, Calculator, Building, Activity, Upload, FileText, Download, Loader2, Save, Plus, Target, CheckCircle, CheckCircle2, ListTodo, Calendar, MessageSquare, Send, X, Trash2, RefreshCw, Edit2, Check, ChevronRight, Info, IndianRupee, Wallet, Receipt, CreditCard, RotateCcw, BadgeCheck, Clock, Copy, ArrowUpRight, Scan } from "lucide-react";
@@ -231,54 +231,124 @@ export default function ProjectDetails() {
 
   // Manual BOQ extraction for projects analysed before automatic extraction existed.
   // Downloads stored PDF files from Firebase Storage and runs the deterministic parser.
+  // Parse a Firebase Storage download URL back into a StorageReference so we can use
+  // getBytes() — which goes through the authenticated SDK and avoids CORS entirely.
+  // bare fetch() on firebasestorage.googleapis.com fails without explicit gsutil CORS config.
+  function storageRefFromDownloadUrl(url: string) {
+    try {
+      const u = new URL(url);
+      const match = u.pathname.match(/^\/v0\/b\/([^/]+)\/o\/(.+)$/);
+      if (!match) return null;
+      return storageRef(storage, `gs://${match[1]}/${decodeURIComponent(match[2])}`);
+    } catch { return null; }
+  }
+
   // NOTE: if Vision fallback is added in future, the credit/entitlement gate belongs here
   // before calling the extraction, since that path would consume an additional credit.
   const handleManualBoqExtract = async () => {
     if (!projectId) return;
+
+    const t0 = Date.now();
+    console.log('[BOQ] manual extraction started', { projectId });
+
     const rawRef = project?.payloadRef;
     const urls: string[] = Array.isArray(rawRef)
       ? (rawRef as string[]).filter((u: any) => typeof u === 'string' && u.startsWith('http'))
       : typeof rawRef === 'string' && rawRef.startsWith('http')
       ? [rawRef]
       : [];
+
     if (urls.length === 0) {
       toast.error('No source documents found. Please re-upload this tender to extract the BOQ.');
       return;
     }
+
     const latestRef = doc(db, 'saved_tenders', projectId, 'boq_extraction', 'latest');
     await setDoc(latestRef, removeUndefined({ status: 'running', startedAt: serverTimestamp() }));
-    let best: Awaited<ReturnType<typeof extractBoqWithFallback>> | null = null;
-    for (const url of urls) {
-      try {
-        const resp = await fetch(url);
-        const buffer = await resp.arrayBuffer();
-        const result = await extractBoqWithFallback(buffer);
-        if (result.extraction.items.length > 0 &&
-            (!best || result.verification.score > best.verification.score)) {
-          best = result;
+    console.log('[BOQ] status set to running', { urlCount: urls.length });
+
+    try {
+      let fetchedCount = 0;
+      let best: Awaited<ReturnType<typeof extractBoqWithFallback>> | null = null;
+      let lastDownloadError: string | null = null;
+
+      for (const url of urls) {
+        try {
+          console.log('[BOQ] downloading PDF', { url: url.slice(0, 80) });
+          let buffer: ArrayBuffer;
+          const sRef = storageRefFromDownloadUrl(url);
+          if (sRef) {
+            buffer = await getBytes(sRef);
+          } else {
+            // Non-storage URL — bare fetch as fallback
+            const resp = await fetch(url);
+            if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+            buffer = await resp.arrayBuffer();
+          }
+          fetchedCount++;
+          console.log('[BOQ] PDF downloaded', { bytes: buffer.byteLength });
+
+          console.log('[BOQ] parser start');
+          const result = await extractBoqWithFallback(buffer);
+          console.log('[BOQ] parser done', {
+            items: result.extraction.items.length,
+            score: result.verification.score,
+            engine: result.telemetry.engine,
+            durationMs: result.telemetry.parserDurationMs,
+          });
+
+          if (result.extraction.items.length > 0 &&
+              (!best || result.verification.score > best.verification.score)) {
+            best = result;
+          }
+        } catch (e: any) {
+          lastDownloadError = e?.message ?? String(e);
+          console.warn('[BOQ] PDF/extraction failed for URL:', lastDownloadError);
         }
-      } catch (e) {
-        console.warn('[BOQ] manual extract failed for URL:', e);
       }
+
+      if (!best) {
+        if (fetchedCount === 0 && lastDownloadError) {
+          // All downloads failed — surface as an error, not 'no_boq_found'
+          await setDoc(latestRef, removeUndefined({
+            status: 'failed',
+            reason: `Couldn't download the tender PDF: ${lastDownloadError}`,
+            updatedAt: serverTimestamp(),
+          }));
+        } else {
+          await setDoc(latestRef, removeUndefined({ status: 'no_boq_found', updatedAt: serverTimestamp() }));
+        }
+        console.log('[BOQ] done — no BOQ', { fetchedCount, durationMs: Date.now() - t0 });
+        return;
+      }
+
+      const { extraction, verification, telemetry } = best;
+      const totalAmount = extraction.items.reduce((s, it) => s + (it.amount ?? 0), 0);
+      await setDoc(latestRef, removeUndefined({
+        status: 'done',
+        items: extraction.items,
+        itemCount: extraction.items.length,
+        totalAmount,
+        engine: telemetry.engine,
+        visionUsed: telemetry.engine === 'vision',
+        verificationScore: verification.score,
+        parserDurationMs: telemetry.parserDurationMs,
+        updatedAt: serverTimestamp(),
+      }));
+      console.log('[BOQ] done — extraction succeeded', {
+        items: extraction.items.length,
+        durationMs: Date.now() - t0,
+      });
+    } catch (err: any) {
+      const reason = err?.message ?? 'BOQ extraction failed.';
+      console.error('[BOQ] extraction error', err);
+      await setDoc(latestRef, removeUndefined({
+        status: 'failed',
+        reason,
+        updatedAt: serverTimestamp(),
+      })).catch(console.error);
+      throw err; // re-throw so BOQViewer can show the error immediately
     }
-    if (!best) {
-      await setDoc(latestRef, removeUndefined({ status: 'no_boq_found', updatedAt: serverTimestamp() }));
-      return;
-    }
-    const { extraction, verification, telemetry } = best;
-    const totalAmount = extraction.items.reduce((s, it) => s + (it.amount ?? 0), 0);
-    await setDoc(latestRef, removeUndefined({
-      status: 'done',
-      items: extraction.items,
-      itemCount: extraction.items.length,
-      totalAmount,
-      engine: telemetry.engine,
-      visionUsed: telemetry.engine === 'vision',
-      verificationScore: verification.score,
-      parserDurationMs: telemetry.parserDurationMs,
-      updatedAt: serverTimestamp(),
-    }));
-    void verification; // referenced via best.verification above; suppress unused-var if tree-shaken
   };
 
   useEffect(() => {

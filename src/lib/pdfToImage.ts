@@ -52,7 +52,9 @@ const DIGITAL_THRESHOLD = 100;
  * If scanned (no text layer), returns isDigital=false and empty text immediately.
  */
 export async function extractPdfText(arrayBuffer: ArrayBuffer): Promise<PdfExtractionResult> {
-  const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer) }).promise;
+  // pdf.js transfers the buffer it receives to its Web Worker, detaching the caller's reference.
+  // Clone first so the original stays valid for base64 encoding, BOQ buffer retention, etc.
+  const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer.slice(0)) }).promise;
   const pageCount = pdf.numPages;
   const pagesChecked = Math.min(SAMPLE_PAGES, pageCount);
 

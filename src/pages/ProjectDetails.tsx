@@ -680,6 +680,11 @@ export default function ProjectDetails() {
             console.warn("Source document storage upload failed — analysis will still proceed:", uploadErr);
           }
 
+          // fileNames tells the server which filenames to record in remarksHistory for this run
+          const reanalysisFileNames: string[] = uploadedEntryNames.length > 0
+            ? uploadedEntryNames
+            : [file.name];
+
           const response = await fetchWithAuth("/api/analyze-tender", {
              method: "POST",
              headers: { "Content-Type": "application/json" },
@@ -690,6 +695,7 @@ export default function ProjectDetails() {
                extraContext: payload,
                language: i18n.language,
                projectId: projectId,
+               fileNames: reanalysisFileNames,
              })
           });
 
@@ -2840,8 +2846,13 @@ export default function ProjectDetails() {
           )}
 
           {activeTab === 'notes' && (() => {
-            const remarks = project?.remarks;
-            if (!remarks) {
+            const remarksHistory: any[] | null =
+              Array.isArray(project?.remarksHistory) && (project.remarksHistory as any[]).length > 0
+                ? (project.remarksHistory as any[])
+                : null;
+            const legacyRemarks = project?.remarks;
+
+            if (!remarksHistory && !legacyRemarks) {
               return (
                 <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6">
                   <h2 className="text-lg font-bold text-slate-800 mb-4">Analysis Notes</h2>
@@ -2850,39 +2861,146 @@ export default function ProjectDetails() {
               );
             }
 
-            // Build per-file lookup tables from the flat remarks arrays
-            const fileNames: string[] = (project?.payloadRefNames as string[]) || [];
-            const skippedMap = new Map<number, string>(
-              (remarks.filesSkipped || []).map((s: any) => [s.index as number, s.reason as string]),
+            const buildRunData = (runEntry: any, fallbackFileNames: string[]) => {
+              const fNames: string[] = Array.isArray(runEntry?.fileNames) ? runEntry.fileNames : fallbackFileNames;
+              const skippedMap = new Map<number, string>(
+                (runEntry?.filesSkipped || []).map((s: any) => [s.index as number, s.reason as string]),
+              );
+              const noteMap = new Map<number, string>();
+              for (const note of (runEntry?.notes || []) as string[]) {
+                const m = /^file (\d+): (.+)$/i.exec(note);
+                if (m) noteMap.set(parseInt(m[1], 10), m[2]);
+              }
+              const totalCount: number = runEntry?.totalFilesProvided ?? fNames.length;
+              const skippedCount: number = runEntry?.filesSkipped?.length ?? 0;
+              const analyzedCount: number = runEntry?.filesAnalyzed ?? Math.max(0, totalCount - skippedCount);
+              const rowCount = Math.max(totalCount, fNames.length);
+              const rows = Array.from({ length: rowCount }, (_, i) => {
+                const name = fNames[i] ?? `File ${i + 1}`;
+                const skipped = skippedMap.has(i);
+                const skipReason = skippedMap.get(i) ?? '';
+                const noteText = noteMap.get(i + 1) ?? '';
+                const isTextLayer = noteText.startsWith('text-layer');
+                const isImagePath = noteText.startsWith('image/pdf') || noteText.startsWith('image') || noteText.includes('image/pdf');
+                return { name, skipped, skipReason, noteText, isTextLayer, isImagePath };
+              });
+              return { rows, totalCount, skippedCount, analyzedCount };
+            };
+
+            const formatRunDate = (at: any): string => {
+              try {
+                const d: Date | null = typeof at?.toDate === 'function' ? at.toDate() : (at?.seconds ? new Date(at.seconds * 1000) : null);
+                if (!d) return '';
+                return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+              } catch { return ''; }
+            };
+
+            const renderFileTable = (rows: Array<{ name: string; skipped: boolean; skipReason: string; isTextLayer: boolean; isImagePath: boolean }>) => (
+              <div className="overflow-x-auto rounded-lg border border-slate-200">
+                <table className="min-w-full text-sm">
+                  <thead className="bg-slate-50 border-b border-slate-200">
+                    <tr>
+                      <th className="px-4 py-2.5 text-left font-semibold text-slate-600 w-8">#</th>
+                      <th className="px-4 py-2.5 text-left font-semibold text-slate-600">Filename</th>
+                      <th className="px-4 py-2.5 text-left font-semibold text-slate-600 whitespace-nowrap">Processing Path</th>
+                      <th className="px-4 py-2.5 text-left font-semibold text-slate-600">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {rows.map((row, i) => (
+                      <tr key={i} className={row.skipped ? 'bg-amber-50/40' : 'hover:bg-slate-50'}>
+                        <td className="px-4 py-3 text-slate-400 font-mono text-xs">{i + 1}</td>
+                        <td className="px-4 py-3 text-slate-700 font-medium max-w-xs truncate" title={row.name}>{row.name}</td>
+                        <td className="px-4 py-3 whitespace-nowrap">
+                          {row.skipped ? (
+                            <span className="text-slate-400 text-xs">—</span>
+                          ) : row.isTextLayer ? (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-100 text-emerald-700">Text layer</span>
+                          ) : row.isImagePath ? (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700">Image / PDF</span>
+                          ) : (
+                            <span className="text-slate-400 text-xs">—</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3">
+                          {row.skipped ? (
+                            <span className="text-amber-700 text-xs">{row.skipReason || 'Skipped'}</span>
+                          ) : (
+                            <span className="text-emerald-600 text-xs font-medium">✓ Included in analysis</span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             );
-            // Notes are pushed for analyzed files as "file N: ..." (1-indexed)
-            const noteMap = new Map<number, string>();
-            for (const note of (remarks.notes || []) as string[]) {
-              const m = /^file (\d+): (.+)$/i.exec(note);
-              if (m) noteMap.set(parseInt(m[1], 10), m[2]);
+
+            if (remarksHistory) {
+              const totals = remarksHistory.reduce(
+                (acc, r) => ({
+                  totalCount: acc.totalCount + (r.totalFilesProvided ?? 0),
+                  skippedCount: acc.skippedCount + (r.filesSkipped?.length ?? 0),
+                  analyzedCount: acc.analyzedCount + (r.filesAnalyzed ?? 0),
+                }),
+                { totalCount: 0, skippedCount: 0, analyzedCount: 0 },
+              );
+
+              return (
+                <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6 space-y-6">
+                  <div>
+                    <h2 className="text-lg font-bold text-slate-800 mb-4">Analysis Notes</h2>
+                    {/* Cumulative aggregate cards */}
+                    <div className="grid grid-cols-3 gap-3 mb-6">
+                      <div className="bg-slate-50 rounded-lg p-4 text-center">
+                        <div className="text-2xl font-bold text-slate-800">{totals.totalCount}</div>
+                        <div className="text-xs text-slate-500 mt-1">Files Received</div>
+                      </div>
+                      <div className="bg-indigo-50 rounded-lg p-4 text-center">
+                        <div className="text-2xl font-bold text-indigo-700">{totals.analyzedCount}</div>
+                        <div className="text-xs text-slate-500 mt-1">Files Analysed</div>
+                      </div>
+                      <div className={`rounded-lg p-4 text-center ${totals.skippedCount > 0 ? 'bg-amber-50' : 'bg-slate-50'}`}>
+                        <div className={`text-2xl font-bold ${totals.skippedCount > 0 ? 'text-amber-600' : 'text-slate-800'}`}>{totals.skippedCount}</div>
+                        <div className="text-xs text-slate-500 mt-1">Files Skipped</div>
+                      </div>
+                    </div>
+                    {/* Per-run sections */}
+                    <div className="space-y-4">
+                      {remarksHistory.map((runEntry: any, idx: number) => {
+                        const { rows, totalCount, skippedCount, analyzedCount } = buildRunData(runEntry, []);
+                        const runNum: number = runEntry.run ?? (idx + 1);
+                        const dateStr = formatRunDate(runEntry.at);
+                        const label = idx === 0
+                          ? `Run ${runNum} — Original analysis`
+                          : `Run ${runNum} — added${dateStr ? ` on ${dateStr}` : ''}`;
+                        return (
+                          <div key={idx} className="border border-slate-200 rounded-lg overflow-hidden">
+                            <div className="bg-slate-50 border-b border-slate-200 px-4 py-2.5 flex items-center justify-between">
+                              <span className="text-sm font-semibold text-slate-700">{label}</span>
+                              <span className="text-xs text-slate-500">
+                                {totalCount} received · {analyzedCount} analysed{skippedCount > 0 ? ` · ${skippedCount} skipped` : ''}
+                              </span>
+                            </div>
+                            {rows.length > 0
+                              ? renderFileTable(rows)
+                              : <p className="text-sm text-slate-500 px-4 py-3">No file details available for this run.</p>}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+              );
             }
 
-            const totalCount: number = remarks.totalFilesProvided ?? fileNames.length;
-            const skippedCount: number = remarks.filesSkipped?.length ?? 0;
-            const analyzedCount: number = remarks.filesAnalyzed ?? (totalCount - skippedCount);
-
-            // Build per-file rows — use fileNames if available, else synthesise from count
-            const rowCount = Math.max(totalCount, fileNames.length);
-            const fileRows = Array.from({ length: rowCount }, (_, i) => {
-              const name = fileNames[i] ?? `File ${i + 1}`;
-              const skipped = skippedMap.has(i);
-              const skipReason = skippedMap.get(i) ?? '';
-              const noteText = noteMap.get(i + 1) ?? '';
-              const isTextLayer = noteText.startsWith('text-layer');
-              const isImagePath = noteText.startsWith('image/pdf') || noteText.startsWith('image') || noteText.includes('image/pdf');
-              return { name, skipped, skipReason, noteText, isTextLayer, isImagePath };
-            });
+            // Legacy single-run view (projects without remarksHistory)
+            const { rows: fileRows, totalCount, skippedCount, analyzedCount } = buildRunData(legacyRemarks, (project?.payloadRefNames as string[]) || []);
 
             return (
               <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6 space-y-6">
                 <div>
                   <h2 className="text-lg font-bold text-slate-800 mb-4">Analysis Notes</h2>
-                  {/* Summary counts */}
                   <div className="grid grid-cols-3 gap-3 mb-6">
                     <div className="bg-slate-50 rounded-lg p-4 text-center">
                       <div className="text-2xl font-bold text-slate-800">{totalCount}</div>
@@ -2897,54 +3015,8 @@ export default function ProjectDetails() {
                       <div className="text-xs text-slate-500 mt-1">Files Skipped</div>
                     </div>
                   </div>
-
-                  {/* Per-file breakdown table */}
-                  {rowCount > 0 && (
-                    <div className="overflow-x-auto rounded-lg border border-slate-200">
-                      <table className="min-w-full text-sm">
-                        <thead className="bg-slate-50 border-b border-slate-200">
-                          <tr>
-                            <th className="px-4 py-2.5 text-left font-semibold text-slate-600 w-8">#</th>
-                            <th className="px-4 py-2.5 text-left font-semibold text-slate-600">Filename</th>
-                            <th className="px-4 py-2.5 text-left font-semibold text-slate-600 whitespace-nowrap">Processing Path</th>
-                            <th className="px-4 py-2.5 text-left font-semibold text-slate-600">Status</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-100">
-                          {fileRows.map((row, i) => (
-                            <tr key={i} className={row.skipped ? 'bg-amber-50/40' : 'hover:bg-slate-50'}>
-                              <td className="px-4 py-3 text-slate-400 font-mono text-xs">{i + 1}</td>
-                              <td className="px-4 py-3 text-slate-700 font-medium max-w-xs truncate" title={row.name}>{row.name}</td>
-                              <td className="px-4 py-3 whitespace-nowrap">
-                                {row.skipped ? (
-                                  <span className="text-slate-400 text-xs">—</span>
-                                ) : row.isTextLayer ? (
-                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-100 text-emerald-700">
-                                    Text layer
-                                  </span>
-                                ) : row.isImagePath ? (
-                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700">
-                                    Image / PDF
-                                  </span>
-                                ) : (
-                                  <span className="text-slate-400 text-xs">—</span>
-                                )}
-                              </td>
-                              <td className="px-4 py-3">
-                                {row.skipped ? (
-                                  <span className="text-amber-700 text-xs">{row.skipReason || 'Skipped'}</span>
-                                ) : (
-                                  <span className="text-emerald-600 text-xs font-medium">✓ Included in analysis</span>
-                                )}
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
-
-                  {rowCount === 0 && skippedCount === 0 && (
+                  {fileRows.length > 0 && renderFileTable(fileRows)}
+                  {fileRows.length === 0 && skippedCount === 0 && (
                     <p className="text-sm text-slate-500">All files were analyzed successfully with no issues detected.</p>
                   )}
                 </div>

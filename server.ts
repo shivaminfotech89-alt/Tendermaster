@@ -1515,15 +1515,19 @@ app.post("/api/analyze-tender", verifyFirebaseToken, async (req: AuthenticatedRe
     const aiClient = getAI();
     let docContents: any[];
     let remarks: any = null;
+    // Holds the Firestore data of the existing project during re-analysis; used later
+    // to build the cumulative remarksHistory without a second read.
+    let existingProjectData: Record<string, any> = {};
 
     // ── Credit / run-count gate ──────────────────────────────────────────────
     if (isReanalysis) {
       // Re-analysis: verify project ownership + enforce 5-run cap
       const projectSnap = await db.collection("saved_tenders").doc(existingProjectId).get();
-      if (!projectSnap.exists || projectSnap.data()?.userId !== uid) {
+      existingProjectData = (projectSnap.data() as Record<string, any>) ?? {};
+      if (!projectSnap.exists || existingProjectData.userId !== uid) {
         return res.status(403).json({ error: "Project not found or access denied" });
       }
-      const runsDone: number = projectSnap.data()?.analysisRuns ?? 0;
+      const runsDone: number = existingProjectData.analysisRuns ?? 0;
       const userSnapRA = await db.collection("users").doc(uid).get();
       const userRoleRA: string = userSnapRA.data()?.role || "free";
       const isAdminRA = isAdminRole(userRoleRA, req.user!.email);
@@ -2047,17 +2051,50 @@ MODE 1: CONTRACT PROFILE ANALYSIS & MATCHING
     }
 
     if (isReanalysis) {
-      // Increment analysis run count on the existing project
+      // Build cumulative remarks history so the Analysis Notes tab can show per-run breakdowns.
+      // If the project has no history yet, seed run 1 from the stored remarks.
+      const existingHistory: any[] = Array.isArray(existingProjectData.remarksHistory)
+        ? existingProjectData.remarksHistory
+        : [];
+      const baseHistory: any[] =
+        existingHistory.length === 0 && existingProjectData.remarks
+          ? [{
+              run: 1,
+              at: existingProjectData.savedAt ?? null,
+              fileNames: existingProjectData.payloadRefNames ?? [],
+              ...existingProjectData.remarks,
+            }]
+          : existingHistory;
+
+      // For Path 1 (re-analyze with existing files), fileNames is not sent — use original names.
+      const runFileNames: string[] =
+        Array.isArray(fileNames) && fileNames.length > 0
+          ? fileNames as string[]
+          : (existingProjectData.payloadRefNames ?? []);
+
+      const runNumber = (existingProjectData.analysisRuns ?? 1) + 1;
+      const newRun = {
+        run: runNumber,
+        at: Timestamp.now(),
+        fileNames: runFileNames,
+        ...remarks,
+      };
+
       try {
         await db.collection("saved_tenders").doc(existingProjectId).update({
           details: parsedData,
-          remarks,
+          remarks,                                        // last-run snapshot, kept for backward compat
+          remarksHistory: [...baseHistory, newRun],       // cumulative across all runs
+          // Accumulate file names from re-analysis uploads (add-document path)
+          ...(Array.isArray(fileNames) && fileNames.length > 0
+            ? { payloadRefNames: FieldValue.arrayUnion(...(fileNames as string[])) }
+            : {}),
           lowConfidence: isLow,
           lastReanalyzedAt: Timestamp.now(),
           analysisRuns: FieldValue.increment(1),
         });
       } catch (saveErr) {
-        console.error("[analyze-tender] Failed to update re-analysis run count:", saveErr);
+        console.error("[analyze-tender] Failed to save re-analysis:", saveErr);
       }
       logUsageEvent({ uid, type: 'reanalysis', projectId: existingProjectId, success: true, lowConfidence: isLow });
       return res.json({ analysis: parsedData, remarks, lowConfidence: isLow, projectId: existingProjectId });

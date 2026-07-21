@@ -1,17 +1,20 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import { doc, onSnapshot, getDoc } from "firebase/firestore";
 import { db } from "../../lib/firebase";
 import type { BoqItem } from "../../types/boq";
 import * as XLSX from "xlsx";
 import {
   Loader2, AlertCircle, Search, Download, ArrowRight,
-  ChevronDown, ChevronUp, RefreshCw, FileText, Sparkles,
+  ChevronDown, ChevronUp, RefreshCw, FileText, Sparkles, XCircle,
 } from "lucide-react";
 
 type ExtractionStatus = 'loading' | 'running' | 'done' | 'failed' | 'no_boq_found' | 'not_attempted';
 type SortField = 'itemNo' | 'amount' | 'quantity';
 type SortDir = 'asc' | 'desc';
 
+// If status is 'running' and startedAt is older than this, treat as stale immediately.
+const STALE_MS = 5 * 60_000;
+// If status is 'running' and startedAt is recent, time out after this.
 const BOQ_TIMEOUT_MS = 60_000;
 
 interface BOQMeta {
@@ -26,8 +29,8 @@ interface BOQMeta {
 interface BOQViewerProps {
   projectId: string;
   onProceedToPricing: () => void;
-  /** Provided when the project was analysed before automatic BOQ extraction existed.
-   *  Must write status updates to Firestore so the onSnapshot listener updates automatically. */
+  /** Re-runs BOQ extraction. Must write status updates to Firestore so the
+   *  onSnapshot listener updates the viewer automatically. */
   onManualExtract?: () => Promise<void>;
 }
 
@@ -45,8 +48,16 @@ function SortIcon({ field, sortField, sortDir }: { field: SortField; sortField: 
 function humaniseReason(raw: string): string {
   if (/download|fetch|cors|network|http \d{3}/i.test(raw)) return "Couldn't download the tender PDF.";
   if (/permission|unauthorized|insufficient/i.test(raw)) return "Permission denied. Please try signing out and back in.";
-  if (/timeout|timed out/i.test(raw)) return "The extraction took too long and was stopped.";
+  if (/timeout|timed out|stale|previous session/i.test(raw)) return "The extraction did not complete. Click Retry to try again.";
   return raw;
+}
+
+// Extract milliseconds from a Firestore Timestamp or plain {seconds, nanoseconds} object.
+function getStartedAtMs(ts: any): number | null {
+  if (!ts) return null;
+  if (typeof ts.toMillis === 'function') return ts.toMillis() as number;
+  if (typeof ts.seconds === 'number') return ts.seconds * 1000;
+  return null;
 }
 
 function ErrorUI({
@@ -54,11 +65,13 @@ function ErrorUI({
   reason,
   onRetry,
   retrying,
+  retryLabel = 'Retry',
 }: {
   title: string;
   reason: string;
   onRetry: () => void;
   retrying?: boolean;
+  retryLabel?: string;
 }) {
   const [showDetails, setShowDetails] = useState(false);
   return (
@@ -74,10 +87,10 @@ function ErrorUI({
         <button
           onClick={onRetry}
           disabled={retrying}
-          className="flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50 transition-colors"
+          className="flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50 transition-colors"
         >
           <RefreshCw className={`w-4 h-4 ${retrying ? 'animate-spin' : ''}`} />
-          Retry
+          {retryLabel}
         </button>
         {reason && (
           <button
@@ -106,22 +119,46 @@ export default function BOQViewer({ projectId, onProceedToPricing, onManualExtra
   const [sortField, setSortField] = useState<SortField>('itemNo');
   const [sortDir, setSortDir] = useState<SortDir>('asc');
   const [expandedDescs, setExpandedDescs] = useState<Set<string>>(new Set());
-  const [refreshing, setRefreshing] = useState(false);
+  // startedAtMs: Firestore's startedAt in ms. Used to calculate timeout remaining time
+  // and to detect stale-running documents from previous sessions.
+  const [startedAtMs, setStartedAtMs] = useState<number | null>(null);
   const [timedOut, setTimedOut] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [isExtracting, setIsExtracting] = useState(false);
   const [extractError, setExtractError] = useState('');
-
-  // Track when 'running' started so the timeout is scoped to one attempt
-  const runningStartRef = useRef<number | null>(null);
 
   useEffect(() => {
     const latestRef = doc(db, 'saved_tenders', projectId, 'boq_extraction', 'latest');
     const unsub = onSnapshot(
       latestRef,
       (snap) => {
-        if (!snap.exists()) { setStatus('not_attempted'); return; }
+        if (!snap.exists()) {
+          setStatus('not_attempted');
+          setStartedAtMs(null);
+          return;
+        }
         const data = snap.data() as any;
         const s = data.status as ExtractionStatus;
+
+        if (s === 'running') {
+          const ms = getStartedAtMs(data.startedAt);
+          // Stale: extraction started > 5 min ago and never completed — show error immediately.
+          if (ms !== null && Date.now() - ms > STALE_MS) {
+            console.warn('[BOQViewer] stale running document detected', {
+              startedAtMs: ms,
+              ageMs: Date.now() - ms,
+            });
+            setFailReason('Extraction did not complete (stuck from a previous session).');
+            setStatus('failed');
+            setStartedAtMs(null);
+            return;
+          }
+          setStartedAtMs(ms ?? Date.now());
+          // setStatus('running') falls through to the bottom
+        } else {
+          setStartedAtMs(null);
+        }
+
         setStatus(s);
         if (s === 'done') {
           setItems(data.items ?? []);
@@ -140,28 +177,31 @@ export default function BOQViewer({ projectId, onProceedToPricing, onManualExtra
         console.error('[BOQViewer] snapshot error', err);
         setStatus('failed');
         setFailReason('Could not load BOQ data: ' + (err.message ?? ''));
+        setStartedAtMs(null);
       },
     );
     return () => unsub();
   }, [projectId]);
 
-  // 60-second timeout guard: if status stays 'running' too long, surface an error
+  // Timeout guard: if status stays 'running', fire after (BOQ_TIMEOUT_MS - elapsed).
+  // Depends on startedAtMs so reconnects don't restart the clock from zero.
   useEffect(() => {
     if (status !== 'running') {
-      runningStartRef.current = null;
       setTimedOut(false);
       return;
     }
-    if (!runningStartRef.current) runningStartRef.current = Date.now();
-    const elapsed = Date.now() - runningStartRef.current;
-    const remaining = Math.max(0, BOQ_TIMEOUT_MS - elapsed);
-    const t = setTimeout(() => setTimedOut(true), remaining);
+    const elapsed = startedAtMs ? Math.max(0, Date.now() - startedAtMs) : 0;
+    const remaining = Math.max(1_000, BOQ_TIMEOUT_MS - elapsed);
+    console.log('[BOQViewer] timeout guard started', { elapsed, remaining });
+    const t = setTimeout(() => {
+      console.warn('[BOQViewer] extraction timed out');
+      setTimedOut(true);
+    }, remaining);
     return () => clearTimeout(t);
-  }, [status]);
+  }, [status, startedAtMs]);
 
   const handleRefresh = async () => {
     setRefreshing(true);
-    setTimedOut(false);
     try {
       const snap = await getDoc(doc(db, 'saved_tenders', projectId, 'boq_extraction', 'latest'));
       if (!snap.exists()) { setStatus('not_attempted'); return; }
@@ -188,19 +228,33 @@ export default function BOQViewer({ projectId, onProceedToPricing, onManualExtra
     }
   };
 
-  const handleExtractClick = async () => {
-    if (!onManualExtract || isExtracting) return;
-    setIsExtracting(true);
+  const handleRetryExtraction = async () => {
+    if (!onManualExtract) {
+      // No extraction function available — just refresh to see latest Firestore state
+      handleRefresh();
+      return;
+    }
+    setTimedOut(false);
     setExtractError('');
+    setIsExtracting(true);
+    // Reset to loading so the spinner shows while extraction rewrites Firestore
+    setStatus('loading');
     try {
       await onManualExtract();
-      // status transitions automatically via onSnapshot
+      // status transitions via onSnapshot once Firestore is updated
     } catch (err: any) {
-      // Only shown if extraction failed before writing 'running' to Firestore
+      console.error('[BOQViewer] retry extraction failed', err);
       setExtractError(err?.message ?? 'Extraction failed. Please try again.');
+      setStatus('failed');
+      setFailReason(err?.message ?? 'Extraction failed.');
     } finally {
       setIsExtracting(false);
     }
+  };
+
+  const handleExtractClick = async () => {
+    if (!onManualExtract || isExtracting) return;
+    await handleRetryExtraction();
   };
 
   const handleSort = (field: SortField) => {
@@ -289,8 +343,9 @@ export default function BOQViewer({ projectId, onProceedToPricing, onManualExtra
         <ErrorUI
           title="Unable to extract BOQ"
           reason="BOQ extraction timed out."
-          onRetry={handleRefresh}
-          retrying={refreshing}
+          onRetry={handleRetryExtraction}
+          retrying={isExtracting}
+          retryLabel="Retry extraction"
         />
       );
     }
@@ -298,7 +353,14 @@ export default function BOQViewer({ projectId, onProceedToPricing, onManualExtra
       <div className="flex flex-col items-center justify-center py-20 gap-4 text-slate-500">
         <Loader2 className="w-8 h-8 animate-spin text-indigo-500" />
         <p className="font-medium">Extracting BOQ items…</p>
-        <p className="text-sm text-slate-400">This may take a few seconds.</p>
+        <p className="text-sm text-slate-400">This may take up to a minute.</p>
+        <button
+          onClick={() => setTimedOut(true)}
+          className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-slate-600 mt-2 transition-colors"
+        >
+          <XCircle className="w-3.5 h-3.5" />
+          Taking too long? Cancel
+        </button>
       </div>
     );
   }
@@ -337,6 +399,16 @@ export default function BOQViewer({ projectId, onProceedToPricing, onManualExtra
         <p className="text-sm text-center max-w-sm text-slate-400">
           This tender document does not appear to contain a structured Bill of Quantities.
         </p>
+        {onManualExtract && (
+          <button
+            onClick={handleRetryExtraction}
+            disabled={isExtracting}
+            className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium rounded-lg border border-slate-200 hover:bg-slate-50 disabled:opacity-50 transition-colors"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${isExtracting ? 'animate-spin' : ''}`} />
+            Try extraction again
+          </button>
+        )}
       </div>
     );
   }
@@ -346,8 +418,9 @@ export default function BOQViewer({ projectId, onProceedToPricing, onManualExtra
       <ErrorUI
         title="Unable to extract BOQ"
         reason={failReason}
-        onRetry={handleRefresh}
-        retrying={refreshing}
+        onRetry={handleRetryExtraction}
+        retrying={isExtracting}
+        retryLabel={onManualExtract ? 'Retry extraction' : 'Refresh'}
       />
     );
   }

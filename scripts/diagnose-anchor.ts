@@ -2,6 +2,7 @@
  * Diagnostic: print the top anchor candidates and first 50 rows with their
  * role-match scores so we can see what the real header looks like.
  */
+import './node-globals';
 import fs from 'fs';
 import { getDocument, GlobalWorkerOptions } from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { groupIntoRows, rowText } from '../src/utils/boq/rowGrouping';

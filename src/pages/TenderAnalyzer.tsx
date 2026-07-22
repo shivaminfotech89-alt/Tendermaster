@@ -83,10 +83,9 @@ function sanitizeDocOutput(raw: string): string {
 const LARGE_FILE_BYTES = 20 * 1024 * 1024;
 
 // ── BOQ candidate scoring ──────────────────────────────────────────────────
-// Retain a PDF's raw bytes for BOQ extraction only if it looks like a BOQ document.
-// This keeps browser memory bounded even for large multi-file ZIPs.
-const BOQ_RETAIN_THRESHOLD = 25;
-const BOQ_BUFFER_CAP_BYTES = 100 * 1024 * 1024; // 100 MB total retained across all candidates
+// All PDFs within this byte cap are retained as BOQ candidates.
+// Score from scoreBOQCandidate orders extraction attempts; verification score selects the winner.
+const BOQ_BUFFER_CAP_BYTES = 100 * 1024 * 1024; // 100 MB total across all candidates
 
 function scoreBOQCandidate(filename: string, text: string): number {
   let score = 0;
@@ -316,7 +315,9 @@ export default function TenderAnalyzer() {
         const score = files.length === 1 ? 100 : scoreBOQCandidate(file.name, extractedText);
         const totalCandidateBytes = boqPdfCandidatesRef.current.reduce((s, c) => s + c.buffer.byteLength, 0);
         const underCap = totalCandidateBytes + arrayBuffer.byteLength <= BOQ_BUFFER_CAP_BYTES;
-        const isBoqCandidate = underCap && (isDigital ? score >= BOQ_RETAIN_THRESHOLD : true);
+        // Score ranks extraction order only — never used to exclude candidates.
+        // Verification score (post-extraction) is the only reliable selector.
+        const isBoqCandidate = underCap;
         console.log(`[BOQ] candidate eval: ${file.name}`, { score, isDigital, pageCount, isBoqCandidate });
         if (isBoqCandidate) {
           boqPdfCandidatesRef.current.push({ name: file.name, buffer: arrayBuffer, score, pageCount });
@@ -387,7 +388,8 @@ export default function TenderAnalyzer() {
           const boqScore = scoreBOQCandidate(shortName, zipEntryText);
           const boqTotalBytes = boqPdfCandidatesRef.current.reduce((s, c) => s + c.buffer.byteLength, 0);
           const zipUnderCap = boqTotalBytes + arrayBuffer.byteLength <= BOQ_BUFFER_CAP_BYTES;
-          const isZipBoqCandidate = zipUnderCap && (isZipDigital ? boqScore >= BOQ_RETAIN_THRESHOLD : true);
+          // Score ranks extraction order only — never used to exclude candidates.
+          const isZipBoqCandidate = zipUnderCap;
           console.log(`[BOQ] candidate eval: ${shortName} (ZIP)`, { boqScore, isZipDigital, zipEntryPageCount, isZipBoqCandidate });
           if (isZipBoqCandidate) {
             boqPdfCandidatesRef.current.push({ name: shortName, buffer: arrayBuffer, score: boqScore, pageCount: zipEntryPageCount });

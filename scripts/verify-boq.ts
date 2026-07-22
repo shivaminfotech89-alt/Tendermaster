@@ -1,23 +1,30 @@
 /**
- * verify-boq.ts — CLI harness for BOQ Phase 2 Milestone 1 verification.
+ * verify-boq.ts — CLI harness for BOQ extraction verification.
  *
  * Delegates all verification logic to boqVerificationService (single source
  * of truth shared with the browser debug view and the orchestrator).
  *
  * Usage:
  *   npx tsx scripts/verify-boq.ts path/to/Schedule-B1.pdf
+ *   npx tsx scripts/verify-boq.ts --fixture bareja
+ *   npx tsx scripts/verify-boq.ts --fixture schedule-b
  *   npx tsx scripts/verify-boq.ts path/to/Schedule-B1.pdf --json > report.json
+ *
+ * Available fixture names: bareja, schedule-b
+ * PDF files must be placed in scripts/fixtures/
  */
 
+import './node-globals'; // must be first: polyfills DOMMatrix/Path2D before pdfjs-dist loads
 import fs from 'fs';
 import path from 'path';
 import { getDocument, GlobalWorkerOptions } from 'pdfjs-dist/legacy/build/pdf.mjs';
-import { groupIntoRows } from '../src/utils/boq/rowGrouping';
+import { groupIntoRows, rowText } from '../src/utils/boq/rowGrouping';
 import { findAnchorRow } from '../src/utils/boq/anchorDetection';
 import { reconstructBoqLinear } from '../src/utils/boq/linearReconstruction';
 import { calculateConfidence } from '../src/utils/boq/confidenceScoring';
 import { detectTenderBoqType } from '../src/services/boqClassifierService';
-import { verifyExtraction, findStatedTotal } from '../src/services/boqVerificationService';
+import { verifyExtraction } from '../src/services/boqVerificationService';
+import { findFixture } from './fixtures';
 import type { TextBlock, ExtractionResult } from '../src/types/boq';
 
 GlobalWorkerOptions.workerSrc = new URL(
@@ -36,25 +43,21 @@ async function extractFromPdf(pdfPath: string): Promise<ExtractionResult> {
   const buf = fs.readFileSync(pdfPath);
   const pdf = await getDocument({ data: new Uint8Array(buf.buffer as ArrayBuffer) }).promise;
   const allBlocks: TextBlock[] = [];
-  const pageTexts: string[] = [];
 
   for (let p = 1; p <= pdf.numPages; p++) {
     const page = await pdf.getPage(p);
     const content = await page.getTextContent();
-    let pageText = '';
     for (const item of content.items) {
       if (!isTextItem(item)) continue;
       const str = item.str.trim();
       if (!str) continue;
       const [, , , d, x, y] = item.transform;
       allBlocks.push({ text: str, x, y, width: item.width, height: item.height, page: p, fontSize: Math.abs(d) });
-      pageText += str + ' ';
     }
-    pageTexts.push(pageText);
   }
 
-  const rawText = pageTexts.join('\n');
   const rows    = groupIntoRows(allBlocks);
+  const rawText = rows.map(rowText).join('\n');
   const locked  = findAnchorRow(rows, 60);
   const { items, warnings } = locked
     ? reconstructBoqLinear(rows, locked)
@@ -77,19 +80,51 @@ function section(title: string) {
   console.log(`\n${C.bold}${'─'.repeat(64)}\n${title}\n${'─'.repeat(64)}${C.reset}`);
 }
 
-// ── Main ───────────────────────────────────────────────────────────────────
+// ── CLI arg parsing ────────────────────────────────────────────────────────
 
-const pdfArg  = process.argv[2];
-const jsonMode = process.argv.includes('--json');
+const args = process.argv.slice(2);
+const jsonMode = args.includes('--json');
+const fixtureIdx = args.indexOf('--fixture');
 
-if (!pdfArg) {
-  console.error('Usage: npx tsx scripts/verify-boq.ts <path-to-pdf> [--json]');
-  process.exit(1);
+let pdfArg: string;
+let expectedItemCount: number | undefined;
+let multilineItems: string[] | undefined;
+
+if (fixtureIdx !== -1) {
+  const fixtureName = args[fixtureIdx + 1];
+  if (!fixtureName) {
+    console.error('Usage: npx tsx scripts/verify-boq.ts --fixture <name>');
+    console.error('Available fixtures: bareja, schedule-b');
+    process.exit(1);
+  }
+  const fixture = findFixture(fixtureName);
+  if (!fixture) {
+    console.error(`Unknown fixture: "${fixtureName}"`);
+    console.error('Available fixtures: bareja, schedule-b');
+    process.exit(1);
+  }
+  pdfArg = fixture.pdfPath;
+  expectedItemCount = fixture.expectedItemCount;
+  multilineItems = fixture.multilineItems;
+  console.log(`\nFixture: ${fixture.description}`);
+} else {
+  pdfArg = args.find(a => !a.startsWith('--')) ?? '';
+  if (!pdfArg) {
+    console.error('Usage: npx tsx scripts/verify-boq.ts <path-to-pdf> [--json]');
+    console.error('       npx tsx scripts/verify-boq.ts --fixture <name>');
+    process.exit(1);
+  }
+  // No fixture: run without expectedItemCount so only structural checks apply
+  expectedItemCount = undefined;
+  multilineItems = [];
 }
+
 if (!fs.existsSync(pdfArg)) {
   console.error(`File not found: ${pdfArg}`);
   process.exit(1);
 }
+
+// ── Main ───────────────────────────────────────────────────────────────────
 
 console.log(`\n${C.bold}BOQ Extraction Verification — ${path.basename(pdfArg)}${C.reset}`);
 
@@ -99,12 +134,16 @@ const parserMs = Date.now() - t0;
 
 const t1 = Date.now();
 const verification = verifyExtraction(result, {
-  expectedItemCount: 41,
-  multilineItems: ['13', '14', '26', '34', '36'],
+  expectedItemCount,
+  multilineItems,
 });
 const verifyMs = Date.now() - t1;
 
 console.log(`Parser: ${parserMs}ms   Verification: ${verifyMs}ms   Items: ${result.items.length}\n`);
+if (verification.statedTotal !== null) {
+  console.log(`Stated total: ₹${verification.statedTotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`);
+  console.log(`Computed total: ₹${verification.computedTotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}\n`);
+}
 
 // Print each check
 for (let i = 0; i < verification.checks.length; i++) {
@@ -130,7 +169,7 @@ const total     = verification.checks.length;
 console.log(`Score : ${verification.score}/100`);
 console.log(`Checks: ${passCount}/${total} passed`);
 if (verification.pass) {
-  console.log(`\n${C.green}${C.bold}✓ ALL CRITICAL CHECKS PASSED — safe to proceed to Milestone 2${C.reset}\n`);
+  console.log(`\n${C.green}${C.bold}✓ ALL CRITICAL CHECKS PASSED${C.reset}\n`);
 } else {
   console.log(`\n${C.red}${C.bold}✗ VERIFICATION FAILED${C.reset}`);
   verification.criticalFailures.forEach(f => console.log(`  • ${f}`));

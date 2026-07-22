@@ -86,11 +86,15 @@ export function verifyExtraction(
  */
 export function findStatedTotal(rawText: string): number | null {
   const patterns = [
+    // Most explicit — "say amount" or "total amount" labels
     /say\s+amount[^₹0-9]*[₹Rs.\s]*([0-9,]+\.?[0-9]*)/i,
     /grand\s+total[^₹0-9]*[₹Rs.\s]*([0-9,]+\.?[0-9]*)/i,
     /total\s+amount[^₹0-9]*[₹Rs.\s]*([0-9,]+\.?[0-9]*)/i,
     /estimated\s+amount[^₹0-9]*[₹Rs.\s]*([0-9,]+\.?[0-9]*)/i,
     /total\s*=\s*[^₹0-9]*[₹Rs.\s]*([0-9,]+\.?[0-9]*)/i,
+    // "TOTAL COST FOR PART-A ₹58,42,000.00" — lettered summary row in Indian electrical/supply BOQs
+    /total\s+cost\s+for\s+part\b[^0-9₹]*[₹Rs.\s]*([0-9,]+\.?[0-9]*)/i,
+    /total\s+for\s+part\b[^0-9₹]*[₹Rs.\s]*([0-9,]+\.?[0-9]*)/i,
   ];
   for (const re of patterns) {
     const m = re.exec(rawText);

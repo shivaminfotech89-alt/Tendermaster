@@ -100,6 +100,12 @@ export async function extractBoqFromPdf(arrayBuffer: ArrayBuffer): Promise<Extra
 
   const rows = groupIntoRows(allBlocks);
 
+  // pdf.js content-stream order doesn't always match visual reading order
+  // (e.g. summary rows can interleave with unrelated positioned text), which
+  // breaks substring-proximity matching like findStatedTotal. Rebuild the
+  // text downstream consumers use from the position-sorted rows instead.
+  const orderedText = rows.map(rowText).join('\n');
+
   // ── Phase A: find BOQ anchor row (global scan, no region splitting) ────────
   const lockedMap = findAnchorRow(rows, 60);
 
@@ -184,7 +190,7 @@ export async function extractBoqFromPdf(arrayBuffer: ArrayBuffer): Promise<Extra
 
   const allWarnings = [...reconWarnings, ...classificationWarnings];
   const confidence = calculateConfidence(tables, allWarnings);
-  const detectedBoqType = detectTenderBoqType(rawText, tables);
+  const detectedBoqType = detectTenderBoqType(orderedText, tables);
 
   return {
     items,
@@ -193,6 +199,6 @@ export async function extractBoqFromPdf(arrayBuffer: ArrayBuffer): Promise<Extra
     detectedBoqType,
     isScanned: false,
     confidence,
-    rawText,
+    rawText: orderedText,
   };
 }

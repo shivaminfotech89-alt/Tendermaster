@@ -1,16 +1,24 @@
 import type { TextRow, ColumnAnchor, ColumnMapping, ColumnRole, HeaderDetectionResult } from '../../types/boq';
 import { snapToColumn } from './columnGrouping';
 
+// ROLE = semantic function, not literal wording.
+// "Particulars" and "DESCRIPTION" are both the description column.
+// "Cost per unit" and "RATE" are both the unit rate column.
+// "Total Cost" and "AMOUNT" are both the total-amount column.
+// Add synonyms here when a new BOQ format uses unfamiliar column names.
 const ROLE_PATTERNS: Record<ColumnRole, string[]> = {
   item_no: ['item no', 'sr no', 'sr', 'no', 'sno', 's no', 'item', '#', 'sl no', 'sl', 'seq no', 'serial no', 'item number', 'sr number', 'schedule item', 'itemno'],
   description: ['description', 'item description', 'particulars', 'work description', 'specification', 'details', 'name of work', 'nature of work', 'desc', 'item particulars'],
   unit: ['unit', 'uom', 'units', 'unit of measure', 'u m', 'uom'],
-  quantity: ['quantity', 'qty', 'quantities', 'quantities estimated but may be more or less', 'nos', 'number', 'quantit'],
+  quantity: ['quantity', 'qty', 'quantities', 'quantities estimated but may be more or less', 'nos', 'number', 'quantit', 'quantity in nos', 'qty nos'],
   code: ['code', 'item code', 'sor code', 'dsr code', 'work code', 'sor'],
   schedule: ['schedule', 'bill', 'chapter', 'section', 'part'],
-  estimated_rate: ['rate', 'estimated rate', 'basic rate', 'unit rate', 'sor rate', 'scheduled rate', 'dsr rate', 'rate per unit', 'market rate', 'est rate'],
+  // "Cost per unit" / "Unit Cost" / "Rate per No" are all unit-rate columns
+  estimated_rate: ['rate', 'estimated rate', 'basic rate', 'unit rate', 'sor rate', 'scheduled rate', 'dsr rate', 'rate per unit', 'market rate', 'est rate', 'cost per unit', 'unit cost', 'rate per no', 'cost per no', 'price per unit'],
   bid_rate: ['bid rate', 'quoted rate', 'offered rate', 'tendered rate', 'your rate', 'bidder rate', 'bid price', 'quoted price'],
-  amount: ['amount', 'total amount', 'total', 'value', 'estimated amount', 'total value', 'est amount', 'cost'],
+  // "Total Cost" and "Total" are both the amount column; listed before bare "cost" so they
+  // score 100 (exact match) and prevent "cost per unit" from accidentally mapping here.
+  amount: ['amount', 'total amount', 'total cost', 'total', 'value', 'estimated amount', 'total value', 'est amount', 'cost'],
   gst: ['gst', 'tax', 'gst amount', 'cgst', 'sgst', 'igst', 'vat'],
   remarks: ['remarks', 'note', 'notes', 'observation', 'remark'],
   unknown: [],

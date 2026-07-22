@@ -24,13 +24,23 @@ const MIN_BLOCKS_IN_HEADER = 4;
 const REQUIRED_ROLES: ColumnRole[] = ['item_no', 'description'];
 const SUPPORTING_ROLES: ColumnRole[] = ['quantity', 'unit', 'estimated_rate', 'amount'];
 const MIN_SUPPORTING = 2;
-const HIGH_CONFIDENCE_EARLY_EXIT = 90;
+// Set above 90 so that a 4-column single-row header doesn't suppress the
+// multi-row band scan: some BOQs (e.g. "Quantity in / No's" split header)
+// carry a 5th column on adjacent rows that the band scan captures.
+const HIGH_CONFIDENCE_EARLY_EXIT = 95;
 
 /** Maximum y-span (in PDF pts) to merge rows into a single header band. */
 const MULTI_ROW_BAND_PX = 20;
 
 /** Number of data rows to scan when calibrating the description column. */
 const CALIBRATION_SCAN_ROWS = 15;
+
+// Bare item-number token (e.g. "1", "2.00", "A1") — must not count as a
+// description-start candidate during calibration.  Some BOQs place the item
+// number well to the right of the header's "Sr. No." label (closer to the
+// description text than to the label itself), which would otherwise fool
+// the scan into collapsing the item_no column to zero width.
+const ITEM_TOKEN_RE = /^[A-Za-z]{0,3}\d+[\d.]*\.?$/;
 
 // ── Public API ─────────────────────────────────────────────────────────────
 
@@ -132,6 +142,10 @@ function calibrateDescriptionBoundary(
 
   for (let ri = map.anchorRowIndex + 1; ri < scanEnd; ri++) {
     for (const block of rows[ri].blocks) {
+      // Skip bare item-number tokens — they belong to the item_no column
+      // even when positioned closer to the description zone than the
+      // header label itself.
+      if (ITEM_TOKEN_RE.test(block.text)) continue;
       // Block sits clearly right of item_no centre and left of numeric zone
       if (block.x > itemB.x + 5 && block.x < numericMinX - 5) {
         minDescX = Math.min(minDescX, block.x);

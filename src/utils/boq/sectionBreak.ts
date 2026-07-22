@@ -32,6 +32,14 @@ export const DEFAULT_SECTION_BREAK_PATTERNS: SectionBreakPattern[] = [
   { re: /\bgeneral\s+conditions\b/i,              label: 'General Conditions',     type: 'end_of_boq' },
   { re: /\bspecial\s+conditions\b/i,              label: 'Special Conditions',     type: 'end_of_boq' },
   { re: /\bscope\s+of\s+work\b/i,                label: 'Scope of Work',          type: 'end_of_boq' },
+  // Post-item summary/totals rows (Indian BOQ format: rows A–J after all numbered items).
+  // "TOTAL COST FOR PART-A", "TOTAL FOR PART B", etc. — must be short (≤ 10 words) to avoid
+  // false-fires on item descriptions that mention "total cost for part of work".
+  { re: /\btotal\s+cost\s+for\s+part\b/i,        label: 'Part-total summary row', type: 'summary', maxWords: 10 },
+  { re: /\btotal\s+for\s+part\b/i,               label: 'Part-total summary row', type: 'summary', maxWords: 10 },
+  // Welfare cess, GST, and grand-total summary rows that appear in the same lettered section
+  { re: /\bwelfare\s+cess\b/i,                   label: 'Welfare cess row',       type: 'summary', maxWords: 8 },
+  { re: /\bgst\s+@\s*\d/i,                       label: 'GST rate row',           type: 'summary', maxWords: 8 },
 ];
 
 export interface SectionBreakMatch {

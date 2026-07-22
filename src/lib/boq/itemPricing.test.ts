@@ -106,6 +106,26 @@ describe('validateItemPricing', () => {
     const v = validateItemPricing(noEst, pricing(1), false);
     expect(v.level).toBe('ok');
   });
+
+  test('zero quantity → warning, flagged for review rather than silently priced', () => {
+    const zeroQty = item({ quantity: 0 });
+    const v = validateItemPricing(zeroQty, pricing(110), false);
+    expect(v.level).toBe('warning');
+    expect(v.issues).toContain('Quantity missing or zero — verify against source');
+  });
+
+  test('quantity never silently defaults to 1: a genuinely-1 quantity is not flagged', () => {
+    const oneQty = item({ quantity: 1 });
+    const v = validateItemPricing(oneQty, pricing(110), false);
+    expect(v.issues).not.toContain('Quantity missing or zero — verify against source');
+  });
+
+  test('negative quantity → warning', () => {
+    const negQty = item({ quantity: -1 });
+    const v = validateItemPricing(negQty, pricing(110), false);
+    expect(v.level).toBe('warning');
+    expect(v.issues).toContain('Quantity missing or zero — verify against source');
+  });
 });
 
 describe('sumItemRateTotals', () => {

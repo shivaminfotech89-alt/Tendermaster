@@ -2,13 +2,13 @@ import { useState, useEffect, useMemo, useCallback } from "react";
 import { doc, onSnapshot, getDoc } from "firebase/firestore";
 import { db } from "../../lib/firebase";
 import type { BoqItem } from "../../types/boq";
-import type { BOQType } from "../../lib/boq/types";
+import type { BOQType, BOQData } from "../../lib/boq/types";
 import * as XLSX from "xlsx";
 import {
   Loader2, AlertCircle, Search, Download, ArrowRight,
   ChevronDown, ChevronUp, RefreshCw, FileText, Sparkles, XCircle, Check,
 } from "lucide-react";
-import BoqPricingGrid, { type EditableField } from "./BoqPricingGrid";
+import BoqPricingGrid, { type EditableField, type PricingGridLabels } from "./BoqPricingGrid";
 import usePricingAutosave from "../../hooks/usePricingAutosave";
 import {
   buildPricingKeys, findDuplicateItemNos, validateItemPricing,
@@ -39,13 +39,23 @@ interface BOQViewerProps {
   /** Re-runs BOQ extraction. Must write status updates to Firestore so the
    *  onSnapshot listener updates the viewer automatically. */
   onManualExtract?: () => Promise<void>;
-  /** When 'item_rate', the item table becomes an editable pricing grid. */
+  /** When 'item_rate' or 'lump_sum_epc', the item table becomes an editable
+   *  pricing grid (relabeled "Package"/"Package Price" for lump sum). */
   boqType?: BOQType;
+  /** Full BOQ pricing state, read-only here — used to render the
+   *  percentage-rate summary strip (Estimated Amount / % / Final Bid Amount)
+   *  without recomputing anything BOQSection already computes. */
+  boq?: BOQData;
   /** Fired whenever the per-item pricing grid's aggregate totals change, so
    *  the caller can feed them into the shared BOQData/BOQSection pipeline
    *  the same way percentage-rate bids already populate quotedAmount. */
   onItemRateTotalsChange?: (estimatedAmount: number, quotedAmount: number) => void;
 }
+
+const GRID_LABELS: Record<'item_rate' | 'lump_sum_epc', PricingGridLabels> = {
+  item_rate: { entityLabel: 'Item No', rateLabel: 'Quoted Rate' },
+  lump_sum_epc: { entityLabel: 'Package', rateLabel: 'Package Price' },
+};
 
 function fmtIndian(n: number): string {
   return new Intl.NumberFormat('en-IN', { maximumFractionDigits: 2 }).format(n);
@@ -123,11 +133,12 @@ function ErrorUI({
   );
 }
 
-export default function BOQViewer({ projectId, onProceedToPricing, onManualExtract, boqType, onItemRateTotalsChange }: BOQViewerProps) {
+export default function BOQViewer({ projectId, onProceedToPricing, onManualExtract, boqType, boq, onItemRateTotalsChange }: BOQViewerProps) {
   const [status, setStatus] = useState<ExtractionStatus>('loading');
   const [items, setItems] = useState<BoqItem[]>([]);
-  const isItemRate = boqType === 'item_rate';
-  const { pricing, saveState, updateItem } = usePricingAutosave(isItemRate ? projectId : undefined);
+  const isGridMode = boqType === 'item_rate' || boqType === 'lump_sum_epc';
+  const gridLabels = boqType === 'lump_sum_epc' ? GRID_LABELS.lump_sum_epc : GRID_LABELS.item_rate;
+  const { pricing, saveState, updateItem } = usePricingAutosave(isGridMode ? projectId : undefined);
   const [meta, setMeta] = useState<BOQMeta | null>(null);
   const [failReason, setFailReason] = useState('');
   const [search, setSearch] = useState('');
@@ -343,7 +354,7 @@ export default function BOQViewer({ projectId, onProceedToPricing, onManualExtra
   );
 
   useEffect(() => {
-    if (!isItemRate || !onItemRateTotalsChange) return;
+    if (!isGridMode || !onItemRateTotalsChange) return;
     // Don't push a bare 0 quotedAmount before any row has a rate — that
     // would falsely make BOQSection think the bid is "computable".
     if (itemRateTotals.pricedItemCount === 0) return;
@@ -352,7 +363,7 @@ export default function BOQViewer({ projectId, onProceedToPricing, onManualExtra
     // ProjectDetails render, and this effect should only re-fire when the
     // grid's own totals actually change, not on unrelated parent re-renders.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isItemRate, itemRateTotals.estimatedAmount, itemRateTotals.quotedAmount, itemRateTotals.pricedItemCount]);
+  }, [isGridMode, itemRateTotals.estimatedAmount, itemRateTotals.quotedAmount, itemRateTotals.pricedItemCount]);
 
   const exportCsv = () => {
     const rows = [
@@ -534,7 +545,7 @@ export default function BOQViewer({ projectId, onProceedToPricing, onManualExtra
           />
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          {isItemRate && (
+          {isGridMode && (
             <span className="flex items-center gap-1.5 text-xs text-slate-400 px-2">
               {saveState === 'saving' && <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Saving…</>}
               {saveState === 'saved' && <><Check className="w-3.5 h-3.5 text-emerald-500" /> Saved</>}
@@ -553,7 +564,7 @@ export default function BOQViewer({ projectId, onProceedToPricing, onManualExtra
           >
             <Download className="w-4 h-4" /> Excel
           </button>
-          {!isItemRate && (
+          {!isGridMode && (
             <button
               onClick={onProceedToPricing}
               className="flex items-center gap-1.5 px-4 py-2 text-sm font-semibold rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 transition-colors"
@@ -564,14 +575,53 @@ export default function BOQViewer({ projectId, onProceedToPricing, onManualExtra
         </div>
       </div>
 
+      {/* Percentage-rate summary strip — read-only, sourced entirely from
+          boq (already computed/synced by BOQSection). No new calculation. */}
+      {boqType === 'percentage_rate' && (
+        <div className="rounded-xl border border-indigo-100 bg-indigo-50/50 px-5 py-4">
+          {boq?.estimatedAmount != null ? (
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div>
+                <p className="text-xs font-medium text-indigo-500 uppercase tracking-wide mb-1">Estimated Amount</p>
+                <p className="text-lg font-bold text-indigo-900">{fmtIndian(boq.estimatedAmount)}</p>
+              </div>
+              <div>
+                <p className="text-xs font-medium text-indigo-500 uppercase tracking-wide mb-1">Bid</p>
+                <p className="text-lg font-bold text-indigo-900">
+                  {boq.percentage == null
+                    ? '—'
+                    : boq.percentage === 0
+                    ? 'At Par'
+                    : `${boq.aboveBelow === 'above' ? '↑' : '↓'} ${boq.percentage}% ${boq.aboveBelow}`}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs font-medium text-indigo-500 uppercase tracking-wide mb-1">Final Bid Amount</p>
+                <p className="text-lg font-bold text-indigo-900">
+                  {boq.quotedAmount != null ? fmtIndian(boq.quotedAmount) : '— enter % in the Bid Engine tab'}
+                </p>
+              </div>
+            </div>
+          ) : (
+            <p className="text-sm text-indigo-700">
+              Confirm the estimated amount in the Bid Engine &amp; Profit Calculator tab to see the bid summary here.
+            </p>
+          )}
+          <p className="text-[11px] text-indigo-400 mt-2">
+            Percentage-rate tenders submit a single percentage and total — these figures are presentational only, not per-item rates.
+          </p>
+        </div>
+      )}
+
       {/* Table */}
-      {isItemRate ? (
+      {isGridMode ? (
         <BoqPricingGrid
           items={sorted}
           pricingKeys={sorted.map(item => pricingKeyById.get(item.id)!)}
           pricing={pricing}
           duplicateItemNos={duplicateItemNos}
           onFieldChange={handlePricingFieldChange}
+          labels={gridLabels}
         />
       ) : (
       <div className="overflow-x-auto rounded-xl border border-slate-200 shadow-sm">

@@ -3138,6 +3138,7 @@ export default function ProjectDetails() {
                 onProceedToPricing={() => setActiveTab('calculator')}
                 onManualExtract={handleManualBoqExtract}
                 boqType={boq.boqType}
+                boq={boq}
                 onItemRateTotalsChange={handleItemRateTotalsChange}
               />
             </div>

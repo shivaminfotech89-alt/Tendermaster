@@ -5,12 +5,22 @@ import type { ItemPricing } from '../../types/boqPricing';
 
 export type EditableField = 'bidRate' | 'discountPercent' | 'premiumPercent' | 'remarks';
 
+export interface PricingGridLabels {
+  /** Column 1 header — "Item No" for item-rate, "Package" for lump-sum. */
+  entityLabel: string;
+  /** Quoted-rate column header — "Quoted Rate" for item-rate, "Package Price" for lump-sum. */
+  rateLabel: string;
+}
+
+const DEFAULT_LABELS: PricingGridLabels = { entityLabel: 'Item No', rateLabel: 'Quoted Rate' };
+
 interface BoqPricingGridProps {
   items: BoqItem[];
   pricingKeys: string[];           // parallel to items — see buildPricingKeys
   pricing: Record<string, ItemPricing>;
   duplicateItemNos: Set<string>;
   onFieldChange: (key: string, item: BoqItem, field: EditableField, rawValue: string) => void;
+  labels?: PricingGridLabels;
 }
 
 function fmtIndian(n: number): string {
@@ -55,7 +65,18 @@ const PricingRow = memo(function PricingRow({
         )}
       </td>
       <td className="px-4 py-3 text-slate-600 whitespace-nowrap align-top">{item.unit}</td>
-      <td className="px-4 py-3 text-right text-slate-600 whitespace-nowrap align-top">{item.quantity}</td>
+      <td className="px-4 py-3 text-right whitespace-nowrap align-top">
+        {item.quantity <= 0 ? (
+          <span
+            className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 font-medium"
+            title="Quantity missing or zero — verify against source"
+          >
+            <AlertTriangle className="w-3 h-3" /> {item.quantity}
+          </span>
+        ) : (
+          <span className="text-slate-600">{item.quantity}</span>
+        )}
+      </td>
       <td className="px-4 py-3 text-right text-slate-600 whitespace-nowrap align-top">
         {item.estimatedRate !== undefined ? fmtIndian(item.estimatedRate) : '—'}
       </td>
@@ -136,7 +157,7 @@ const PricingRow = memo(function PricingRow({
   );
 });
 
-export default function BoqPricingGrid({ items, pricingKeys, pricing, duplicateItemNos, onFieldChange }: BoqPricingGridProps) {
+export default function BoqPricingGrid({ items, pricingKeys, pricing, duplicateItemNos, onFieldChange, labels = DEFAULT_LABELS }: BoqPricingGridProps) {
   const [expandedDescs, setExpandedDescs] = useState<Set<string>>(new Set());
 
   const toggleDesc = useCallback((id: string) => {
@@ -152,13 +173,13 @@ export default function BoqPricingGrid({ items, pricingKeys, pricing, duplicateI
       <table className="min-w-full text-sm">
         <thead className="bg-slate-50 border-b border-slate-200">
           <tr>
-            <th className="px-4 py-3 text-left font-semibold text-slate-600 whitespace-nowrap">Item No</th>
+            <th className="px-4 py-3 text-left font-semibold text-slate-600 whitespace-nowrap">{labels.entityLabel}</th>
             <th className="px-4 py-3 text-left font-semibold text-slate-600 min-w-[200px]">Description</th>
             <th className="px-4 py-3 text-left font-semibold text-slate-600 whitespace-nowrap">Unit</th>
             <th className="px-4 py-3 text-right font-semibold text-slate-600 whitespace-nowrap">Quantity</th>
             <th className="px-4 py-3 text-right font-semibold text-slate-600 whitespace-nowrap">Est. Rate (₹)</th>
             <th className="px-4 py-3 text-right font-semibold text-slate-600 whitespace-nowrap">Est. Amount (₹)</th>
-            <th className="px-4 py-3 text-right font-semibold text-indigo-700 whitespace-nowrap">Quoted Rate (₹)</th>
+            <th className="px-4 py-3 text-right font-semibold text-indigo-700 whitespace-nowrap">{labels.rateLabel} (₹)</th>
             <th className="px-4 py-3 text-right font-semibold text-indigo-700 whitespace-nowrap">Disc. %</th>
             <th className="px-4 py-3 text-right font-semibold text-indigo-700 whitespace-nowrap">Prem. %</th>
             <th className="px-4 py-3 text-right font-semibold text-indigo-700 whitespace-nowrap">Quoted Amount (₹)</th>

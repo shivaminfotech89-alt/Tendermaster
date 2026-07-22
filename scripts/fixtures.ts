@@ -14,6 +14,10 @@ export interface BoqFixture {
   expectedItemCount: number;
   expectedTotal: number;
   multilineItems?: string[];
+  /** Per-item quantities in extraction order, for regression-testing that the
+   *  parser never silently defaults a missing/unparsed quantity (matching the
+   *  aggregate total alone can't rule out compensating errors). */
+  expectedQuantities?: number[];
 }
 
 export const FIXTURES: BoqFixture[] = [
@@ -32,6 +36,7 @@ export const FIXTURES: BoqFixture[] = [
     expectedItemCount: 5,
     expectedTotal: 5842000.00,
     multilineItems: [],
+    expectedQuantities: [2, 2, 4, 4, 5],
   },
 ];
 

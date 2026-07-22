@@ -153,16 +153,20 @@ export default function BOQSection({
   }, [analysisResult]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Computed values ────────────────────────────────────────────────────────
-  const isItemRate = boq.boqType === 'item_rate';
+  // Item-rate and lump-sum bids share the same grid-driven pipeline in
+  // BOQViewer (a package is a line item whose "rate" is the package price) —
+  // only the display label differs.
+  const isGridMode = boq.boqType === 'item_rate' || boq.boqType === 'lump_sum_epc';
+  const modeLabel = boq.boqType === 'lump_sum_epc' ? 'Lump Sum / Package' : 'Item Rate';
 
-  // Item-rate bids have no user-entered percentage/direction — the net
+  // Grid-mode bids have no user-entered percentage/direction — the net
   // quoted amount is pushed in from BOQViewer's per-item grid (summed there,
   // synced via BOQData.quotedAmount) rather than derived from netBidAmount.
-  const canCompute = isItemRate
+  const canCompute = isGridMode
     ? boq.quotedAmount != null && boq.estimatedAmount != null
     : (boq.estimatedAmountConfirmed && boq.estimatedAmount != null && boq.percentage != null);
 
-  const quotedAmount = isItemRate
+  const quotedAmount = isGridMode
     ? boq.quotedAmount
     : (canCompute ? netBidAmount(boq.estimatedAmount!, boq.percentage!, boq.aboveBelow) : null);
 
@@ -176,10 +180,10 @@ export default function BOQSection({
   // Derive percentage/direction from the itemized totals so bid_snapshots
   // (which requires these keys) and getBidWarnings stay meaningful for
   // item-rate bids too, instead of reusing the percentage-rate math.
-  const derivedPercentage = isItemRate && quotedAmount != null && boq.estimatedAmount
+  const derivedPercentage = isGridMode && quotedAmount != null && boq.estimatedAmount
     ? Math.abs((quotedAmount - boq.estimatedAmount) / boq.estimatedAmount) * 100
     : boq.percentage;
-  const derivedAboveBelow: 'above' | 'below' = isItemRate && quotedAmount != null && boq.estimatedAmount != null
+  const derivedAboveBelow: 'above' | 'below' = isGridMode && quotedAmount != null && boq.estimatedAmount != null
     ? (quotedAmount >= boq.estimatedAmount ? 'above' : 'below')
     : boq.aboveBelow;
 
@@ -191,10 +195,10 @@ export default function BOQSection({
       : null;
 
   // Welfare cess (applied first) then GST (on the cess-inclusive total).
-  // Gated on isItemRate — percentage-rate bids have no cess/GST UI, and
+  // Gated on isGridMode — percentage-rate bids have no cess/GST UI, and
   // must not have a phantom 18% GST default silently computed and written
   // into their finalize/snapshot data.
-  const cessGst = isItemRate && quotedAmount != null
+  const cessGst = isGridMode && quotedAmount != null
     ? applyCessAndGst(quotedAmount, boq.cessPercent ?? 0, boq.gstPercent ?? 18)
     : null;
 
@@ -209,7 +213,7 @@ export default function BOQSection({
     if (key === prevSyncKeyRef.current) return;
     prevSyncKeyRef.current = key;
 
-    const breakdown = isItemRate && quotedAmount != null
+    const breakdown = isGridMode && quotedAmount != null
       ? applyCessAndGst(quotedAmount, boq.cessPercent ?? 0, boq.gstPercent ?? 18)
       : null;
 
@@ -220,7 +224,7 @@ export default function BOQSection({
       grossProfit: metrics?.grossProfit ?? null,
       profitPercent: metrics?.profitPercent ?? null,
       marginPercent: metrics?.marginPercent ?? null,
-      ...(isItemRate ? {
+      ...(isGridMode ? {
         estimatedAmountConfirmed: true,
         percentage: derivedPercentage,
         aboveBelow: derivedAboveBelow,
@@ -497,14 +501,14 @@ export default function BOQSection({
         </div>
         <div className="divide-y divide-slate-100">
           {[
-            ['BOQ Type', isItemRate ? 'Item Rate' : 'Percentage Rate'],
-            ['Estimated Amount', `${fmtINR(boq.estimatedAmount!)}${isItemRate ? ' (summed from priced BOQ items)' : ' ✓'}${boq.estimatedAmountClause ? ` · ${boq.estimatedAmountClause}` : ''}${boq.estimatedAmountPage ? ` · Page ${boq.estimatedAmountPage}` : ''}`],
+            ['BOQ Type', isGridMode ? modeLabel : 'Percentage Rate'],
+            ['Estimated Amount', `${fmtINR(boq.estimatedAmount!)}${isGridMode ? ' (summed from priced BOQ items)' : ' ✓'}${boq.estimatedAmountClause ? ` · ${boq.estimatedAmountClause}` : ''}${boq.estimatedAmountPage ? ` · Page ${boq.estimatedAmountPage}` : ''}`],
             ['Bid Direction', `${derivedAboveBelow === 'above' ? '↑ Above' : '↓ Below'} Estimated Amount`],
-            ['Percentage Quoted', isItemRate
+            ['Percentage Quoted', isGridMode
               ? (derivedPercentage != null ? `${derivedPercentage.toFixed(2)}%` : '—')
               : `${boq.percentage}%`],
-            [isItemRate ? 'Net Quoted Amount' : 'Final Quoted Amount', fmtINR(quotedAmount)],
-            ...(isItemRate && cessGst && (boq.cessPercent || boq.gstPercent) ? [
+            [isGridMode ? 'Net Quoted Amount' : 'Final Quoted Amount', fmtINR(quotedAmount)],
+            ...(isGridMode && cessGst && (boq.cessPercent || boq.gstPercent) ? [
               ...(boq.cessPercent ? [['Welfare Cess', `${boq.cessPercent}% = ${fmtINR(cessGst.cessAmount)}`]] : []),
               ...(boq.gstPercent ? [['GST', `${boq.gstPercent}% = ${fmtINR(cessGst.gstAmount)}`]] : []),
               ['Round Off', fmtINR(cessGst.roundOff)],
@@ -537,7 +541,7 @@ export default function BOQSection({
     if (!boq.estimatedAmountConfirmed) {
       disabledReason = 'Confirm the estimated amount to finalise';
     } else if (boq.percentage == null) {
-      disabledReason = isItemRate ? 'Price at least one BOQ item to finalise' : 'Enter your bid percentage to finalise';
+      disabledReason = isGridMode ? 'Price at least one BOQ item to finalise' : 'Enter your bid percentage to finalise';
     } else if (!onFinalize) {
       disabledReason = 'Save as a project to lock bid snapshots';
     } else if (warnings?.level === 'red') {
@@ -624,7 +628,7 @@ export default function BOQSection({
         <div className="flex items-center justify-between gap-2">
           <div className="flex-1 min-w-0">
             <h3 className="text-base font-bold text-white">BOQ & Bid Pricing</h3>
-            <p className="text-xs text-indigo-200 mt-0.5">Supported: Percentage Rate & Item Rate Tenders · Lump Sum/EPC coming later</p>
+            <p className="text-xs text-indigo-200 mt-0.5">Supported: Percentage Rate, Item Rate & Lump Sum (manual) · Hybrid coming later</p>
           </div>
           <div className="flex items-center gap-2 shrink-0">
             {boq.boqType !== 'unknown' && boq.boqTypeConfidence && (
@@ -661,9 +665,14 @@ export default function BOQSection({
               <option value="unknown">— Select BOQ type —</option>
               <option value="percentage_rate">Percentage Rate</option>
               <option value="item_rate">Item Rate</option>
-              <option value="lump_sum_epc" disabled>Lump Sum / EPC (coming soon)</option>
+              <option value="lump_sum_epc">Lump Sum / Package</option>
               <option value="hybrid" disabled>Hybrid (coming soon)</option>
             </select>
+            {boq.boqType === 'lump_sum_epc' && (
+              <p className="text-[11px] text-slate-400 mt-1">
+                Lump Sum isn't auto-detected yet — you've selected it manually.
+              </p>
+            )}
           </div>
 
           {import.meta.env.DEV && (
@@ -676,19 +685,19 @@ export default function BOQSection({
             </div>
           )}
 
-          {boq.boqType !== 'percentage_rate' && boq.boqType !== 'item_rate' && boq.boqType !== 'unknown' && (
+          {!isGridMode && boq.boqType !== 'percentage_rate' && boq.boqType !== 'unknown' && (
             <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-lg p-3 text-xs text-slate-600">
               <AlertCircle className="w-4 h-4 text-slate-400 shrink-0" />
-              Lump Sum / EPC BOQ entry is coming in a future update.
+              Hybrid BOQ entry is coming in a future update.
             </div>
           )}
 
-          {boq.boqType === 'item_rate' && (
+          {isGridMode && (
             <>
               {boq.estimatedAmount == null ? (
                 <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-lg p-3 text-xs text-slate-600">
                   <AlertCircle className="w-4 h-4 text-slate-400 shrink-0" />
-                  No priced BOQ items yet — open the BOQ tab and enter Quoted Rates. Totals sync here automatically.
+                  No priced {boq.boqType === 'lump_sum_epc' ? 'packages' : 'BOQ items'} yet — open the BOQ tab and enter {boq.boqType === 'lump_sum_epc' ? 'Package Prices' : 'Quoted Rates'}. Totals sync here automatically.
                 </div>
               ) : (
                 <div className="bg-white border border-slate-200 rounded-xl p-4 space-y-3">

@@ -19,6 +19,9 @@ import type { ExtractionResult, VerificationCheck, VerificationResult } from '..
 export interface VerificationOptions {
   /** Known item count (used for completeness check) */
   expectedItemCount?: number;
+  /** Known per-item quantities in extraction order — catches silent
+   *  quantity-defaulting bugs that an aggregate-total match alone can't. */
+  expectedQuantities?: number[];
   /** Item numbers whose descriptions should be multi-line (spot-check) */
   multilineItems?: string[];
   /** Lowercase title substrings that identify Rate Analysis tables */
@@ -43,6 +46,7 @@ export function verifyExtraction(
     rateAnalysisTitleFragments:options.rateAnalysisTitleFragments ?? DEFAULT_RA_FRAGMENTS,
     materialLeakRe:            options.materialLeakRe            ?? DEFAULT_MATERIAL_LEAK_RE,
     expectedItemCount:         options.expectedItemCount,
+    expectedQuantities:        options.expectedQuantities,
   };
 
   const statedTotal     = findStatedTotal(rawText);
@@ -55,6 +59,7 @@ export function verifyExtraction(
     checkZeroItems(items.length),
     checkRaIsolation(items, tables, opts.rateAnalysisTitleFragments, opts.materialLeakRe),
     checkItemCompleteness(items, opts.expectedItemCount),
+    checkQuantityIntegrity(items, opts.expectedQuantities),
     checkDescriptionQuality(items, opts.multilineItems),
   ];
 
@@ -197,6 +202,40 @@ function checkItemCompleteness(
       missing.length > 0 ? `Missing: ${missing.join(', ')}` : '✓ No missing items',
       dupes.length > 0   ? `Duplicates: ${dupes.join(', ')}`  : '✓ No duplicates',
     ],
+  };
+}
+
+/**
+ * Guards against silent quantity-defaulting bugs. An aggregate-total match
+ * (checkReconciliation) can't rule out compensating errors across items —
+ * this compares every extracted quantity against a known-good value.
+ */
+function checkQuantityIntegrity(
+  items: ExtractionResult['items'],
+  expectedQuantities: number[] | undefined,
+): VerificationCheck {
+  if (!expectedQuantities) {
+    return {
+      name:     'Quantity integrity',
+      pass:     true,
+      critical: false,
+      detail:   ['No expected quantities configured — skipped'],
+    };
+  }
+
+  const mismatches: string[] = [];
+  expectedQuantities.forEach((expected, i) => {
+    const actual = items[i]?.quantity;
+    if (actual !== expected) {
+      mismatches.push(`Item ${i + 1} (${items[i]?.itemNo ?? '?'}): expected ${expected}, got ${actual ?? 'missing'}`);
+    }
+  });
+
+  return {
+    name:     'Quantity integrity',
+    pass:     mismatches.length === 0,
+    critical: true,
+    detail:   mismatches.length > 0 ? mismatches : ['✓ All quantities match expected values exactly'],
   };
 }
 

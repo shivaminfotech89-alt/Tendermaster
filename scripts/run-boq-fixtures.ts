@@ -75,6 +75,7 @@ for (const fixture of FIXTURES) {
     const v = verifyExtraction(result, {
       expectedItemCount: fixture.expectedItemCount,
       multilineItems: fixture.multilineItems ?? [],
+      expectedQuantities: fixture.expectedQuantities,
     });
 
     const totalOk = v.statedTotal !== null

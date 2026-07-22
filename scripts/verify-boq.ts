@@ -89,6 +89,7 @@ const fixtureIdx = args.indexOf('--fixture');
 let pdfArg: string;
 let expectedItemCount: number | undefined;
 let multilineItems: string[] | undefined;
+let expectedQuantities: number[] | undefined;
 
 if (fixtureIdx !== -1) {
   const fixtureName = args[fixtureIdx + 1];
@@ -106,6 +107,7 @@ if (fixtureIdx !== -1) {
   pdfArg = fixture.pdfPath;
   expectedItemCount = fixture.expectedItemCount;
   multilineItems = fixture.multilineItems;
+  expectedQuantities = fixture.expectedQuantities;
   console.log(`\nFixture: ${fixture.description}`);
 } else {
   pdfArg = args.find(a => !a.startsWith('--')) ?? '';
@@ -136,6 +138,7 @@ const t1 = Date.now();
 const verification = verifyExtraction(result, {
   expectedItemCount,
   multilineItems,
+  expectedQuantities,
 });
 const verifyMs = Date.now() - t1;
 

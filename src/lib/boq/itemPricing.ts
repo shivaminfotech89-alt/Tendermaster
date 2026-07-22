@@ -46,6 +46,15 @@ export function validateItemPricing(item: BoqItem, pricing: ItemPricing | undefi
   const rate = pricing?.bidRate;
   const estimated = item.estimatedRate;
 
+  // BoqItem.quantity is a required number, so a genuinely-missing quantity
+  // and a genuinely-zero one are indistinguishable downstream — but either
+  // way Quoted Amount = Quantity × Rate silently comes out 0, which reads as
+  // ordinary data rather than a parsing gap. Flag it for review.
+  if (item.quantity <= 0) {
+    issues.push('Quantity missing or zero — verify against source');
+    level = 'warning';
+  }
+
   if (rate === undefined) {
     issues.push('Rate missing');
     level = 'warning';

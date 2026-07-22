@@ -5,7 +5,7 @@ import {
 } from 'lucide-react';
 import type { BOQData, BidSnapshotRow, FinancialValueCandidate } from '../../lib/boq/types';
 import { toIndianWords } from '../../lib/boq/indianWords';
-import { netBidAmount, calcProfit, getBidWarnings, fmtINR } from '../../lib/boq/calculator';
+import { netBidAmount, calcProfit, getBidWarnings, fmtINR, applyCessAndGst } from '../../lib/boq/calculator';
 import { detectBoqTypeFromAnalysis } from '../../lib/boq/detectBoqType';
 
 interface BOQSectionProps {
@@ -153,14 +153,18 @@ export default function BOQSection({
   }, [analysisResult]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Computed values ────────────────────────────────────────────────────────
-  const canCompute =
-    boq.estimatedAmountConfirmed &&
-    boq.estimatedAmount != null &&
-    boq.percentage != null;
+  const isItemRate = boq.boqType === 'item_rate';
 
-  const quotedAmount = canCompute
-    ? netBidAmount(boq.estimatedAmount!, boq.percentage!, boq.aboveBelow)
-    : null;
+  // Item-rate bids have no user-entered percentage/direction — the net
+  // quoted amount is pushed in from BOQViewer's per-item grid (summed there,
+  // synced via BOQData.quotedAmount) rather than derived from netBidAmount.
+  const canCompute = isItemRate
+    ? boq.quotedAmount != null && boq.estimatedAmount != null
+    : (boq.estimatedAmountConfirmed && boq.estimatedAmount != null && boq.percentage != null);
+
+  const quotedAmount = isItemRate
+    ? boq.quotedAmount
+    : (canCompute ? netBidAmount(boq.estimatedAmount!, boq.percentage!, boq.aboveBelow) : null);
 
   const words = quotedAmount != null ? toIndianWords(quotedAmount) : null;
 
@@ -169,18 +173,46 @@ export default function BOQSection({
       ? calcProfit(quotedAmount, totalCost)
       : null;
 
+  // Derive percentage/direction from the itemized totals so bid_snapshots
+  // (which requires these keys) and getBidWarnings stay meaningful for
+  // item-rate bids too, instead of reusing the percentage-rate math.
+  const derivedPercentage = isItemRate && quotedAmount != null && boq.estimatedAmount
+    ? Math.abs((quotedAmount - boq.estimatedAmount) / boq.estimatedAmount) * 100
+    : boq.percentage;
+  const derivedAboveBelow: 'above' | 'below' = isItemRate && quotedAmount != null && boq.estimatedAmount != null
+    ? (quotedAmount >= boq.estimatedAmount ? 'above' : 'below')
+    : boq.aboveBelow;
+
   const warnings =
-    quotedAmount != null && boq.percentage != null
-      ? getBidWarnings(quotedAmount, totalCost, boq.percentage, metrics ?? {
+    quotedAmount != null && derivedPercentage != null
+      ? getBidWarnings(quotedAmount, totalCost, derivedPercentage, metrics ?? {
           grossProfit: 0, profitPercent: 0, marginPercent: 0,
         })
       : null;
 
-  // Sync computed values into boq state and parent revenue
-  const prevQuotedRef = useRef<number | null | undefined>(undefined);
+  // Welfare cess (applied first) then GST (on the cess-inclusive total).
+  // Gated on isItemRate — percentage-rate bids have no cess/GST UI, and
+  // must not have a phantom 18% GST default silently computed and written
+  // into their finalize/snapshot data.
+  const cessGst = isItemRate && quotedAmount != null
+    ? applyCessAndGst(quotedAmount, boq.cessPercent ?? 0, boq.gstPercent ?? 18)
+    : null;
+
+  // Sync computed values into boq state and parent revenue. Merged into one
+  // effect (rather than a separate cess/GST effect also keyed on
+  // quotedAmount) because two effects both calling setBoq({...boq, ...})
+  // from the same render's stale `boq` closure in the same commit would let
+  // the second call silently clobber the first's writes.
+  const prevSyncKeyRef = useRef<string>('');
   useEffect(() => {
-    if (quotedAmount === prevQuotedRef.current) return;
-    prevQuotedRef.current = quotedAmount;
+    const key = `${quotedAmount}|${boq.cessPercent ?? ''}|${boq.gstPercent ?? ''}`;
+    if (key === prevSyncKeyRef.current) return;
+    prevSyncKeyRef.current = key;
+
+    const breakdown = isItemRate && quotedAmount != null
+      ? applyCessAndGst(quotedAmount, boq.cessPercent ?? 0, boq.gstPercent ?? 18)
+      : null;
+
     setBoq({
       ...boq,
       quotedAmount,
@@ -188,10 +220,20 @@ export default function BOQSection({
       grossProfit: metrics?.grossProfit ?? null,
       profitPercent: metrics?.profitPercent ?? null,
       marginPercent: metrics?.marginPercent ?? null,
+      ...(isItemRate ? {
+        estimatedAmountConfirmed: true,
+        percentage: derivedPercentage,
+        aboveBelow: derivedAboveBelow,
+        cessAmount: breakdown?.cessAmount,
+        gstAmount: breakdown?.gstAmount,
+        totalWithGst: breakdown?.totalWithGst,
+        roundOff: breakdown?.roundOff,
+        roundedTotal: breakdown?.roundedTotal,
+      } : {}),
       boqLastChangedAt: Date.now(),
     });
     if (quotedAmount != null) onRevenueSync(quotedAmount);
-  }, [quotedAmount]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [quotedAmount, boq.cessPercent, boq.gstPercent]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Recompute metrics when totalCost changes independently
   const prevCostRef = useRef<number>(totalCost);
@@ -237,6 +279,16 @@ export default function BOQSection({
     setBoq({ ...boq, percentage: pct, boqLastChangedAt: Date.now() });
   };
 
+  const handleCessChange = (v: string) => {
+    const n = parseFloat(v);
+    setBoq({ ...boq, cessPercent: v !== '' && isFinite(n) ? Math.max(0, n) : undefined, boqLastChangedAt: Date.now() });
+  };
+
+  const handleGstChange = (v: string) => {
+    const n = parseFloat(v);
+    setBoq({ ...boq, gstPercent: v !== '' && isFinite(n) ? Math.max(0, n) : undefined, boqLastChangedAt: Date.now() });
+  };
+
   const handleFinalize = async () => {
     if (!onFinalize || !canCompute || !quotedAmount || !words) return;
     setFinalizing(true);
@@ -256,6 +308,13 @@ export default function BOQSection({
         grossProfit: metrics?.grossProfit ?? 0,
         profitPercent: metrics?.profitPercent ?? 0,
         marginPercent: metrics?.marginPercent ?? 0,
+        cessPercent: boq.cessPercent,
+        gstPercent: boq.gstPercent,
+        cessAmount: cessGst?.cessAmount,
+        gstAmount: cessGst?.gstAmount,
+        totalWithGst: cessGst?.totalWithGst,
+        roundOff: cessGst?.roundOff,
+        roundedTotal: cessGst?.roundedTotal,
         remarks: boq.remarks,
       });
     } finally {
@@ -438,11 +497,19 @@ export default function BOQSection({
         </div>
         <div className="divide-y divide-slate-100">
           {[
-            ['BOQ Type', 'Percentage Rate'],
-            ['Estimated Amount', `${fmtINR(boq.estimatedAmount!)} ✓${boq.estimatedAmountClause ? ` · ${boq.estimatedAmountClause}` : ''}${boq.estimatedAmountPage ? ` · Page ${boq.estimatedAmountPage}` : ''}`],
-            ['Bid Direction', `${boq.aboveBelow === 'above' ? '↑ Above' : '↓ Below'} Estimated Amount`],
-            ['Percentage Quoted', `${boq.percentage}%`],
-            ['Final Quoted Amount', fmtINR(quotedAmount)],
+            ['BOQ Type', isItemRate ? 'Item Rate' : 'Percentage Rate'],
+            ['Estimated Amount', `${fmtINR(boq.estimatedAmount!)}${isItemRate ? ' (summed from priced BOQ items)' : ' ✓'}${boq.estimatedAmountClause ? ` · ${boq.estimatedAmountClause}` : ''}${boq.estimatedAmountPage ? ` · Page ${boq.estimatedAmountPage}` : ''}`],
+            ['Bid Direction', `${derivedAboveBelow === 'above' ? '↑ Above' : '↓ Below'} Estimated Amount`],
+            ['Percentage Quoted', isItemRate
+              ? (derivedPercentage != null ? `${derivedPercentage.toFixed(2)}%` : '—')
+              : `${boq.percentage}%`],
+            [isItemRate ? 'Net Quoted Amount' : 'Final Quoted Amount', fmtINR(quotedAmount)],
+            ...(isItemRate && cessGst && (boq.cessPercent || boq.gstPercent) ? [
+              ...(boq.cessPercent ? [['Welfare Cess', `${boq.cessPercent}% = ${fmtINR(cessGst.cessAmount)}`]] : []),
+              ...(boq.gstPercent ? [['GST', `${boq.gstPercent}% = ${fmtINR(cessGst.gstAmount)}`]] : []),
+              ['Round Off', fmtINR(cessGst.roundOff)],
+              ['Grand Total', fmtINR(cessGst.roundedTotal)],
+            ] as [string, string][] : []),
             ['Amount in Words', words ?? '—'],
             ...(totalCost > 0 ? [
               ['Total Estimated Cost', fmtINR(totalCost)],
@@ -470,7 +537,7 @@ export default function BOQSection({
     if (!boq.estimatedAmountConfirmed) {
       disabledReason = 'Confirm the estimated amount to finalise';
     } else if (boq.percentage == null) {
-      disabledReason = 'Enter your bid percentage to finalise';
+      disabledReason = isItemRate ? 'Price at least one BOQ item to finalise' : 'Enter your bid percentage to finalise';
     } else if (!onFinalize) {
       disabledReason = 'Save as a project to lock bid snapshots';
     } else if (warnings?.level === 'red') {
@@ -557,7 +624,7 @@ export default function BOQSection({
         <div className="flex items-center justify-between gap-2">
           <div className="flex-1 min-w-0">
             <h3 className="text-base font-bold text-white">BOQ & Bid Pricing</h3>
-            <p className="text-xs text-indigo-200 mt-0.5">Supported: Percentage Rate Tenders · Item Rate and EPC coming later</p>
+            <p className="text-xs text-indigo-200 mt-0.5">Supported: Percentage Rate & Item Rate Tenders · Lump Sum/EPC coming later</p>
           </div>
           <div className="flex items-center gap-2 shrink-0">
             {boq.boqType !== 'unknown' && boq.boqTypeConfidence && (
@@ -593,7 +660,7 @@ export default function BOQSection({
             >
               <option value="unknown">— Select BOQ type —</option>
               <option value="percentage_rate">Percentage Rate</option>
-              <option value="item_rate" disabled>Item Rate (coming soon)</option>
+              <option value="item_rate">Item Rate</option>
               <option value="lump_sum_epc" disabled>Lump Sum / EPC (coming soon)</option>
               <option value="hybrid" disabled>Hybrid (coming soon)</option>
             </select>
@@ -609,11 +676,65 @@ export default function BOQSection({
             </div>
           )}
 
-          {boq.boqType !== 'percentage_rate' && boq.boqType !== 'unknown' && (
+          {boq.boqType !== 'percentage_rate' && boq.boqType !== 'item_rate' && boq.boqType !== 'unknown' && (
             <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-lg p-3 text-xs text-slate-600">
               <AlertCircle className="w-4 h-4 text-slate-400 shrink-0" />
-              {boq.boqType === 'item_rate' ? 'Item Rate' : 'Lump Sum / EPC'} BOQ entry is coming in a future update.
+              Lump Sum / EPC BOQ entry is coming in a future update.
             </div>
+          )}
+
+          {boq.boqType === 'item_rate' && (
+            <>
+              {boq.estimatedAmount == null ? (
+                <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-lg p-3 text-xs text-slate-600">
+                  <AlertCircle className="w-4 h-4 text-slate-400 shrink-0" />
+                  No priced BOQ items yet — open the BOQ tab and enter Quoted Rates. Totals sync here automatically.
+                </div>
+              ) : (
+                <div className="bg-white border border-slate-200 rounded-xl p-4 space-y-3">
+                  <h4 className="text-xs font-bold text-slate-700 uppercase tracking-widest">Statutory Additions (optional)</h4>
+                  <div className="flex flex-wrap items-center gap-4">
+                    <label className="flex items-center gap-2 text-sm text-slate-600">
+                      Welfare Cess
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={boq.cessPercent ?? ''}
+                        onChange={e => handleCessChange(e.target.value)}
+                        placeholder="0"
+                        className="w-20 border border-slate-200 rounded-lg px-2 py-1.5 text-sm text-slate-900 outline-none focus:ring-2 focus:ring-indigo-300"
+                      />
+                      %
+                    </label>
+                    <label className="flex items-center gap-2 text-sm text-slate-600">
+                      GST
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={boq.gstPercent ?? 18}
+                        onChange={e => handleGstChange(e.target.value)}
+                        className="w-20 border border-slate-200 rounded-lg px-2 py-1.5 text-sm text-slate-900 outline-none focus:ring-2 focus:ring-indigo-300"
+                      />
+                      %
+                    </label>
+                  </div>
+                  <p className="text-[11px] text-slate-400">
+                    Cess is applied to the quoted amount first; GST is then applied to the cess-inclusive total.
+                  </p>
+                </div>
+              )}
+
+              {/* Financial Summary Card */}
+              {renderSummaryCard()}
+
+              {/* Finalize button */}
+              {renderFinalizeButton()}
+
+              {/* Revision history */}
+              {renderHistory()}
+            </>
           )}
 
           {boq.boqType === 'percentage_rate' && (

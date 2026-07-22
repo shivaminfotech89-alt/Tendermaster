@@ -49,6 +49,19 @@ export interface BOQData {
   profitPercent: number | null;
   marginPercent: number | null;
 
+  // Statutory additions on top of the net quoted amount — cess applied
+  // first, then GST on the cess-inclusive total (see applyCessAndGst in
+  // calculator.ts). Optional: undefined means no cess/GST entered yet.
+  // BOQ-type-agnostic, but the UI to edit these currently only exists in
+  // the item_rate branch of BOQSection.
+  cessPercent?: number;
+  gstPercent?: number;
+  cessAmount?: number;
+  gstAmount?: number;
+  totalWithGst?: number;
+  roundOff?: number;
+  roundedTotal?: number;            // final grand-total figure for the bid
+
   // Tracking
   boqLastChangedAt?: number;        // Date.now() on any change
   finalisedAt?: any;                // Firestore Timestamp of last finalize
@@ -71,6 +84,13 @@ export interface BidSnapshot {
   grossProfit: number;
   profitPercent: number;
   marginPercent: number;
+  cessPercent?: number;
+  gstPercent?: number;
+  cessAmount?: number;
+  gstAmount?: number;
+  totalWithGst?: number;
+  roundOff?: number;
+  roundedTotal?: number;
   remarks: string;
   createdAt: any;
   createdBy: string;

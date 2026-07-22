@@ -1,12 +1,19 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { doc, onSnapshot, getDoc } from "firebase/firestore";
 import { db } from "../../lib/firebase";
 import type { BoqItem } from "../../types/boq";
+import type { BOQType } from "../../lib/boq/types";
 import * as XLSX from "xlsx";
 import {
   Loader2, AlertCircle, Search, Download, ArrowRight,
-  ChevronDown, ChevronUp, RefreshCw, FileText, Sparkles, XCircle,
+  ChevronDown, ChevronUp, RefreshCw, FileText, Sparkles, XCircle, Check,
 } from "lucide-react";
+import BoqPricingGrid, { type EditableField } from "./BoqPricingGrid";
+import usePricingAutosave from "../../hooks/usePricingAutosave";
+import {
+  buildPricingKeys, findDuplicateItemNos, validateItemPricing,
+  computeQuotedAmount, sumItemRateTotals,
+} from "../../lib/boq/itemPricing";
 
 type ExtractionStatus = 'loading' | 'running' | 'done' | 'failed' | 'no_boq_found' | 'not_attempted';
 type SortField = 'itemNo' | 'amount' | 'quantity';
@@ -32,6 +39,12 @@ interface BOQViewerProps {
   /** Re-runs BOQ extraction. Must write status updates to Firestore so the
    *  onSnapshot listener updates the viewer automatically. */
   onManualExtract?: () => Promise<void>;
+  /** When 'item_rate', the item table becomes an editable pricing grid. */
+  boqType?: BOQType;
+  /** Fired whenever the per-item pricing grid's aggregate totals change, so
+   *  the caller can feed them into the shared BOQData/BOQSection pipeline
+   *  the same way percentage-rate bids already populate quotedAmount. */
+  onItemRateTotalsChange?: (estimatedAmount: number, quotedAmount: number) => void;
 }
 
 function fmtIndian(n: number): string {
@@ -110,9 +123,11 @@ function ErrorUI({
   );
 }
 
-export default function BOQViewer({ projectId, onProceedToPricing, onManualExtract }: BOQViewerProps) {
+export default function BOQViewer({ projectId, onProceedToPricing, onManualExtract, boqType, onItemRateTotalsChange }: BOQViewerProps) {
   const [status, setStatus] = useState<ExtractionStatus>('loading');
   const [items, setItems] = useState<BoqItem[]>([]);
+  const isItemRate = boqType === 'item_rate';
+  const { pricing, saveState, updateItem } = usePricingAutosave(isItemRate ? projectId : undefined);
   const [meta, setMeta] = useState<BOQMeta | null>(null);
   const [failReason, setFailReason] = useState('');
   const [search, setSearch] = useState('');
@@ -294,6 +309,51 @@ export default function BOQViewer({ projectId, onProceedToPricing, onManualExtra
     });
   };
 
+  // ── Item-rate pricing grid wiring ──────────────────────────────────────────
+
+  const pricingKeys = useMemo(() => buildPricingKeys(items), [items]);
+  const pricingKeyById = useMemo(
+    () => new Map(items.map((item, i) => [item.id, pricingKeys[i]])),
+    [items, pricingKeys],
+  );
+  const duplicateItemNos = useMemo(() => new Set(findDuplicateItemNos(items)), [items]);
+
+  const handlePricingFieldChange = useCallback((key: string, item: BoqItem, field: EditableField, rawValue: string) => {
+    const existing = pricing[key];
+    const patch: Partial<{ bidRate: number; discountPercent: number; premiumPercent: number; remarks: string; quotedAmount: number }> = {};
+
+    if (field === 'remarks') {
+      patch.remarks = rawValue === '' ? undefined : rawValue;
+    } else {
+      const n = rawValue === '' ? undefined : parseFloat(rawValue);
+      patch[field] = n !== undefined && isFinite(n) ? n : undefined;
+    }
+
+    const nextBidRate = field === 'bidRate' ? patch.bidRate : existing?.bidRate;
+    patch.quotedAmount = computeQuotedAmount(item.quantity, nextBidRate);
+
+    const isDuplicate = duplicateItemNos.has(item.itemNo.trim());
+    const validation = validateItemPricing(item, { ...existing, ...patch, validation: { level: 'ok', issues: [] } }, isDuplicate);
+    updateItem(key, patch, validation);
+  }, [pricing, duplicateItemNos, updateItem]);
+
+  const itemRateTotals = useMemo(
+    () => sumItemRateTotals(items, pricing, pricingKeys),
+    [items, pricing, pricingKeys],
+  );
+
+  useEffect(() => {
+    if (!isItemRate || !onItemRateTotalsChange) return;
+    // Don't push a bare 0 quotedAmount before any row has a rate — that
+    // would falsely make BOQSection think the bid is "computable".
+    if (itemRateTotals.pricedItemCount === 0) return;
+    onItemRateTotalsChange(itemRateTotals.estimatedAmount, itemRateTotals.quotedAmount);
+    // onItemRateTotalsChange intentionally omitted: it's a fresh closure each
+    // ProjectDetails render, and this effect should only re-fire when the
+    // grid's own totals actually change, not on unrelated parent re-renders.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isItemRate, itemRateTotals.estimatedAmount, itemRateTotals.quotedAmount, itemRateTotals.pricedItemCount]);
+
   const exportCsv = () => {
     const rows = [
       ['Item No', 'Description', 'Unit', 'Quantity', 'Est. Rate (Rs)', 'Amount (Rs)'],
@@ -474,6 +534,13 @@ export default function BOQViewer({ projectId, onProceedToPricing, onManualExtra
           />
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          {isItemRate && (
+            <span className="flex items-center gap-1.5 text-xs text-slate-400 px-2">
+              {saveState === 'saving' && <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Saving…</>}
+              {saveState === 'saved' && <><Check className="w-3.5 h-3.5 text-emerald-500" /> Saved</>}
+              {saveState === 'error' && <><AlertCircle className="w-3.5 h-3.5 text-rose-500" /> Save failed</>}
+            </span>
+          )}
           <button
             onClick={exportCsv}
             className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium rounded-lg border border-slate-200 hover:bg-slate-50 transition-colors"
@@ -486,16 +553,27 @@ export default function BOQViewer({ projectId, onProceedToPricing, onManualExtra
           >
             <Download className="w-4 h-4" /> Excel
           </button>
-          <button
-            onClick={onProceedToPricing}
-            className="flex items-center gap-1.5 px-4 py-2 text-sm font-semibold rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 transition-colors"
-          >
-            Proceed to Pricing <ArrowRight className="w-4 h-4" />
-          </button>
+          {!isItemRate && (
+            <button
+              onClick={onProceedToPricing}
+              className="flex items-center gap-1.5 px-4 py-2 text-sm font-semibold rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 transition-colors"
+            >
+              Proceed to Pricing <ArrowRight className="w-4 h-4" />
+            </button>
+          )}
         </div>
       </div>
 
       {/* Table */}
+      {isItemRate ? (
+        <BoqPricingGrid
+          items={sorted}
+          pricingKeys={sorted.map(item => pricingKeyById.get(item.id)!)}
+          pricing={pricing}
+          duplicateItemNos={duplicateItemNos}
+          onFieldChange={handlePricingFieldChange}
+        />
+      ) : (
       <div className="overflow-x-auto rounded-xl border border-slate-200 shadow-sm">
         <table className="min-w-full text-sm">
           <thead className="bg-slate-50 border-b border-slate-200">
@@ -572,6 +650,7 @@ export default function BOQViewer({ projectId, onProceedToPricing, onManualExtra
           )}
         </table>
       </div>
+      )}
     </div>
   );
 }

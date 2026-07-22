@@ -123,6 +123,11 @@ service cloud.firestore {
         && get(/databases/$(database)/documents/saved_tenders/$(savedId)).data.userId == request.auth.uid;
     }
 
+    match /saved_tenders/{savedId}/boq_pricing/{docId} {
+      allow read, create, update: if isSignedIn()
+        && get(/databases/$(database)/documents/saved_tenders/$(savedId)).data.userId == request.auth.uid;
+    }
+
     match /saved_tenders/{savedId}/bid_snapshots/{snapshotId} {
       allow read: if isSignedIn() && (resource.data.createdBy == request.auth.uid || isAdmin());
       allow create: if isSignedIn()

@@ -509,6 +509,13 @@ export default function ProjectDetails() {
     }, 1000);
   };
 
+  // Pushed up from BOQViewer's item-rate pricing grid whenever its aggregate
+  // totals change. Merges into the same `boq` state/save path percentage-rate
+  // already uses — BOQSection derives profit/margin/warnings from these.
+  const handleItemRateTotalsChange = (estimatedAmount: number, quotedAmount: number) => {
+    handleBoqChange({ ...boq, estimatedAmount, quotedAmount });
+  };
+
   const handleFinalize = async (
     data: Omit<BidSnapshotRow, 'id' | 'createdAt' | 'createdBy' | 'version'>,
   ) => {
@@ -3130,6 +3137,8 @@ export default function ProjectDetails() {
                 projectId={projectId!}
                 onProceedToPricing={() => setActiveTab('calculator')}
                 onManualExtract={handleManualBoqExtract}
+                boqType={boq.boqType}
+                onItemRateTotalsChange={handleItemRateTotalsChange}
               />
             </div>
           )}

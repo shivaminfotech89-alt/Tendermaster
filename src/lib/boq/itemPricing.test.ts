@@ -62,19 +62,19 @@ describe('validateItemPricing', () => {
   test('missing rate → warning', () => {
     const v = validateItemPricing(base, pricing(undefined), false);
     expect(v.level).toBe('warning');
-    expect(v.issues).toContain('Rate missing');
+    expect(v.issues).toContain('Quoted Rate missing');
   });
 
   test('negative rate → error', () => {
     const v = validateItemPricing(base, pricing(-5), false);
     expect(v.level).toBe('error');
-    expect(v.issues).toContain('Negative rate');
+    expect(v.issues).toContain('Negative quoted rate');
   });
 
   test('zero rate → warning', () => {
     const v = validateItemPricing(base, pricing(0), false);
     expect(v.level).toBe('warning');
-    expect(v.issues).toContain('Zero rate');
+    expect(v.issues).toContain('Zero quoted rate');
   });
 
   test('rate far below estimated → warning', () => {
@@ -101,30 +101,32 @@ describe('validateItemPricing', () => {
     expect(v.issues).toContain('Duplicate item number');
   });
 
-  test('no estimated rate present: skips the low/high comparison', () => {
+  test('no estimated rate present: skips the low/high comparison, but flags the missing department rate', () => {
     const noEst = item({ estimatedRate: undefined });
     const v = validateItemPricing(noEst, pricing(1), false);
-    expect(v.level).toBe('ok');
+    expect(v.issues.some(i => i.includes('below estimated rate') || i.includes('above estimated rate'))).toBe(false);
+    expect(v.level).toBe('warning');
+    expect(v.issues).toContain('Rate could not be confidently extracted. Please compare with the original BOQ.');
   });
 
   test('zero quantity → warning, flagged for review rather than silently priced', () => {
     const zeroQty = item({ quantity: 0 });
     const v = validateItemPricing(zeroQty, pricing(110), false);
     expect(v.level).toBe('warning');
-    expect(v.issues).toContain('Quantity missing or zero — verify against source');
+    expect(v.issues).toContain('Quantity could not be confidently extracted. Please compare with the original BOQ.');
   });
 
   test('quantity never silently defaults to 1: a genuinely-1 quantity is not flagged', () => {
     const oneQty = item({ quantity: 1 });
     const v = validateItemPricing(oneQty, pricing(110), false);
-    expect(v.issues).not.toContain('Quantity missing or zero — verify against source');
+    expect(v.issues).not.toContain('Quantity could not be confidently extracted. Please compare with the original BOQ.');
   });
 
   test('negative quantity → warning', () => {
     const negQty = item({ quantity: -1 });
     const v = validateItemPricing(negQty, pricing(110), false);
     expect(v.level).toBe('warning');
-    expect(v.issues).toContain('Quantity missing or zero — verify against source');
+    expect(v.issues).toContain('Quantity could not be confidently extracted. Please compare with the original BOQ.');
   });
 });
 

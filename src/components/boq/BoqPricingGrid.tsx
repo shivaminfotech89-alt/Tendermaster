@@ -69,7 +69,7 @@ const PricingRow = memo(function PricingRow({
         {item.quantity <= 0 ? (
           <span
             className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 font-medium"
-            title="Quantity missing or zero — verify against source"
+            title="Quantity could not be confidently extracted. Please compare with the original BOQ."
           >
             <AlertTriangle className="w-3 h-3" /> {item.quantity}
           </span>
@@ -171,14 +171,14 @@ export default function BoqPricingGrid({ items, pricingKeys, pricing, duplicateI
   return (
     <div className="overflow-x-auto rounded-xl border border-slate-200 shadow-sm">
       <table className="min-w-full text-sm">
-        <thead className="bg-slate-50 border-b border-slate-200">
+        <thead className="bg-slate-50 border-b border-slate-200 sticky top-0 z-10">
           <tr>
             <th className="px-4 py-3 text-left font-semibold text-slate-600 whitespace-nowrap">{labels.entityLabel}</th>
             <th className="px-4 py-3 text-left font-semibold text-slate-600 min-w-[200px]">Description</th>
             <th className="px-4 py-3 text-left font-semibold text-slate-600 whitespace-nowrap">Unit</th>
             <th className="px-4 py-3 text-right font-semibold text-slate-600 whitespace-nowrap">Quantity</th>
-            <th className="px-4 py-3 text-right font-semibold text-slate-600 whitespace-nowrap">Est. Rate (₹)</th>
-            <th className="px-4 py-3 text-right font-semibold text-slate-600 whitespace-nowrap">Est. Amount (₹)</th>
+            <th className="px-4 py-3 text-right font-semibold text-slate-600 whitespace-nowrap">Department Rate (₹)</th>
+            <th className="px-4 py-3 text-right font-semibold text-slate-600 whitespace-nowrap">Department Amount (₹)</th>
             <th className="px-4 py-3 text-right font-semibold text-indigo-700 whitespace-nowrap">{labels.rateLabel} (₹)</th>
             <th className="px-4 py-3 text-right font-semibold text-indigo-700 whitespace-nowrap">Disc. %</th>
             <th className="px-4 py-3 text-right font-semibold text-indigo-700 whitespace-nowrap">Prem. %</th>

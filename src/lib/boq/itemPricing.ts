@@ -1,5 +1,6 @@
 import type { BoqItem } from '../../types/boq';
 import type { ItemPricing, ItemValidation } from '../../types/boqPricing';
+import { checkBoqItemDataQuality } from './boqDataQuality';
 
 /** Rate below this fraction of the estimated rate is flagged "extremely low". */
 const LOW_RATE_RATIO = 0.5;
@@ -40,29 +41,24 @@ export function findDuplicateItemNos(items: BoqItem[]): string[] {
 }
 
 export function validateItemPricing(item: BoqItem, pricing: ItemPricing | undefined, isDuplicate: boolean): ItemValidation {
-  const issues: string[] = [];
-  let level: 'ok' | 'warning' | 'error' = 'ok';
+  // Department-data sanity (quantity/unit/rate/amount) is shared with the
+  // read-only table via boqDataQuality.ts — folded in here so the pricing
+  // grid surfaces the same warnings, not just its own bid-rate checks.
+  const dataQuality = checkBoqItemDataQuality(item);
+  const issues: string[] = [...dataQuality.issues];
+  let level: 'ok' | 'warning' | 'error' = dataQuality.level;
 
   const rate = pricing?.bidRate;
   const estimated = item.estimatedRate;
 
-  // BoqItem.quantity is a required number, so a genuinely-missing quantity
-  // and a genuinely-zero one are indistinguishable downstream — but either
-  // way Quoted Amount = Quantity × Rate silently comes out 0, which reads as
-  // ordinary data rather than a parsing gap. Flag it for review.
-  if (item.quantity <= 0) {
-    issues.push('Quantity missing or zero — verify against source');
-    level = 'warning';
-  }
-
   if (rate === undefined) {
-    issues.push('Rate missing');
-    level = 'warning';
+    issues.push('Quoted Rate missing');
+    if (level === 'ok') level = 'warning';
   } else if (rate < 0) {
-    issues.push('Negative rate');
+    issues.push('Negative quoted rate');
     level = 'error';
   } else if (rate === 0) {
-    issues.push('Zero rate');
+    issues.push('Zero quoted rate');
     if (level === 'ok') level = 'warning';
   } else if (estimated !== undefined && estimated > 0) {
     if (rate < estimated * LOW_RATE_RATIO) {

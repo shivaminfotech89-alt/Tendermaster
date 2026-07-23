@@ -6,14 +6,18 @@ import type { BOQType, BOQData } from "../../lib/boq/types";
 import * as XLSX from "xlsx";
 import {
   Loader2, AlertCircle, Search, Download, ArrowRight,
-  ChevronDown, ChevronUp, RefreshCw, FileText, Sparkles, XCircle, Check,
+  ChevronDown, ChevronUp, RefreshCw, FileText, Sparkles, XCircle, Check, AlertTriangle,
 } from "lucide-react";
 import BoqPricingGrid, { type EditableField, type PricingGridLabels } from "./BoqPricingGrid";
+import ReferenceBoqBanner from "./ReferenceBoqBanner";
+import PricingMethodCard from "./PricingMethodCard";
 import usePricingAutosave from "../../hooks/usePricingAutosave";
 import {
   buildPricingKeys, findDuplicateItemNos, validateItemPricing,
   computeQuotedAmount, sumItemRateTotals,
 } from "../../lib/boq/itemPricing";
+import { checkBoqItemDataQuality } from "../../lib/boq/boqDataQuality";
+import { deriveBidStatus, type BidStatus } from "../../lib/boq/boqReviewStatus";
 
 type ExtractionStatus = 'loading' | 'running' | 'done' | 'failed' | 'no_boq_found' | 'not_attempted';
 type SortField = 'itemNo' | 'amount' | 'quantity';
@@ -55,6 +59,13 @@ interface BOQViewerProps {
 const GRID_LABELS: Record<'item_rate' | 'lump_sum_epc', PricingGridLabels> = {
   item_rate: { entityLabel: 'Item No', rateLabel: 'Quoted Rate' },
   lump_sum_epc: { entityLabel: 'Package', rateLabel: 'Package Price' },
+};
+
+const BID_STATUS_STYLE: Record<BidStatus, string> = {
+  not_started: 'text-slate-500',
+  in_progress: 'text-amber-600',
+  completed: 'text-emerald-600',
+  locked: 'text-indigo-600',
 };
 
 function fmtIndian(n: number): string {
@@ -353,6 +364,11 @@ export default function BOQViewer({ projectId, onProceedToPricing, onManualExtra
     [items, pricing, pricingKeys],
   );
 
+  const bidStatus = useMemo(
+    () => deriveBidStatus(boq, isGridMode, itemRateTotals.pricedItemCount, items.length),
+    [boq, isGridMode, itemRateTotals.pricedItemCount, items.length],
+  );
+
   useEffect(() => {
     if (!isGridMode || !onItemRateTotalsChange) return;
     // Don't push a bare 0 quotedAmount before any row has a rate — that
@@ -501,36 +517,50 @@ export default function BOQViewer({ projectId, onProceedToPricing, onManualExtra
 
   return (
     <div className="space-y-6">
+      <ReferenceBoqBanner />
+
       {/* Summary cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
         <div className="bg-indigo-50 rounded-xl p-4">
           <p className="text-xs font-medium text-indigo-500 uppercase tracking-wide mb-1">Items</p>
           <p className="text-2xl font-bold text-indigo-700">{meta?.itemCount ?? items.length}</p>
         </div>
-        <div className="bg-amber-50 rounded-xl p-4 col-span-1 sm:col-span-1">
-          <p className="text-xs font-medium text-amber-600 uppercase tracking-wide mb-1">Total (₹)</p>
-          <p className="text-xl font-bold text-amber-700 break-all">{fmtIndian(meta?.totalAmount ?? 0)}</p>
+        <div className="bg-amber-50 rounded-xl p-4">
+          <p className="text-xs font-medium text-amber-600 uppercase tracking-wide mb-1">Estimated Amount</p>
+          <p className="text-xl font-bold text-amber-700 break-all">
+            {meta ? fmtIndian(meta.totalAmount) : '--'}
+          </p>
         </div>
         <div className="bg-slate-50 rounded-xl p-4">
-          <p className="text-xs font-medium text-slate-500 uppercase tracking-wide mb-1">Engine</p>
-          <div className="flex items-center gap-1 mt-1">
-            <p className="text-sm font-semibold text-slate-700">
-              {meta?.visionUsed ? 'AI Assisted' : 'Parser'}
-            </p>
-            {meta?.visionUsed && <Sparkles className="w-3.5 h-3.5 text-indigo-400" />}
-          </div>
-        </div>
-        <div className="bg-slate-50 rounded-xl p-4">
-          <p className="text-xs font-medium text-slate-500 uppercase tracking-wide mb-1">Confidence</p>
-          <p className="text-sm font-semibold text-slate-700 mt-1">{meta?.verificationScore ?? 0}/100</p>
+          <p className="text-xs font-medium text-slate-500 uppercase tracking-wide mb-1">Parser Confidence</p>
+          <p className="text-sm font-semibold text-slate-700 mt-1">{meta ? `${meta.verificationScore}/100` : '--'}</p>
         </div>
         <div className="bg-slate-50 rounded-xl p-4">
           <p className="text-xs font-medium text-slate-500 uppercase tracking-wide mb-1">Parse Time</p>
           <p className="text-sm font-semibold text-slate-700 mt-1">
-            {((meta?.parserDurationMs ?? 0) / 1000).toFixed(1)}s
+            {meta ? `${(meta.parserDurationMs / 1000).toFixed(1)}s` : '--'}
           </p>
         </div>
+        <PricingMethodCard
+          boqType={boqType}
+          boqTypeConfidence={boq?.boqTypeConfidence}
+          boqTypeScore={boq?.boqTypeScore}
+          boqTypeReason={boq?.boqTypeReason}
+        />
+        <div className="bg-slate-50 rounded-xl p-4">
+          <p className="text-xs font-medium text-slate-500 uppercase tracking-wide mb-1">Status</p>
+          <p className={`text-sm font-bold mt-1 ${BID_STATUS_STYLE[bidStatus.status]}`}>{bidStatus.label}</p>
+        </div>
       </div>
+
+      {bidStatus.status === 'not_started' && (
+        <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+          <AlertCircle className="w-4 h-4 text-slate-400 shrink-0" />
+          {isGridMode
+            ? `No bid prepared yet. Enter ${gridLabels.rateLabel.toLowerCase()}s below to begin.`
+            : 'No bid prepared yet. Click "Prepare Financial Bid" to begin.'}
+        </div>
+      )}
 
       {/* Toolbar */}
       <div className="flex flex-wrap items-center gap-3">
@@ -569,7 +599,7 @@ export default function BOQViewer({ projectId, onProceedToPricing, onManualExtra
               onClick={onProceedToPricing}
               className="flex items-center gap-1.5 px-4 py-2 text-sm font-semibold rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 transition-colors"
             >
-              Proceed to Pricing <ArrowRight className="w-4 h-4" />
+              Prepare Financial Bid <ArrowRight className="w-4 h-4" />
             </button>
           )}
         </div>
@@ -626,7 +656,7 @@ export default function BOQViewer({ projectId, onProceedToPricing, onManualExtra
       ) : (
       <div className="overflow-x-auto rounded-xl border border-slate-200 shadow-sm">
         <table className="min-w-full text-sm">
-          <thead className="bg-slate-50 border-b border-slate-200">
+          <thead className="bg-slate-50 border-b border-slate-200 sticky top-0 z-10">
             <tr>
               <th className="px-4 py-3 text-left font-semibold text-slate-600 whitespace-nowrap">
                 <button className="flex items-center gap-1" onClick={() => handleSort('itemNo')}>
@@ -640,24 +670,26 @@ export default function BOQViewer({ projectId, onProceedToPricing, onManualExtra
                   Quantity <SortIcon field="quantity" sortField={sortField} sortDir={sortDir} />
                 </button>
               </th>
-              <th className="px-4 py-3 text-right font-semibold text-slate-600 whitespace-nowrap">Est. Rate (₹)</th>
+              <th className="px-4 py-3 text-right font-semibold text-slate-600 whitespace-nowrap">Department Rate (₹)</th>
               <th className="px-4 py-3 text-right font-semibold text-slate-600 whitespace-nowrap">
                 <button className="flex items-center gap-1 ml-auto" onClick={() => handleSort('amount')}>
-                  Amount (₹) <SortIcon field="amount" sortField={sortField} sortDir={sortDir} />
+                  Department Amount (₹) <SortIcon field="amount" sortField={sortField} sortDir={sortDir} />
                 </button>
               </th>
+              <th className="px-2 py-3"></th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
             {sorted.length === 0 ? (
               <tr>
-                <td colSpan={6} className="px-4 py-10 text-center text-slate-400">
+                <td colSpan={7} className="px-4 py-10 text-center text-slate-400">
                   No items match your search.
                 </td>
               </tr>
             ) : sorted.map(item => {
               const expanded = expandedDescs.has(item.id);
               const longDesc = item.description.length > 80;
+              const quality = checkBoqItemDataQuality(item);
               return (
                 <tr key={item.id} className="hover:bg-slate-50 transition-colors">
                   <td className="px-4 py-3 font-mono text-slate-600 whitespace-nowrap align-top">{item.itemNo}</td>
@@ -682,6 +714,13 @@ export default function BOQViewer({ projectId, onProceedToPricing, onManualExtra
                   <td className="px-4 py-3 text-right font-medium text-slate-700 whitespace-nowrap align-top">
                     {item.amount !== undefined ? fmtIndian(item.amount) : '—'}
                   </td>
+                  <td className="px-2 py-3 align-top">
+                    {quality.level === 'warning' && (
+                      <span title={quality.issues.join(', ')}>
+                        <AlertTriangle className="w-4 h-4 text-amber-500" />
+                      </span>
+                    )}
+                  </td>
                 </tr>
               );
             })}
@@ -695,6 +734,7 @@ export default function BOQViewer({ projectId, onProceedToPricing, onManualExtra
                 <td className="px-4 py-3 text-right font-bold text-slate-800 whitespace-nowrap">
                   ₹{fmtIndian(totalFiltered)}
                 </td>
+                <td></td>
               </tr>
             </tfoot>
           )}

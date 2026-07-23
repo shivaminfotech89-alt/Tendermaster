@@ -369,6 +369,18 @@ export default function BOQViewer({ projectId, onProceedToPricing, onManualExtra
     [boq, isGridMode, itemRateTotals.pricedItemCount, items.length],
   );
 
+  // Single source of truth for "Estimated Amount" across the whole page —
+  // prefer the confirmed/synced BOQData figure (boq.estimatedAmount) over the
+  // raw extraction sum. For percentage-rate specifically, those two numbers
+  // are NOT guaranteed to match (the tender's stated "Estimated Amount Put to
+  // Tender" doesn't have to equal a raw sum of Schedule-B line items), so
+  // showing the extraction sum before confirmation would risk showing a
+  // different number than the one actually used for bid math. Grid modes
+  // have no such divergence risk — boq.estimatedAmount there is synced from
+  // the same sum-of-item-amounts formula as meta.totalAmount — so falling
+  // back to the extraction sum before pricing starts is safe and useful.
+  const displayEstimatedAmount = boq?.estimatedAmount ?? (boqType !== 'percentage_rate' ? meta?.totalAmount : undefined);
+
   useEffect(() => {
     if (!isGridMode || !onItemRateTotalsChange) return;
     // Don't push a bare 0 quotedAmount before any row has a rate — that
@@ -528,7 +540,7 @@ export default function BOQViewer({ projectId, onProceedToPricing, onManualExtra
         <div className="bg-amber-50 rounded-xl p-4">
           <p className="text-xs font-medium text-amber-600 uppercase tracking-wide mb-1">Estimated Amount</p>
           <p className="text-xl font-bold text-amber-700 break-all">
-            {meta ? fmtIndian(meta.totalAmount) : '--'}
+            {displayEstimatedAmount != null ? fmtIndian(displayEstimatedAmount) : '--'}
           </p>
         </div>
         <div className="bg-slate-50 rounded-xl p-4">
@@ -536,7 +548,9 @@ export default function BOQViewer({ projectId, onProceedToPricing, onManualExtra
           <p className="text-sm font-semibold text-slate-700 mt-1">{meta ? `${meta.verificationScore}/100` : '--'}</p>
         </div>
         <div className="bg-slate-50 rounded-xl p-4">
-          <p className="text-xs font-medium text-slate-500 uppercase tracking-wide mb-1">Parse Time</p>
+          <p className="text-xs font-medium text-slate-500 uppercase tracking-wide mb-1" title="Time spent parsing the already-downloaded PDF (text extraction + BOQ reconstruction). Excludes download and verification time.">
+            Parser Time
+          </p>
           <p className="text-sm font-semibold text-slate-700 mt-1">
             {meta ? `${(meta.parserDurationMs / 1000).toFixed(1)}s` : '--'}
           </p>
@@ -609,32 +623,33 @@ export default function BOQViewer({ projectId, onProceedToPricing, onManualExtra
           boq (already computed/synced by BOQSection). No new calculation. */}
       {boqType === 'percentage_rate' && (
         <div className="rounded-xl border border-indigo-100 bg-indigo-50/50 px-5 py-4">
-          {boq?.estimatedAmount != null ? (
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              <div>
-                <p className="text-xs font-medium text-indigo-500 uppercase tracking-wide mb-1">Estimated Amount</p>
-                <p className="text-lg font-bold text-indigo-900">{fmtIndian(boq.estimatedAmount)}</p>
-              </div>
-              <div>
-                <p className="text-xs font-medium text-indigo-500 uppercase tracking-wide mb-1">Bid</p>
-                <p className="text-lg font-bold text-indigo-900">
-                  {boq.percentage == null
-                    ? '—'
-                    : boq.percentage === 0
-                    ? 'At Par'
-                    : `${boq.aboveBelow === 'above' ? '↑' : '↓'} ${boq.percentage}% ${boq.aboveBelow}`}
-                </p>
-              </div>
-              <div>
-                <p className="text-xs font-medium text-indigo-500 uppercase tracking-wide mb-1">Final Bid Amount</p>
-                <p className="text-lg font-bold text-indigo-900">
-                  {boq.quotedAmount != null ? fmtIndian(boq.quotedAmount) : '— enter % in the Bid Engine tab'}
-                </p>
-              </div>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div>
+              <p className="text-xs font-medium text-indigo-500 uppercase tracking-wide mb-1">Estimated Amount</p>
+              <p className="text-lg font-bold text-indigo-900">
+                {boq?.estimatedAmount != null ? fmtIndian(boq.estimatedAmount) : '--'}
+              </p>
             </div>
-          ) : (
-            <p className="text-sm text-indigo-700">
-              Confirm the estimated amount in the Bid Engine &amp; Profit Calculator tab to see the bid summary here.
+            <div>
+              <p className="text-xs font-medium text-indigo-500 uppercase tracking-wide mb-1">Bid</p>
+              <p className="text-lg font-bold text-indigo-900">
+                {boq?.percentage == null
+                  ? 'Not Prepared'
+                  : boq.percentage === 0
+                  ? 'At Par'
+                  : `${boq.aboveBelow === 'above' ? '↑' : '↓'} ${boq.percentage}% ${boq.aboveBelow}`}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs font-medium text-indigo-500 uppercase tracking-wide mb-1">Final Bid Amount</p>
+              <p className="text-lg font-bold text-indigo-900">
+                {boq?.quotedAmount != null ? fmtIndian(boq.quotedAmount) : '--'}
+              </p>
+            </div>
+          </div>
+          {boq?.estimatedAmount == null && (
+            <p className="text-xs text-indigo-700 mt-3">
+              Confirm the estimated amount in the Bid Engine &amp; Profit Calculator tab to prepare your bid.
             </p>
           )}
           <p className="text-[11px] text-indigo-400 mt-2">

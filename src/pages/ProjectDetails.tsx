@@ -22,6 +22,10 @@ import BOQViewer from "../components/boq/BOQViewer";
 import { extractBoqWithFallback } from "../services/boqExtractionOrchestrator";
 import type { BOQData, BidSnapshotRow } from "../lib/boq/types";
 import { INITIAL_BOQ } from "../lib/boq/types";
+import { decideRevenueSync, inferRevenueSource, type RevenueSource } from "../lib/boq/revenueSync";
+import { netBidAmount } from "../lib/boq/calculator";
+import { extractAnalysisText, extractBidRecommendationEstimatedValue } from "../lib/boq/detectBoqType";
+import { buildRateContractHint, resolveRateContractRevenue } from "../lib/boq/detectRateContract";
 
 function formatFileSize(bytes: number): string {
   if (bytes >= 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
@@ -139,6 +143,12 @@ export default function ProjectDetails() {
   const [materials, setMaterials] = useState<any[]>([]);
   const [labour, setLabour] = useState<any[]>([]);
   const [revenue, setRevenue] = useState(0);
+  // 'manual' once the bidder edits revenue directly (or via Auto Bid) — sticky,
+  // so BOQSection's auto-sync never silently overwrites a manual entry again.
+  const [revenueSource, setRevenueSource] = useState<RevenueSource>('auto');
+  // A sync BOQSection wants to apply while revenueSource is 'manual' — held
+  // for explicit confirmation instead of being applied directly.
+  const [pendingRevenueSync, setPendingRevenueSync] = useState<number | null>(null);
   const [savingCalc, setSavingCalc] = useState(false);
 
   // Document Generation
@@ -155,6 +165,9 @@ export default function ProjectDetails() {
   const [generatedFromTemplate, setGeneratedFromTemplate] = useState(false);
   const [boq, setBoqState] = useState<BOQData>({ ...INITIAL_BOQ });
   const [boqChangedSinceDocGen, setBoqChangedSinceDocGen] = useState(false);
+  // Weak advisory signal from BOQViewer's items (BOQSection doesn't have
+  // items itself) — one of three inputs to the Rate Contract hint.
+  const [nominalQuantitiesSignal, setNominalQuantitiesSignal] = useState(false);
   const [snapshots, setSnapshots] = useState<BidSnapshotRow[]>([]);
   const [snapshotsLoading, setSnapshotsLoading] = useState(false);
   const [downloadingPdf, setDownloadingPdf] = useState(false);
@@ -403,7 +416,18 @@ export default function ProjectDetails() {
           }
           
           if (data.revenue) setRevenue(data.revenue);
-          
+          if (data.revenueSource === 'manual' || data.revenueSource === 'auto') {
+            setRevenueSource(data.revenueSource);
+          } else if (data.revenue) {
+            // Migration: this project predates revenueSource. Infer it once
+            // from whether the stored revenue still matches what auto-sync
+            // would compute right now — self-heals without a batch script.
+            const computedAutoRevenue = data.boq?.estimatedAmount != null && data.boq?.percentage != null
+              ? netBidAmount(data.boq.estimatedAmount, data.boq.percentage, data.boq.aboveBelow ?? 'above')
+              : null;
+            setRevenueSource(inferRevenueSource(data.revenue, computedAutoRevenue));
+          }
+
           if (data.checkedItems) setCheckedItems(data.checkedItems);
 
           if (data.uploadedFiles) setUploadedFiles(data.uploadedFiles);
@@ -516,6 +540,34 @@ export default function ProjectDetails() {
     handleBoqChange({ ...boq, estimatedAmount, quotedAmount });
   };
 
+  // BOQSection calls this whenever its computed quotedAmount changes (any
+  // boqType). While revenueSource is 'manual', a bidder-entered revenue must
+  // never be silently overwritten — hold the new value for explicit
+  // confirmation via the banner instead of applying it directly.
+  const handleRevenueSync = (amount: number) => {
+    const decision = decideRevenueSync(revenueSource, revenue, amount);
+    if (decision.applyRevenue != null) setRevenue(decision.applyRevenue);
+    setPendingRevenueSync(decision.pendingSync);
+  };
+
+  const handleManualRevenueEdit = (amount: number) => {
+    setRevenue(amount);
+    setRevenueSource('manual');
+    setPendingRevenueSync(null);
+  };
+
+  const handleAcceptRevenueSync = () => {
+    if (pendingRevenueSync == null) return;
+    setRevenue(pendingRevenueSync);
+    setPendingRevenueSync(null);
+  };
+
+  const handleResumeAutoSync = () => {
+    if (boq.quotedAmount != null) setRevenue(boq.quotedAmount);
+    setRevenueSource('auto');
+    setPendingRevenueSync(null);
+  };
+
   const handleFinalize = async (
     data: Omit<BidSnapshotRow, 'id' | 'createdAt' | 'createdBy' | 'version'>,
   ) => {
@@ -549,7 +601,8 @@ export default function ProjectDetails() {
       await updateDoc(docRef, {
         materials,
         labour,
-        revenue
+        revenue,
+        revenueSource
       });
       
       // Auto re-analyze financial risk with manual data
@@ -1385,6 +1438,22 @@ export default function ProjectDetails() {
   const totalExpense = materials.reduce((acc, m) => acc + (m.cost_num || 0), 0) + labour.reduce((acc, l) => acc + (l.cost_num || 0), 0);
   const estimatedProfit = revenue - totalExpense;
 
+  // Same gate BOQSection computes for its own Gross Profit/Margin — recomputed
+  // independently here (not threaded as a prop) so this panel can never show
+  // a number BOQSection itself considers not-yet-determinable, even if
+  // `revenue` is momentarily stale from before isRateContract was answered.
+  const rateContractHintForPanel = boq.boqType === 'percentage_rate'
+    ? buildRateContractHint(
+        extractAnalysisText(project?.details),
+        boq.estimatedAmount,
+        extractBidRecommendationEstimatedValue(project?.details),
+        nominalQuantitiesSignal,
+      )
+    : { signals: [], reasons: [] };
+  const rateContractGate = resolveRateContractRevenue(
+    boq.isRateContract, boq.expectedContractValue, rateContractHintForPanel.signals.length, revenue,
+  );
+
   const [isExportingPDF, setIsExportingPDF] = useState(false);
 
   const handleDownloadPDF = async () => {
@@ -1940,10 +2009,11 @@ export default function ProjectDetails() {
              boq={boq}
              setBoq={handleBoqChange}
              totalCost={totalExpense}
-             onRevenueSync={(amount) => setRevenue(amount)}
+             onRevenueSync={handleRevenueSync}
              onFinalize={handleFinalize}
              snapshots={snapshots}
              snapshotsLoading={snapshotsLoading}
+             nominalQuantitiesSignal={nominalQuantitiesSignal}
            />
 
            {project.details?.bid_recommendation ? (
@@ -2051,15 +2121,47 @@ export default function ProjectDetails() {
                 )}
                 
                 {/* Financial Summary */}
+                {pendingRevenueSync != null && (
+                  <div className="flex items-center justify-between gap-3 flex-wrap bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-sm">
+                    <span className="text-amber-800">
+                      Bid amount changed to <span className="font-bold">₹{pendingRevenueSync.toLocaleString()}</span> — update expected revenue?
+                    </span>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <button
+                        onClick={handleAcceptRevenueSync}
+                        className="px-3 py-1.5 text-xs font-semibold rounded bg-amber-600 text-white hover:bg-amber-700 transition-colors"
+                      >
+                        Update
+                      </button>
+                      <button
+                        onClick={() => setPendingRevenueSync(null)}
+                        className="px-3 py-1.5 text-xs font-medium rounded border border-amber-300 text-amber-800 hover:bg-amber-100 transition-colors"
+                      >
+                        Keep ₹{revenue.toLocaleString()}
+                      </button>
+                    </div>
+                  </div>
+                )}
                 <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                   <div className="bg-white p-4 rounded-xl border border-slate-200">
-                     <p className="text-xs font-bold text-slate-500 uppercase">Estimated Revenue (Bid Value)</p>
+                     <div className="flex items-center justify-between">
+                       <p className="text-xs font-bold text-slate-500 uppercase">Estimated Revenue (Bid Value)</p>
+                       {revenueSource === 'manual' && (
+                         <button
+                           onClick={handleResumeAutoSync}
+                           title="Resume syncing this from the BOQ pricing tab"
+                           className="text-[10px] font-semibold text-indigo-600 hover:text-indigo-800 uppercase tracking-wide shrink-0"
+                         >
+                           Resume auto-sync
+                         </button>
+                       )}
+                     </div>
                      <div className="flex items-center mt-2">
                        <span className="text-slate-400 mr-1 text-lg font-bold">₹</span>
-                       <input 
+                       <input
                          type="number"
                          value={revenue || ''}
-                         onChange={e => setRevenue(Number(e.target.value))}
+                         onChange={e => handleManualRevenueEdit(Number(e.target.value))}
                          placeholder="Enter Bid Amount"
                          className="bg-transparent border-0 font-bold text-2xl text-slate-900 w-full p-0 focus:ring-0 outline-none"
                        />
@@ -2071,17 +2173,24 @@ export default function ProjectDetails() {
                        ₹{totalExpense.toLocaleString()}
                      </div>
                   </div>
-                  <div className={`p-4 rounded-xl border ${estimatedProfit > 0 ? 'bg-emerald-50 border-emerald-200 text-emerald-900' : 'bg-rose-50 border-rose-200 text-rose-900'}`}>
-                     <p className="text-xs font-bold uppercase opacity-70">Projected Profit / Loss</p>
-                     <div className="mt-2 text-2xl font-bold">
-                       ₹{estimatedProfit.toLocaleString()}
-                     </div>
-                     {revenue > 0 && (
-                        <p className="text-sm font-medium mt-1 opacity-80">
-                          {((estimatedProfit / revenue) * 100).toFixed(1)}% Margin
-                        </p>
-                     )}
-                  </div>
+                  {rateContractGate.gated ? (
+                    <div className="p-4 rounded-xl border bg-amber-50 border-amber-200 text-amber-900">
+                       <p className="text-xs font-bold uppercase opacity-70">Projected Profit / Loss</p>
+                       <p className="text-sm font-medium mt-2">{rateContractGate.reason}</p>
+                    </div>
+                  ) : (
+                    <div className={`p-4 rounded-xl border ${estimatedProfit > 0 ? 'bg-emerald-50 border-emerald-200 text-emerald-900' : 'bg-rose-50 border-rose-200 text-rose-900'}`}>
+                       <p className="text-xs font-bold uppercase opacity-70">Projected Profit / Loss</p>
+                       <div className="mt-2 text-2xl font-bold">
+                         ₹{estimatedProfit.toLocaleString()}
+                       </div>
+                       {revenue > 0 && (
+                          <p className="text-sm font-medium mt-1 opacity-80">
+                            {((estimatedProfit / revenue) * 100).toFixed(1)}% Margin
+                          </p>
+                       )}
+                    </div>
+                  )}
                   <div className="bg-white p-4 rounded-xl border border-slate-200">
                      <p className="text-xs font-bold text-slate-500 uppercase">Target Margin (%) &rarr; Auto Bid</p>
                      <div className="flex items-center mt-2">
@@ -2091,7 +2200,7 @@ export default function ProjectDetails() {
                          onChange={e => {
                             const margin = Number(e.target.value);
                             if (margin > 0 && margin < 100) {
-                               setRevenue(Math.round(totalExpense / (1 - margin / 100)));
+                               handleManualRevenueEdit(Math.round(totalExpense / (1 - margin / 100)));
                             }
                          }}
                          className="bg-transparent border-0 font-bold text-2xl text-slate-900 w-full p-0 focus:ring-0 outline-none"
@@ -3140,6 +3249,7 @@ export default function ProjectDetails() {
                 boqType={boq.boqType}
                 boq={boq}
                 onItemRateTotalsChange={handleItemRateTotalsChange}
+                onQuantitySignal={setNominalQuantitiesSignal}
               />
             </div>
           )}

@@ -127,6 +127,35 @@ export function detectBoqTypeFromText(text: string): BoqTypeDetectionResult {
   return { type: 'unknown', confidence: 'low', score: 0, reason: 'No BOQ type indicators found in document text' };
 }
 
+/** AI-summarized text fields most likely to describe the tender's nature —
+ *  not the raw document, so exact phrases (e.g. a document title) aren't
+ *  guaranteed to survive, but defining characteristics usually do. Shared
+ *  by detectBoqTypeFromAnalysis and the Rate Contract hint (detectRateContract.ts). */
+export function extractAnalysisText(analysisResult: unknown): string {
+  if (!analysisResult || typeof analysisResult !== 'object') return '';
+  const r = analysisResult as Record<string, unknown>;
+  const str = (v: unknown): string => (typeof v === 'string' ? v : '');
+  const ts = r['tender_simplified'] as Record<string, unknown> | undefined;
+  const br = r['bid_recommendation'] as Record<string, unknown> | undefined;
+  return [
+    str(ts?.['scope_of_work']),
+    str(br?.['rationale']),
+    str(br?.['estimated_value']),
+  ].filter(Boolean).join(' ');
+}
+
+/** Parses bid_recommendation.estimated_value (a free-text AI string, e.g.
+ *  "₹25,00,000") into a number, or null if absent/unparseable. */
+export function extractBidRecommendationEstimatedValue(analysisResult: unknown): number | null {
+  if (!analysisResult || typeof analysisResult !== 'object') return null;
+  const r = analysisResult as Record<string, unknown>;
+  const br = r['bid_recommendation'] as Record<string, unknown> | undefined;
+  const raw = br?.['estimated_value'];
+  if (typeof raw !== 'string') return null;
+  const n = parseFloat(raw.replace(/[^0-9.]/g, ''));
+  return isFinite(n) && n > 0 ? n : null;
+}
+
 // Scans AI-generated analysis fields for BOQ type hints.
 // HARD CAP: output confidence is always 'low' — AI text fields must NEVER trigger auto-selection.
 // Only used as a last-resort display hint, not for state mutation.
@@ -135,18 +164,7 @@ export function detectBoqTypeFromAnalysis(analysisResult: unknown): BoqTypeDetec
     return { type: 'unknown', confidence: 'low', score: 0, reason: 'No analysis result' };
   }
 
-  const r = analysisResult as Record<string, unknown>;
-  const str = (v: unknown): string => (typeof v === 'string' ? v : '');
-
-  const ts = r['tender_simplified'] as Record<string, unknown> | undefined;
-  const br = r['bid_recommendation'] as Record<string, unknown> | undefined;
-
-  const combined = [
-    str(ts?.['scope_of_work']),
-    str(br?.['rationale']),
-    str(br?.['estimated_value']),
-  ].filter(Boolean).join(' ');
-
+  const combined = extractAnalysisText(analysisResult);
   const raw = detectBoqTypeFromText(combined);
   return {
     type: raw.type,

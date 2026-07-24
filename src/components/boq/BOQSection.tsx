@@ -6,7 +6,8 @@ import {
 import type { BOQData, BidSnapshotRow, FinancialValueCandidate } from '../../lib/boq/types';
 import { toIndianWords } from '../../lib/boq/indianWords';
 import { netBidAmount, calcProfit, getBidWarnings, fmtINR, applyCessAndGst } from '../../lib/boq/calculator';
-import { detectBoqTypeFromAnalysis } from '../../lib/boq/detectBoqType';
+import { detectBoqTypeFromAnalysis, extractAnalysisText, extractBidRecommendationEstimatedValue } from '../../lib/boq/detectBoqType';
+import { buildRateContractHint, resolveRateContractRevenue } from '../../lib/boq/detectRateContract';
 
 interface BOQSectionProps {
   analysisResult: any;
@@ -18,6 +19,10 @@ interface BOQSectionProps {
   onFinalize?: (data: Omit<BidSnapshotRow, 'id' | 'createdAt' | 'createdBy' | 'version'>) => Promise<void>;
   snapshots?: BidSnapshotRow[];
   snapshotsLoading?: boolean;
+  /** Weak signal from BOQViewer's items — "do quantities look nominal?" —
+   *  one of three inputs to the Rate Contract hint. Defaults false, which is
+   *  the correct behavior when BOQViewer hasn't computed it yet. */
+  nominalQuantitiesSignal?: boolean;
 }
 
 const INR_RE = /₹?\s*[\d,]+(?:\.\d+)?/;
@@ -41,8 +46,12 @@ function snapDate(ts: any): string {
 export default function BOQSection({
   analysisResult, boq, setBoq, totalCost,
   onRevenueSync, onFinalize, snapshots = [], snapshotsLoading = false,
+  nominalQuantitiesSignal = false,
 }: BOQSectionProps) {
   // ── Local UI state ─────────────────────────────────────────────────────────
+  // Session-only — a 1-signal hint is a light nudge, not a decision that
+  // needs to survive a reload. The 2+-signal case has no dismiss at all.
+  const [rateContractHintDismissed, setRateContractHintDismissed] = useState(false);
   const [editingAmount, setEditingAmount] = useState(false);
   const [amountInput, setAmountInput] = useState('');
   const [finalizing, setFinalizing] = useState(false);
@@ -159,6 +168,23 @@ export default function BOQSection({
   const isGridMode = boq.boqType === 'item_rate' || boq.boqType === 'lump_sum_epc';
   const modeLabel = boq.boqType === 'lump_sum_epc' ? 'Lump Sum / Package' : 'Item Rate';
 
+  // Rate Contract hint — percentage-rate only (grid modes already use real,
+  // locked quantities; there's no schedule-vs-revenue ambiguity for them).
+  // Zero signals for any other boqType, so nothing below fires for them.
+  const aiEstimatedValue = extractBidRecommendationEstimatedValue(analysisResult);
+  const rateContractHint = boq.boqType === 'percentage_rate'
+    ? buildRateContractHint(
+        extractAnalysisText(analysisResult),
+        boq.estimatedAmount,
+        aiEstimatedValue,
+        nominalQuantitiesSignal,
+      )
+    : { signals: [], reasons: [] };
+
+  const handleSetRateContract = (value: boolean) => {
+    setBoq({ ...boq, isRateContract: value, boqLastChangedAt: Date.now() });
+  };
+
   // Grid-mode bids have no user-entered percentage/direction — the net
   // quoted amount is pushed in from BOQViewer's per-item grid (summed there,
   // synced via BOQData.quotedAmount) rather than derived from netBidAmount.
@@ -172,9 +198,21 @@ export default function BOQSection({
 
   const words = quotedAmount != null ? toIndianWords(quotedAmount) : null;
 
+  // Resolves which revenue figure Gross Profit/Margin should use. For the
+  // majority case (not a confirmed/strongly-hinted Rate Contract) this
+  // resolves to `quotedAmount` unchanged — see resolveRateContractRevenue's
+  // own tests for the exact byte-identical-to-today guarantee. Only a
+  // confirmed Rate Contract's schedule-derived quotedAmount gets replaced —
+  // quotedAmount itself (the pricing basis / "Final Quoted Amount" figure)
+  // is never altered by this, only what feeds calcProfit/getBidWarnings and
+  // the parent's revenue sync.
+  const rateContractRevenue = resolveRateContractRevenue(
+    boq.isRateContract, boq.expectedContractValue, rateContractHint.signals.length, quotedAmount,
+  );
+
   const metrics =
-    quotedAmount != null && totalCost > 0
-      ? calcProfit(quotedAmount, totalCost)
+    rateContractRevenue.revenue != null && totalCost > 0
+      ? calcProfit(rateContractRevenue.revenue, totalCost)
       : null;
 
   // Derive percentage/direction from the itemized totals so bid_snapshots
@@ -188,8 +226,8 @@ export default function BOQSection({
     : boq.aboveBelow;
 
   const warnings =
-    quotedAmount != null && derivedPercentage != null
-      ? getBidWarnings(quotedAmount, totalCost, derivedPercentage, metrics ?? {
+    rateContractRevenue.revenue != null && derivedPercentage != null
+      ? getBidWarnings(rateContractRevenue.revenue, totalCost, derivedPercentage, metrics ?? {
           grossProfit: 0, profitPercent: 0, marginPercent: 0,
         })
       : null;
@@ -209,7 +247,7 @@ export default function BOQSection({
   // the second call silently clobber the first's writes.
   const prevSyncKeyRef = useRef<string>('');
   useEffect(() => {
-    const key = `${quotedAmount}|${boq.cessPercent ?? ''}|${boq.gstPercent ?? ''}`;
+    const key = `${quotedAmount}|${boq.cessPercent ?? ''}|${boq.gstPercent ?? ''}|${boq.isRateContract ?? ''}|${boq.expectedContractValue ?? ''}`;
     if (key === prevSyncKeyRef.current) return;
     prevSyncKeyRef.current = key;
 
@@ -236,8 +274,12 @@ export default function BOQSection({
       } : {}),
       boqLastChangedAt: Date.now(),
     });
-    if (quotedAmount != null) onRevenueSync(quotedAmount);
-  }, [quotedAmount, boq.cessPercent, boq.gstPercent]); // eslint-disable-line react-hooks/exhaustive-deps
+    // Never sync a gated/schedule-derived figure into the parent's revenue —
+    // that's precisely the bug this feature exists to prevent. While gated,
+    // the parent's Bid Engine panel keeps whatever revenue it already has
+    // rather than receiving a fabricated or wrong update.
+    if (rateContractRevenue.revenue != null) onRevenueSync(rateContractRevenue.revenue);
+  }, [quotedAmount, boq.cessPercent, boq.gstPercent, boq.isRateContract, boq.expectedContractValue]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Recompute metrics when totalCost changes independently
   const prevCostRef = useRef<number>(totalCost);
@@ -294,7 +336,9 @@ export default function BOQSection({
   };
 
   const handleFinalize = async () => {
-    if (!onFinalize || !canCompute || !quotedAmount || !words) return;
+    // rateContractRevenue.gated is a hard stop, independent of the button's
+    // own disabled state — a bid_snapshots entry is immutable.
+    if (!onFinalize || !canCompute || !quotedAmount || !words || rateContractRevenue.gated) return;
     setFinalizing(true);
     try {
       await onFinalize({
@@ -517,8 +561,12 @@ export default function BOQSection({
             ['Amount in Words', words ?? '—'],
             ...(totalCost > 0 ? [
               ['Total Estimated Cost', fmtINR(totalCost)],
-              ['Gross Profit', metrics ? `${fmtINR(metrics.grossProfit)} (${metrics.profitPercent.toFixed(2)}% of quoted)` : '—'],
-              ['Margin on Cost', metrics ? `${metrics.marginPercent.toFixed(2)}%` : '—'],
+              ['Gross Profit', rateContractRevenue.gated
+                ? rateContractRevenue.reason!
+                : (metrics ? `${fmtINR(metrics.grossProfit)} (${metrics.profitPercent.toFixed(2)}% of quoted)` : '—')],
+              ['Margin on Cost', rateContractRevenue.gated
+                ? rateContractRevenue.reason!
+                : (metrics ? `${metrics.marginPercent.toFixed(2)}%` : '—')],
             ] : [['Total Estimated Cost', '— (enter costs in the calculator below)']]),
           ].map(([k, v]) => (
             <div key={k} className="grid grid-cols-[180px_1fr] gap-2 px-5 py-2.5">
@@ -542,6 +590,10 @@ export default function BOQSection({
       disabledReason = 'Confirm the estimated amount to finalise';
     } else if (boq.percentage == null) {
       disabledReason = isGridMode ? 'Price at least one BOQ item to finalise' : 'Enter your bid percentage to finalise';
+    } else if (rateContractRevenue.gated) {
+      // A bid_snapshots entry is immutable — must never lock in a margin
+      // computed against a revenue figure that isn't determinable yet.
+      disabledReason = rateContractRevenue.reason;
     } else if (!onFinalize) {
       disabledReason = 'Save as a project to lock bid snapshots';
     } else if (warnings?.level === 'red') {
@@ -570,6 +622,110 @@ export default function BOQSection({
         {disabledReason && !finalizing && (
           <p className="text-xs text-slate-500 text-center">{disabledReason}</p>
         )}
+      </div>
+    );
+  };
+
+  // Zero signals → returns null, no UI change from before this feature
+  // existed. One signal → dismissible nudge. Two or more → prominent,
+  // no-dismiss (Yes/No only) — margin gating in response to this lives in
+  // the summary card, not here.
+  const renderRateContractBanner = () => {
+    if (boq.isRateContract !== undefined) {
+      return (
+        <div className="flex items-center justify-between gap-2 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-600">
+          <span>Rate Contract: <span className="font-semibold">{boq.isRateContract ? 'Yes' : 'No'}</span></span>
+          <button
+            onClick={() => setBoq({ ...boq, isRateContract: undefined, boqLastChangedAt: Date.now() })}
+            className="text-indigo-600 hover:text-indigo-800 font-medium"
+          >
+            Change
+          </button>
+        </div>
+      );
+    }
+
+    const { signals, reasons } = rateContractHint;
+    if (signals.length === 0) return null;
+
+    const strong = signals.length >= 2;
+    if (!strong && rateContractHintDismissed) return null;
+
+    return (
+      <div className={`rounded-lg border p-3 text-sm ${strong ? 'bg-amber-50 border-amber-300' : 'bg-slate-50 border-slate-200'}`}>
+        <div className="flex items-start gap-2">
+          <AlertTriangle className={`w-4 h-4 shrink-0 mt-0.5 ${strong ? 'text-amber-600' : 'text-slate-400'}`} />
+          <div className="flex-1 min-w-0">
+            <p className={`font-semibold ${strong ? 'text-amber-800' : 'text-slate-700'}`}>
+              This may be a Rate Contract, not a fully-quantified BOQ.
+            </p>
+            <ul className="text-xs mt-1 space-y-0.5 opacity-80">
+              {reasons.map(r => <li key={r}>• {r}</li>)}
+            </ul>
+            <div className="flex items-center gap-2 mt-2 flex-wrap">
+              <button
+                onClick={() => handleSetRateContract(true)}
+                className="px-3 py-1 text-xs font-semibold rounded bg-amber-600 text-white hover:bg-amber-700 transition-colors"
+              >
+                Yes, it's a Rate Contract
+              </button>
+              <button
+                onClick={() => handleSetRateContract(false)}
+                className="px-3 py-1 text-xs font-medium rounded border border-slate-300 hover:bg-slate-100 transition-colors"
+              >
+                No, quantities are real
+              </button>
+              {!strong && (
+                <button
+                  onClick={() => setRateContractHintDismissed(true)}
+                  className="px-3 py-1 text-xs text-slate-400 hover:text-slate-600 transition-colors"
+                >
+                  Not now
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // Only rendered once isRateContract is confirmed true. The only number
+  // that unblocks the margin gate for a Rate Contract — never auto-filled,
+  // including from the AI estimate, which is shown alongside as context only.
+  const renderExpectedContractValueInput = () => {
+    if (boq.isRateContract !== true) return null;
+    return (
+      <div className="bg-white border border-slate-200 rounded-xl p-4 space-y-2">
+        <label className="block text-xs font-semibold text-slate-600">Expected Contract Value (your estimate)</label>
+        <div className="flex items-center gap-2 border border-slate-200 rounded-lg px-3 py-2 focus-within:ring-2 focus-within:ring-indigo-300">
+          <span className="text-slate-400 font-bold text-sm">₹</span>
+          <input
+            type="number"
+            min="0"
+            value={boq.expectedContractValue ?? ''}
+            onChange={e => {
+              const raw = e.target.value;
+              const n = parseFloat(raw);
+              setBoq({
+                ...boq,
+                expectedContractValue: raw !== '' && isFinite(n) ? n : null,
+                boqLastChangedAt: Date.now(),
+              });
+            }}
+            placeholder="How much work do you expect to be ordered over the contract term?"
+            className="flex-1 bg-transparent text-slate-900 font-semibold text-sm outline-none"
+          />
+        </div>
+        {aiEstimatedValue != null && (
+          <p className="text-[11px] text-slate-400">
+            AI-estimated contract scale: {fmtINR(aiEstimatedValue)} (informational — not a revenue guarantee)
+          </p>
+        )}
+        <p className="text-[11px] text-slate-400">
+          Only you can estimate how much work will actually be ordered over this Rate Contract's
+          term — this figure drives Gross Profit/Margin below, not the schedule total.
+        </p>
       </div>
     );
   };
@@ -756,6 +912,12 @@ export default function BOQSection({
 
               {/* Step 2: Pricing */}
               {renderPricingStep()}
+
+              {/* Rate Contract hint/toggle — no UI at all when zero signals fire */}
+              {renderRateContractBanner()}
+
+              {/* Expected Contract Value — only rendered once isRateContract is confirmed true */}
+              {renderExpectedContractValueInput()}
 
               {/* Financial Summary Card */}
               {renderSummaryCard()}

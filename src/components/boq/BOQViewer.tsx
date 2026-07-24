@@ -18,6 +18,7 @@ import {
 } from "../../lib/boq/itemPricing";
 import { checkBoqItemDataQuality } from "../../lib/boq/boqDataQuality";
 import { deriveBidStatus, type BidStatus } from "../../lib/boq/boqReviewStatus";
+import { detectNominalQuantities } from "../../lib/boq/detectRateContract";
 
 type ExtractionStatus = 'loading' | 'running' | 'done' | 'failed' | 'no_boq_found' | 'not_attempted';
 type SortField = 'itemNo' | 'amount' | 'quantity';
@@ -54,6 +55,10 @@ interface BOQViewerProps {
    *  the caller can feed them into the shared BOQData/BOQSection pipeline
    *  the same way percentage-rate bids already populate quotedAmount. */
   onItemRateTotalsChange?: (estimatedAmount: number, quotedAmount: number) => void;
+  /** Fired whenever the "do BOQ quantities look nominal" signal changes —
+   *  one of three weak, advisory signals BOQSection uses to hint (never
+   *  auto-set) that a percentage-rate tender may be an Annual Rate Contract. */
+  onQuantitySignal?: (nominalQuantities: boolean) => void;
 }
 
 const GRID_LABELS: Record<'item_rate' | 'lump_sum_epc', PricingGridLabels> = {
@@ -144,7 +149,7 @@ function ErrorUI({
   );
 }
 
-export default function BOQViewer({ projectId, onProceedToPricing, onManualExtract, boqType, boq, onItemRateTotalsChange }: BOQViewerProps) {
+export default function BOQViewer({ projectId, onProceedToPricing, onManualExtract, boqType, boq, onItemRateTotalsChange, onQuantitySignal }: BOQViewerProps) {
   const [status, setStatus] = useState<ExtractionStatus>('loading');
   const [items, setItems] = useState<BoqItem[]>([]);
   const isGridMode = boqType === 'item_rate' || boqType === 'lump_sum_epc';
@@ -368,6 +373,15 @@ export default function BOQViewer({ projectId, onProceedToPricing, onManualExtra
     () => deriveBidStatus(boq, isGridMode, itemRateTotals.pricedItemCount, items.length),
     [boq, isGridMode, itemRateTotals.pricedItemCount, items.length],
   );
+
+  const nominalQuantities = useMemo(() => detectNominalQuantities(items), [items]);
+  useEffect(() => {
+    onQuantitySignal?.(nominalQuantities);
+    // onQuantitySignal intentionally omitted — same rationale as the
+    // itemRateTotals sync effect below: it's a fresh closure each parent
+    // render, and this should only re-fire when the signal itself changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nominalQuantities]);
 
   // Single source of truth for "Estimated Amount" across the whole page —
   // prefer the confirmed/synced BOQData figure (boq.estimatedAmount) over the

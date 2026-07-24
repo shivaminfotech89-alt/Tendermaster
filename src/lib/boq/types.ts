@@ -43,6 +43,15 @@ export interface BOQData {
   quotedAmountWords: string | null;
   remarks: string;
 
+  // Annual Rate Contract flag — tri-state via absence. undefined = undetermined
+  // (never inferred by code, only ever set by an explicit user click). When
+  // true, the BOQ schedule sum is a sum of nominal unit rates, not the
+  // contract's expected revenue — see boqExpectedContractValue below.
+  isRateContract?: boolean;
+  /** Bidder-entered expected contract value/volume — the only number that
+   *  drives revenue/margin for a confirmed Rate Contract. Never auto-filled. */
+  expectedContractValue?: number | null;
+
   // Profit metrics (recomputed whenever cost or quote changes)
   totalCost: number | null;
   grossProfit: number | null;

@@ -161,6 +161,46 @@ export function detectMisenteredScheduleAmount(
  * only when the real schedule sum isn't known yet or no candidate value is
  * usable — never silently picks an unrelated index either.
  */
+export interface ExpectedRevenueConfirmation {
+  /** true when margin must not be computed/shown/finalized — either because
+   *  resolveRateContractRevenue itself is gated, or because its revenue is
+   *  ready but hasn't been explicitly confirmed yet (or has drifted since
+   *  the last confirmation). */
+  gated: boolean;
+  reason: string | null;
+  revenue: number | null;
+}
+
+/**
+ * Extends — never modifies — resolveRateContractRevenue's gating discipline
+ * to its previously-ungated fallback branch. That branch (not a confirmed
+ * Rate Contract, or undetermined with <2 hint signals) returns
+ * fallbackRevenue immediately with no confirmation step at all: every
+ * ordinary tender's Gross Profit/Margin was computed and used without the
+ * bidder ever seeing or accepting the revenue figure driving it. This is the
+ * same failure class the Rate Contract gate exists to prevent, just left
+ * open elsewhere.
+ *
+ * resolveRateContractRevenue's own gated cases (undetermined Rate Contract
+ * status with 2+ signals; confirmed Rate Contract with no Expected Contract
+ * Value yet) are checked first and passed straight through unchanged — this
+ * function only adds a requirement on top of the case that was previously
+ * open, never loosens the existing one.
+ */
+export function resolveExpectedRevenueConfirmation(
+  rateContractRevenue: RateContractRevenueResult,
+  expectedRevenueConfirmed: boolean,
+  confirmedValue: number | null | undefined,
+): ExpectedRevenueConfirmation {
+  if (rateContractRevenue.gated) {
+    return { gated: true, reason: rateContractRevenue.reason, revenue: null };
+  }
+  if (!expectedRevenueConfirmed || confirmedValue !== rateContractRevenue.revenue) {
+    return { gated: true, reason: 'Confirm Expected Revenue below to see margin', revenue: null };
+  }
+  return { gated: false, reason: null, revenue: rateContractRevenue.revenue };
+}
+
 export function pickScheduleMatchingCandidateIndex(
   candidateValues: (number | undefined)[],
   scheduleSum: number | null | undefined,

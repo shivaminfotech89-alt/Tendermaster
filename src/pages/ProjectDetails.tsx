@@ -27,6 +27,8 @@ import { netBidAmount } from "../lib/boq/calculator";
 import { extractAnalysisText, extractBidRecommendationEstimatedValue } from "../lib/boq/detectBoqType";
 import { buildRateContractHint, resolveRateContractRevenue } from "../lib/boq/detectRateContract";
 import { detectGstCess } from "../lib/boq/detectGstCess";
+import { detectTenderValidity } from "../lib/boq/detectTenderValidity";
+import { inferLegacyConfirmations } from "../lib/boq/confirmationMigration";
 
 function formatFileSize(bytes: number): string {
   if (bytes >= 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
@@ -400,6 +402,18 @@ export default function ProjectDetails() {
         });
       }
 
+      // Tender Validity detection — same call site, same sticky-override
+      // pattern as GST/Cess above.
+      if (!boq.manualOverride?.tenderValidity) {
+        const validity = detectTenderValidity(extraction.rawText, project?.details?.timeline_and_milestones?.execution_duration);
+        handleBoqChange({
+          ...boq,
+          tenderValidityDays: validity.days ?? boq.tenderValidityDays,
+          tenderValidityConfidence: validity.confidence,
+          tenderValidityReason: validity.reason,
+        });
+      }
+
       console.log('[BOQ] done — extraction succeeded', {
         items: extraction.items.length,
         verificationScore: verification.score,
@@ -455,7 +469,11 @@ export default function ProjectDetails() {
 
           if (data.uploadedFiles) setUploadedFiles(data.uploadedFiles);
 
-          if (data.boq) setBoqState(data.boq);
+          // Migration: grandfather already-finalized/actively-priced projects
+          // past the new GST/Cost/Validity/Expected-Revenue confirmation
+          // gates, once — a brand-new project has neither signal and goes
+          // through the full new flow untouched. See confirmationMigration.ts.
+          if (data.boq) setBoqState({ ...data.boq, ...inferLegacyConfirmations(data.boq) });
         }
         
         if (user) {

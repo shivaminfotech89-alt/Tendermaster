@@ -7,7 +7,7 @@ import type { BOQData, BidSnapshotRow, FinancialValueCandidate } from '../../lib
 import { toIndianWords } from '../../lib/boq/indianWords';
 import { netBidAmount, calcProfit, getBidWarnings, fmtINR, applyCessAndGst, resolveGstCalculationMode } from '../../lib/boq/calculator';
 import { detectBoqTypeFromAnalysis, extractAnalysisText, extractBidRecommendationEstimatedValue } from '../../lib/boq/detectBoqType';
-import { buildRateContractHint, resolveRateContractRevenue, detectMisenteredScheduleAmount, pickScheduleMatchingCandidateIndex } from '../../lib/boq/detectRateContract';
+import { buildRateContractHint, resolveRateContractRevenue, detectMisenteredScheduleAmount, pickScheduleMatchingCandidateIndex, resolveExpectedRevenueConfirmation } from '../../lib/boq/detectRateContract';
 
 interface BOQSectionProps {
   analysisResult: any;
@@ -58,6 +58,10 @@ export default function BOQSection({
   const [rateContractHintDismissed, setRateContractHintDismissed] = useState(false);
   const [editingAmount, setEditingAmount] = useState(false);
   const [amountInput, setAmountInput] = useState('');
+  const [editingRevenue, setEditingRevenue] = useState(false);
+  const [revenueInput, setRevenueInput] = useState('');
+  const [editingValidity, setEditingValidity] = useState(false);
+  const [customValidityInput, setCustomValidityInput] = useState('');
   const [finalizing, setFinalizing] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   const [isExpanded, setIsExpanded] = useState(() => {
@@ -264,9 +268,21 @@ export default function BOQSection({
     boq.isRateContract, boq.expectedContractValue, rateContractHint.signals.length, quotedAmount,
   );
 
+  // Extends (never modifies) rateContractRevenue above with one more
+  // requirement: even its ungated fallback branch (an ordinary tender, not a
+  // confirmed Rate Contract) must be explicitly confirmed once before it
+  // drives Gross Profit/Margin — see resolveExpectedRevenueConfirmation's own
+  // docs for why. This is now the single source of truth for profit-relevant
+  // revenue everywhere below (metrics, warnings, the revenue sync effect, and
+  // the Finalize gate) — rateContractRevenue itself is still used directly
+  // only by renderRateContractBanner().
+  const expectedRevenue = resolveExpectedRevenueConfirmation(
+    rateContractRevenue, boq.expectedRevenueConfirmed ?? false, boq.expectedRevenueConfirmedValue,
+  );
+
   const metrics =
-    rateContractRevenue.revenue != null && totalCost > 0
-      ? calcProfit(rateContractRevenue.revenue, totalCost)
+    expectedRevenue.revenue != null && totalCost > 0
+      ? calcProfit(expectedRevenue.revenue, totalCost)
       : null;
 
   // Derive percentage/direction from the itemized totals so bid_snapshots
@@ -280,11 +296,30 @@ export default function BOQSection({
     : boq.aboveBelow;
 
   const warnings =
-    rateContractRevenue.revenue != null && derivedPercentage != null
-      ? getBidWarnings(rateContractRevenue.revenue, totalCost, derivedPercentage, metrics ?? {
+    expectedRevenue.revenue != null && derivedPercentage != null
+      ? getBidWarnings(expectedRevenue.revenue, totalCost, derivedPercentage, metrics ?? {
           grossProfit: 0, profitPercent: 0, marginPercent: 0,
         })
       : null;
+
+  // Derived, not a stored boolean — self-healing: editing the Material/Labour
+  // cost entries elsewhere in ProjectDetails changes totalCost, which
+  // immediately un-confirms this without any extra reset logic.
+  const estimatedCostConfirmed = boq.estimatedCostConfirmedValue === totalCost && totalCost > 0;
+
+  // Type-aware suggested Expected Revenue figure — already correctly
+  // computed by existing code, no new derivation needed. Rate Contract uses
+  // the AI tender value/ceiling (informational, never a commitment); every
+  // other path uses quotedAmount, which is itself already type-correct
+  // (grid-mode item sum, or the percentage-rate netBidAmount result).
+  const revenueSuggestion = boq.isRateContract === true
+    ? { value: aiEstimatedValue, label: 'contract ceiling from tender notice — not a revenue guarantee' }
+    : {
+        value: quotedAmount,
+        label: boq.boqType === 'item_rate' ? 'quoted BOQ total'
+          : boq.boqType === 'lump_sum_epc' ? 'quoted lump sum'
+          : 'quoted schedule amount',
+      };
 
   // Welfare cess (applied first) then GST (on the cess-inclusive total) —
   // universal across all boqTypes (previously isGridMode-only). Two
@@ -300,15 +335,29 @@ export default function BOQSection({
   const cessGst = !gstCessGated && quotedAmount != null
     ? applyCessAndGst(quotedAmount, boq.cessPercent ?? 0, gstMode.effectiveGstPercent)
     : null;
+  // The live cess/GST preview above stays visible as soon as gstIncluded is
+  // resolved (gstCessGated only fires on 'unknown') — but a high-confidence
+  // *detection* alone was previously usable at Finalize with no explicit
+  // click. gstConfirmed reuses the existing manualOverride.gstIncluded flag
+  // (already set by clicking any of the three Financial Review buttons,
+  // including re-clicking the pre-highlighted detected one) as that click.
+  const gstConfirmed = gstIncluded !== 'unknown' && !!boq.manualOverride?.gstIncluded;
 
   // Sync computed values into boq state and parent revenue. Merged into one
   // effect (rather than a separate cess/GST effect also keyed on
   // quotedAmount) because two effects both calling setBoq({...boq, ...})
   // from the same render's stale `boq` closure in the same commit would let
   // the second call silently clobber the first's writes.
+  // Single source of truth for grossProfit/profitPercent/marginPercent sync —
+  // previously split across two effects, one of which (the totalCost-only
+  // effect) recomputed from boq.quotedAmount instead of the resolved revenue,
+  // silently overwriting a correct Rate-Contract-aware figure with a
+  // schedule-based one whenever Total Cost changed afterward. totalCost is
+  // now part of this effect's own key/deps instead, so there is exactly one
+  // code path and it always uses the same revenue source as the render above.
   const prevSyncKeyRef = useRef<string>('');
   useEffect(() => {
-    const key = `${quotedAmount}|${boq.cessPercent ?? ''}|${boq.gstPercent ?? ''}|${boq.gstIncluded ?? ''}|${boq.isRateContract ?? ''}|${boq.expectedContractValue ?? ''}`;
+    const key = `${quotedAmount}|${boq.cessPercent ?? ''}|${boq.gstPercent ?? ''}|${boq.gstIncluded ?? ''}|${boq.isRateContract ?? ''}|${boq.expectedContractValue ?? ''}|${totalCost}`;
     if (key === prevSyncKeyRef.current) return;
     prevSyncKeyRef.current = key;
 
@@ -335,27 +384,12 @@ export default function BOQSection({
       roundedTotal: cessGst?.roundedTotal,
       boqLastChangedAt: Date.now(),
     });
-    // Never sync a gated/schedule-derived figure into the parent's revenue —
-    // that's precisely the bug this feature exists to prevent. While gated,
-    // the parent's Bid Engine panel keeps whatever revenue it already has
-    // rather than receiving a fabricated or wrong update.
-    if (rateContractRevenue.revenue != null) onRevenueSync(rateContractRevenue.revenue);
-  }, [quotedAmount, boq.cessPercent, boq.gstPercent, boq.gstIncluded, boq.isRateContract, boq.expectedContractValue]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Recompute metrics when totalCost changes independently
-  const prevCostRef = useRef<number>(totalCost);
-  useEffect(() => {
-    if (totalCost === prevCostRef.current || boq.quotedAmount == null) return;
-    prevCostRef.current = totalCost;
-    const m = calcProfit(boq.quotedAmount, totalCost);
-    setBoq({
-      ...boq,
-      grossProfit: m.grossProfit,
-      profitPercent: m.profitPercent,
-      marginPercent: m.marginPercent,
-      boqLastChangedAt: Date.now(),
-    });
-  }, [totalCost]); // eslint-disable-line react-hooks/exhaustive-deps
+    // Never sync a gated/unconfirmed figure into the parent's revenue —
+    // that's precisely the bug/gap this feature exists to prevent. While
+    // gated, the parent's Bid Engine panel keeps whatever revenue it already
+    // has rather than receiving a fabricated, wrong, or unconfirmed update.
+    if (expectedRevenue.revenue != null) onRevenueSync(expectedRevenue.revenue);
+  }, [quotedAmount, boq.cessPercent, boq.gstPercent, boq.gstIncluded, boq.isRateContract, boq.expectedContractValue, boq.expectedRevenueConfirmed, boq.expectedRevenueConfirmedValue, totalCost]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Handlers ───────────────────────────────────────────────────────────────
 
@@ -424,10 +458,54 @@ export default function BOQSection({
     });
   };
 
+  // Confirming here is what actually feeds resolveRateContractRevenue for the
+  // Rate Contract branch (expectedContractValue) — same field it already
+  // reads, populated through this UI instead of a blank input. For every
+  // other boqType, expectedRevenueOverride is set only when the confirmed
+  // figure differs from the suggestion (i.e. the bidder typed something else).
+  const handleConfirmExpectedRevenue = (value: number) => {
+    setBoq({
+      ...boq,
+      expectedRevenueConfirmed: true,
+      expectedRevenueConfirmedValue: value,
+      ...(boq.isRateContract === true
+        ? { expectedContractValue: value }
+        : { expectedRevenueOverride: value !== revenueSuggestion.value ? value : null }),
+      boqLastChangedAt: Date.now(),
+    });
+    setEditingRevenue(false);
+  };
+
+  const handleReconfirmExpectedRevenue = () => {
+    setBoq({ ...boq, expectedRevenueConfirmed: false });
+    setRevenueInput(boq.expectedRevenueConfirmedValue?.toString() ?? '');
+  };
+
+  const handleConfirmTenderValidity = (days: number) => {
+    setBoq({
+      ...boq,
+      tenderValidityDays: days,
+      tenderValidityConfirmed: true,
+      manualOverride: { ...boq.manualOverride, tenderValidity: true },
+      boqLastChangedAt: Date.now(),
+    });
+    setEditingValidity(false);
+  };
+
+  const handleEditTenderValidity = () => {
+    setBoq({ ...boq, tenderValidityConfirmed: false });
+    setEditingValidity(true);
+  };
+
+  const handleConfirmEstimatedCost = () => {
+    setBoq({ ...boq, estimatedCostConfirmedValue: totalCost, boqLastChangedAt: Date.now() });
+  };
+
   const handleFinalize = async () => {
-    // rateContractRevenue.gated is a hard stop, independent of the button's
-    // own disabled state — a bid_snapshots entry is immutable.
-    if (!onFinalize || !canCompute || !quotedAmount || !words || rateContractRevenue.gated || gstCessGated) return;
+    // Each of these gates is a hard stop, independent of the button's own
+    // disabled state — a bid_snapshots entry is immutable.
+    if (!onFinalize || !canCompute || !quotedAmount || !words || gstCessGated || !gstConfirmed
+      || !estimatedCostConfirmed || !boq.tenderValidityConfirmed || expectedRevenue.gated) return;
     setFinalizing(true);
     try {
       await onFinalize({
@@ -459,6 +537,8 @@ export default function BOQSection({
         quotedScheduleAmount: quotedAmount,
         pricingMethod: isGridMode ? modeLabel : 'Percentage Rate',
         bidPercent: derivedPercentage ?? undefined,
+        expectedRevenue: expectedRevenue.revenue ?? undefined,
+        tenderValidityDays: boq.tenderValidityDays ?? undefined,
         remarks: boq.remarks,
       });
     } finally {
@@ -692,6 +772,12 @@ export default function BOQSection({
               Could not determine GST treatment from the tender text — select one above. Cess/GST totals are withheld until this is resolved.
             </p>
           )}
+          {gstIncluded !== 'unknown' && !gstConfirmed && (
+            <p className="text-[11px] text-amber-600 mt-1.5 flex items-center gap-1">
+              <AlertTriangle className="w-3 h-3 shrink-0" />
+              Detected, not yet confirmed — click "{gstIncluded === 'yes' ? 'Included' : gstIncluded === 'no' ? 'Not Applicable' : 'Payable Separately'}" above to confirm before finalizing.
+            </p>
+          )}
         </div>
 
         <div className="flex flex-wrap items-center gap-4">
@@ -824,8 +910,9 @@ export default function BOQSection({
         </div>
         <div className="divide-y divide-slate-100">
           {[
-            ['BOQ Type', isGridMode ? modeLabel : 'Percentage Rate'],
+            ['Pricing Method', isGridMode ? modeLabel : 'Percentage Rate'],
             ...typeSpecificRows,
+            ...(boq.bidBasis ? [['Pricing Basis', boq.bidBasis.replace(/_/g, ' ')]] : []),
             // Un-gated from isGridMode-only — cessGst is itself gated on
             // gstIncluded being resolved (see its computation above), so
             // 'unknown' correctly shows nothing here rather than a guess.
@@ -838,13 +925,17 @@ export default function BOQSection({
               ['Grand Total', fmtINR(cessGst.roundedTotal)],
             ] as [string, string][] : []),
             ['Amount in Words', words ?? '—'],
+            // Distinct from Quoted Schedule/BOQ/Lump-Sum Amount above — the
+            // confirmed figure that actually drives profit below, which can
+            // diverge sharply from the quoted figure for a Rate Contract.
+            ['Expected Revenue', expectedRevenue.revenue != null ? fmtINR(expectedRevenue.revenue) : (expectedRevenue.reason ?? '--')],
             ...(totalCost > 0 ? [
               ['Total Estimated Cost', fmtINR(totalCost)],
-              ['Gross Profit', rateContractRevenue.gated
-                ? rateContractRevenue.reason!
+              ['Gross Profit', expectedRevenue.gated
+                ? expectedRevenue.reason!
                 : (metrics ? `${fmtINR(metrics.grossProfit)} (${metrics.profitPercent.toFixed(2)}% of quoted)` : '—')],
-              ['Margin on Cost', rateContractRevenue.gated
-                ? rateContractRevenue.reason!
+              ['Margin on Cost', expectedRevenue.gated
+                ? expectedRevenue.reason!
                 : (metrics ? `${metrics.marginPercent.toFixed(2)}%` : '—')],
             ] : [['Total Estimated Cost', '— (enter costs in the calculator below)']]),
           ].map(([k, v]) => (
@@ -874,10 +965,19 @@ export default function BOQSection({
       // immutable, so it must never lock in a total computed with an assumed
       // GST treatment when the tender text didn't actually say.
       disabledReason = 'Confirm GST treatment in the Financial Review above to finalise';
-    } else if (rateContractRevenue.gated) {
+    } else if (!gstConfirmed) {
+      // Resolved (not 'unknown') but not yet explicitly confirmed via a
+      // button click — a high-confidence detection alone isn't consent.
+      disabledReason = 'Confirm GST treatment in the Financial Review above to finalise';
+    } else if (!estimatedCostConfirmed) {
+      disabledReason = 'Confirm your Total Estimated Cost to finalise';
+    } else if (!boq.tenderValidityConfirmed) {
+      disabledReason = 'Confirm Tender Validity to finalise';
+    } else if (expectedRevenue.gated) {
       // A bid_snapshots entry is immutable — must never lock in a margin
-      // computed against a revenue figure that isn't determinable yet.
-      disabledReason = rateContractRevenue.reason;
+      // computed against a revenue figure that isn't determined and
+      // confirmed yet (extends, not replaces, the Rate Contract gate).
+      disabledReason = expectedRevenue.reason;
     } else if (!onFinalize) {
       disabledReason = 'Save as a project to lock bid snapshots';
     } else if (warnings?.level === 'red') {
@@ -974,42 +1074,208 @@ export default function BOQSection({
     );
   };
 
-  // Only rendered once isRateContract is confirmed true. The only number
-  // that unblocks the margin gate for a Rate Contract — never auto-filled,
-  // including from the AI estimate, which is shown alongside as context only.
-  const renderExpectedContractValueInput = () => {
-    if (boq.isRateContract !== true) return null;
+  // Universal Expected Revenue confirmation — one pattern for all four
+  // type-aware cases (see revenueSuggestion above), replacing the old
+  // Rate-Contract-only blank input. Never shown while the Rate-Contract
+  // status itself is still undetermined (2+ signals) — the banner above
+  // handles that first. For a confirmed Rate Contract, confirming here also
+  // writes expectedContractValue (the field resolveRateContractRevenue
+  // already reads, unmodified) — same gate, nicer UI. For every other type,
+  // confirming closes the previously-silent gap where quotedAmount was used
+  // as revenue with no confirmation at all.
+  const renderExpectedRevenueConfirmation = () => {
+    if (boq.isRateContract === undefined && rateContractHint.signals.length >= 2) return null;
+    if (boq.isRateContract !== true && quotedAmount == null) return null;
+
+    const suggested = revenueSuggestion.value;
+    const isConfirmedAndFresh = !expectedRevenue.gated;
+
     return (
       <div className="bg-white border border-slate-200 rounded-xl p-4 space-y-2">
-        <label className="block text-xs font-semibold text-slate-600">Expected Contract Value (your estimate)</label>
-        <div className="flex items-center gap-2 border border-slate-200 rounded-lg px-3 py-2 focus-within:ring-2 focus-within:ring-indigo-300">
-          <span className="text-slate-400 font-bold text-sm">₹</span>
-          <input
-            type="number"
-            min="0"
-            value={boq.expectedContractValue ?? ''}
-            onChange={e => {
-              const raw = e.target.value;
-              const n = parseFloat(raw);
-              setBoq({
-                ...boq,
-                expectedContractValue: raw !== '' && isFinite(n) ? n : null,
-                boqLastChangedAt: Date.now(),
-              });
-            }}
-            placeholder="How much work do you expect to be ordered over the contract term?"
-            className="flex-1 bg-transparent text-slate-900 font-semibold text-sm outline-none"
-          />
-        </div>
-        {aiEstimatedValue != null && (
-          <p className="text-[11px] text-slate-400">
-            AI-estimated contract scale: {fmtINR(aiEstimatedValue)} (informational — not a revenue guarantee)
-          </p>
+        <label className="block text-xs font-semibold text-slate-600">Expected Revenue</label>
+
+        {isConfirmedAndFresh ? (
+          <div className="flex items-center justify-between gap-3 bg-emerald-50 border border-emerald-200 rounded-lg px-4 py-2.5">
+            <div className="flex items-center gap-2 min-w-0">
+              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+              <span className="text-sm font-semibold text-emerald-800 truncate">{fmtINR(expectedRevenue.revenue!)} Confirmed</span>
+            </div>
+            <button onClick={handleReconfirmExpectedRevenue} className="text-xs text-emerald-700 hover:text-emerald-900 font-medium flex items-center gap-1 shrink-0">
+              <RotateCcw className="w-3 h-3" /> Re-confirm
+            </button>
+          </div>
+        ) : editingRevenue ? (
+          <div className="space-y-2">
+            <div className="flex items-center gap-2 border border-slate-200 rounded-lg px-3 py-2 focus-within:ring-2 focus-within:ring-indigo-300">
+              <span className="text-slate-400 font-bold text-sm">₹</span>
+              <input
+                type="number"
+                min="0"
+                value={revenueInput}
+                onChange={e => setRevenueInput(e.target.value)}
+                placeholder="How much do you actually expect to earn?"
+                className="flex-1 bg-transparent text-slate-900 font-semibold text-sm outline-none"
+              />
+            </div>
+            <button
+              onClick={() => {
+                const n = parseFloat(revenueInput);
+                if (isFinite(n) && n > 0) handleConfirmExpectedRevenue(n);
+              }}
+              disabled={!(isFinite(parseFloat(revenueInput)) && parseFloat(revenueInput) > 0)}
+              className="w-full py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-semibold text-sm rounded-lg transition-colors"
+            >
+              Confirm Expected Revenue
+            </button>
+          </div>
+        ) : (
+          <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 space-y-2">
+            <p className="text-xs text-amber-700">
+              Suggested: <span className="font-bold text-amber-900">{suggested != null ? fmtINR(suggested) : '--'}</span>
+              {' '}<span className="italic">({revenueSuggestion.label})</span>
+            </p>
+            <div className="flex items-center gap-2 flex-wrap">
+              <button
+                onClick={() => suggested != null && handleConfirmExpectedRevenue(suggested)}
+                disabled={suggested == null}
+                className="px-3 py-1.5 text-xs font-semibold rounded bg-amber-600 text-white hover:bg-amber-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-1"
+              >
+                <CheckCircle2 className="w-3.5 h-3.5" /> Yes, use this
+              </button>
+              <button
+                onClick={() => { setRevenueInput(suggested != null ? String(suggested) : ''); setEditingRevenue(true); }}
+                className="px-3 py-1.5 text-xs font-medium rounded border border-slate-300 hover:bg-slate-100 transition-colors flex items-center gap-1"
+              >
+                <Edit2 className="w-3.5 h-3.5" /> No, enter expected value
+              </button>
+            </div>
+          </div>
         )}
         <p className="text-[11px] text-slate-400">
-          Only you can estimate how much work will actually be ordered over this Rate Contract's
-          term — this figure drives Gross Profit/Margin below, not the schedule total.
+          This figure — not necessarily {boq.isRateContract === true ? 'the tender ceiling' : 'the quoted amount'} —
+          drives Gross Profit/Margin below.
         </p>
+      </div>
+    );
+  };
+
+  // totalCost itself is computed elsewhere (materials + labour line items,
+  // owned by ProjectDetails) — nothing to retype here, just a confirmation
+  // that the current sum is the one to price against. estimatedCostConfirmed
+  // is derived above and self-heals the moment the underlying cost changes.
+  const renderEstimatedCostConfirmation = () => {
+    if (totalCost <= 0) return null;
+    if (estimatedCostConfirmed) {
+      return (
+        <div className="flex items-center gap-2 bg-emerald-50 border border-emerald-200 rounded-lg px-4 py-2.5">
+          <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+          <span className="text-sm font-semibold text-emerald-800">Total Estimated Cost: {fmtINR(totalCost)} Confirmed</span>
+        </div>
+      );
+    }
+    return (
+      <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 space-y-2">
+        <p className="text-xs text-amber-700">
+          Total Estimated Cost: <span className="font-bold text-amber-900">{fmtINR(totalCost)}</span> (from your Material &amp; Labour cost entries)
+        </p>
+        <div className="flex items-center gap-2 flex-wrap">
+          <button
+            onClick={handleConfirmEstimatedCost}
+            className="px-3 py-1.5 text-xs font-semibold rounded bg-amber-600 text-white hover:bg-amber-700 transition-colors flex items-center gap-1"
+          >
+            <CheckCircle2 className="w-3.5 h-3.5" /> Yes, use this cost
+          </button>
+          <span className="text-[11px] text-slate-500">Edit it in the Cost Estimate section above, then return here to confirm.</span>
+        </div>
+      </div>
+    );
+  };
+
+  // Detected from the tender text (or the AI's execution_duration as a
+  // weaker fallback) — see detectTenderValidity.ts. No calculation currently
+  // consumes this number; it's a confirmed, displayed fact and a Finalize
+  // gate only.
+  const renderTenderValidityConfirmation = () => {
+    if (boq.estimatedAmount == null) return null;
+
+    if (boq.tenderValidityConfirmed && !editingValidity) {
+      return (
+        <div className="flex items-center justify-between gap-3 bg-emerald-50 border border-emerald-200 rounded-lg px-4 py-2.5">
+          <div className="flex items-center gap-2 min-w-0">
+            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+            <span className="text-sm font-semibold text-emerald-800">Tender Validity: {boq.tenderValidityDays} Days Confirmed</span>
+          </div>
+          <button onClick={handleEditTenderValidity} className="text-xs text-emerald-700 hover:text-emerald-900 font-medium flex items-center gap-1 shrink-0">
+            <Edit2 className="w-3 h-3" /> Edit
+          </button>
+        </div>
+      );
+    }
+
+    if (boq.tenderValidityDays != null && !editingValidity) {
+      return (
+        <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 space-y-2">
+          <p className="text-xs text-amber-700">
+            Tender Validity: <span className="font-bold text-amber-900">{boq.tenderValidityDays} Days</span>
+            {boq.tenderValidityConfidence != null && (
+              <span className="italic"> (detected, {boq.tenderValidityConfidence}% conf.)</span>
+            )}
+          </p>
+          <div className="flex items-center gap-2 flex-wrap">
+            <button
+              onClick={() => handleConfirmTenderValidity(boq.tenderValidityDays!)}
+              className="px-3 py-1.5 text-xs font-semibold rounded bg-amber-600 text-white hover:bg-amber-700 transition-colors flex items-center gap-1"
+            >
+              <CheckCircle2 className="w-3.5 h-3.5" /> Confirm
+            </button>
+            <button
+              onClick={() => setEditingValidity(true)}
+              className="px-3 py-1.5 text-xs font-medium rounded border border-slate-300 hover:bg-slate-100 transition-colors flex items-center gap-1"
+            >
+              <Edit2 className="w-3.5 h-3.5" /> Edit
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 space-y-2">
+        <p className="text-xs font-semibold text-amber-800">Tender Validity</p>
+        {boq.tenderValidityDays == null && (
+          <p className="text-[11px] text-amber-600">Could not determine this from the tender text — select below.</p>
+        )}
+        <div className="flex items-center gap-1.5 flex-wrap">
+          {[30, 60, 90, 180].map(d => (
+            <button
+              key={d}
+              onClick={() => handleConfirmTenderValidity(d)}
+              className="px-3 py-1.5 text-xs font-medium rounded border border-slate-300 hover:bg-slate-100 transition-colors"
+            >
+              {d} Days
+            </button>
+          ))}
+        </div>
+        <div className="flex items-center gap-2">
+          <input
+            type="number"
+            min="1"
+            value={customValidityInput}
+            onChange={e => setCustomValidityInput(e.target.value)}
+            placeholder="Custom (days)"
+            className="w-32 border border-slate-200 rounded-lg px-2 py-1.5 text-xs text-slate-900 outline-none focus:ring-2 focus:ring-amber-300"
+          />
+          <button
+            onClick={() => {
+              const n = parseInt(customValidityInput, 10);
+              if (isFinite(n) && n > 0) handleConfirmTenderValidity(n);
+            }}
+            disabled={!(isFinite(parseInt(customValidityInput, 10)) && parseInt(customValidityInput, 10) > 0)}
+            className="px-3 py-1.5 text-xs font-medium rounded bg-amber-600 text-white hover:bg-amber-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          >
+            Use Custom
+          </button>
+        </div>
       </div>
     );
   };
@@ -1140,7 +1406,13 @@ export default function BOQSection({
                   No priced {boq.boqType === 'lump_sum_epc' ? 'packages' : 'BOQ items'} yet — open the BOQ tab and enter {boq.boqType === 'lump_sum_epc' ? 'Package Prices' : 'Quoted Rates'}. Totals sync here automatically.
                 </div>
               ) : (
-                renderFinancialReview()
+                <>
+                  {renderFinancialReview()}
+                  {/* Expected Revenue confirmation — item_rate/lump_sum have no Rate Contract concept, so the suggestion is always quotedAmount (grid-mode item sum) */}
+                  {renderExpectedRevenueConfirmation()}
+                  {renderEstimatedCostConfirmation()}
+                  {renderTenderValidityConfirmation()}
+                </>
               )}
 
               {/* Financial Summary Card */}
@@ -1171,8 +1443,14 @@ export default function BOQSection({
               {/* Rate Contract hint/toggle — no UI at all when zero signals fire */}
               {renderRateContractBanner()}
 
-              {/* Expected Contract Value — only rendered once isRateContract is confirmed true */}
-              {renderExpectedContractValueInput()}
+              {/* Expected Revenue confirmation — universal, all four type-aware cases */}
+              {renderExpectedRevenueConfirmation()}
+
+              {/* Total Estimated Cost confirmation */}
+              {renderEstimatedCostConfirmation()}
+
+              {/* Tender Validity confirmation */}
+              {renderTenderValidityConfirmation()}
 
               {/* Financial Summary Card */}
               {renderSummaryCard()}

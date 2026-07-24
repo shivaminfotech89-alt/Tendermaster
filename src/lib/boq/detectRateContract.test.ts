@@ -3,6 +3,7 @@ import type { BoqItem } from '../../types/boq';
 import {
   detectTitleMention, detectValueRatio, detectNominalQuantities, buildRateContractHint,
   resolveRateContractRevenue, detectMisenteredScheduleAmount, pickScheduleMatchingCandidateIndex,
+  resolveExpectedRevenueConfirmation,
 } from './detectRateContract';
 
 function item(quantity: number): BoqItem {
@@ -191,5 +192,69 @@ describe('pickScheduleMatchingCandidateIndex', () => {
   test('does not override when the AI-suggested candidate is already the closest match', () => {
     const idx = pickScheduleMatchingCandidateIndex([48265.33, 2500000], 48265.33, 0);
     expect(idx).toBe(0);
+  });
+});
+
+describe('resolveExpectedRevenueConfirmation', () => {
+  test('Rate Contract gated (status undetermined, 2+ signals): passes through unchanged, reason and all', () => {
+    const rcr = resolveRateContractRevenue(undefined, undefined, 2, 47300);
+    const r = resolveExpectedRevenueConfirmation(rcr, false, null);
+    expect(r.gated).toBe(true);
+    expect(r.reason).toMatch(/Confirm Rate Contract status/);
+    expect(r.revenue).toBeNull();
+  });
+
+  test('Rate Contract gated (confirmed true, no Expected Contract Value yet): passes through unchanged', () => {
+    const rcr = resolveRateContractRevenue(true, undefined, 3, 47300);
+    const r = resolveExpectedRevenueConfirmation(rcr, false, null);
+    expect(r.gated).toBe(true);
+    expect(r.reason).toMatch(/Enter Expected Contract Value/);
+    expect(r.revenue).toBeNull();
+  });
+
+  test('Rate Contract ungated (value entered) but not yet confirmed here: gated with the new reason', () => {
+    const rcr = resolveRateContractRevenue(true, 1800000, 3, 47300);
+    const r = resolveExpectedRevenueConfirmation(rcr, false, null);
+    expect(r.gated).toBe(true);
+    expect(r.reason).toBe('Confirm Expected Revenue below to see margin');
+    expect(r.revenue).toBeNull();
+  });
+
+  test('Rate Contract ungated and confirmed with the matching value: ungated, revenue passes through', () => {
+    const rcr = resolveRateContractRevenue(true, 1800000, 3, 47300);
+    const r = resolveExpectedRevenueConfirmation(rcr, true, 1800000);
+    expect(r.gated).toBe(false);
+    expect(r.reason).toBeNull();
+    expect(r.revenue).toBe(1800000);
+  });
+
+  test('majority case (not a Rate Contract), unconfirmed: NEW gate — previously silently ungated, now blocked', () => {
+    const rcr = resolveRateContractRevenue(false, undefined, 0, 47300);
+    const r = resolveExpectedRevenueConfirmation(rcr, false, null);
+    expect(r.gated).toBe(true);
+    expect(r.reason).toBe('Confirm Expected Revenue below to see margin');
+    expect(r.revenue).toBeNull();
+  });
+
+  test('majority case, confirmed with the matching value: ungated', () => {
+    const rcr = resolveRateContractRevenue(false, undefined, 0, 47300);
+    const r = resolveExpectedRevenueConfirmation(rcr, true, 47300);
+    expect(r.gated).toBe(false);
+    expect(r.revenue).toBe(47300);
+  });
+
+  test('confirmed then the underlying revenue drifts (e.g. bid % edited): gate reopens automatically', () => {
+    const rcr = resolveRateContractRevenue(false, undefined, 0, 52000); // fallbackRevenue changed since confirmation
+    const r = resolveExpectedRevenueConfirmation(rcr, true, 47300); // stale confirmedValue
+    expect(r.gated).toBe(true);
+    expect(r.reason).toBe('Confirm Expected Revenue below to see margin');
+    expect(r.revenue).toBeNull();
+  });
+
+  test('undetermined with <2 signals (ordinary tender, ungated by resolveRateContractRevenue), unconfirmed: still gated here', () => {
+    const rcr = resolveRateContractRevenue(undefined, undefined, 1, 47300);
+    const r = resolveExpectedRevenueConfirmation(rcr, false, null);
+    expect(r.gated).toBe(true);
+    expect(r.revenue).toBeNull();
   });
 });

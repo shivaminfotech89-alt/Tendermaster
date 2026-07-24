@@ -52,11 +52,43 @@ export interface BOQData {
    *  drives revenue/margin for a confirmed Rate Contract. Never auto-filled. */
   expectedContractValue?: number | null;
 
+  // Universal Expected Revenue confirmation — extends (never modifies)
+  // resolveRateContractRevenue's gating discipline to its previously-ungated
+  // fallback branch (non-Rate-Contract types), where quotedAmount was used as
+  // revenue with no explicit confirmation step at all. See
+  // resolveExpectedRevenueConfirmation in detectRateContract.ts.
+  expectedRevenueConfirmed?: boolean;
+  /** Snapshot of exactly what was confirmed — compared against the live
+   *  suggested value each render; any drift (bid % edited, cess/GST changed,
+   *  etc.) auto-reopens the gate without a manual "reconfirm" click. */
+  expectedRevenueConfirmedValue?: number | null;
+  /** Non-Rate-Contract path only: set when the bidder picks "No, enter
+   *  expected value" and types something other than the suggested figure.
+   *  For the Rate Contract path, expectedContractValue itself holds this. */
+  expectedRevenueOverride?: number | null;
+
   // Profit metrics (recomputed whenever cost or quote changes)
   totalCost: number | null;
   grossProfit: number | null;
   profitPercent: number | null;
   marginPercent: number | null;
+
+  /** Snapshot of totalCost (materials + labour, computed in ProjectDetails)
+   *  at the moment the bidder confirmed it. Derived, not stored as a
+   *  boolean: estimatedCostConfirmed = estimatedCostConfirmedValue ===
+   *  totalCost && totalCost > 0 — self-healing, re-gates automatically the
+   *  moment the underlying cost estimate changes. */
+  estimatedCostConfirmedValue?: number | null;
+
+  // Tender Validity — detected from raw tender text (or the AI's
+  // execution_duration summary as a weaker fallback signal), confirmed
+  // before Finalize. No calculation currently consumes this number; it's a
+  // confirmed, displayed fact and a Finalize gate only — see
+  // detectTenderValidity.ts.
+  tenderValidityDays?: number | null;
+  tenderValidityConfirmed?: boolean;
+  tenderValidityConfidence?: number;      // 0-100
+  tenderValidityReason?: string;          // decision log, mirrors gstCessDetectionReason
 
   // Statutory additions on top of the net quoted amount — cess applied
   // first, then GST on the cess-inclusive total (see applyCessAndGst in
@@ -90,6 +122,7 @@ export interface BOQData {
     gstIncluded?: true;
     bidBasis?: true;
     scheduleValue?: true;
+    tenderValidity?: true;
   };
 
   // Tracking
@@ -132,6 +165,11 @@ export interface BidSnapshot {
   quotedScheduleAmount?: number; // = quotedAmount — the bidder's figure against the schedule
   pricingMethod?: string;        // e.g. "Percentage Rate", "Item Rate", "Lump Sum / Package"
   bidPercent?: number;           // = percentage, re-exposed under an unambiguous name
+
+  // Confirmed Expected Revenue and Tender Validity at finalize time —
+  // distinct from quotedScheduleAmount (see resolveExpectedRevenueConfirmation).
+  expectedRevenue?: number;
+  tenderValidityDays?: number;
 
   remarks: string;
   createdAt: any;

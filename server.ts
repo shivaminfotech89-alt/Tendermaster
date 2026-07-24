@@ -1819,17 +1819,32 @@ MODE 1: CONTRACT PROFILE ANALYSIS & MATCHING
     "boq_type_confidence": "high (explicit clause) | medium (inferred from structure) | low (unclear)",
     "financial_values": [
       {
-        "label": "Estimated Amount Put to Tender",
+        "label": "[Schedule Total] Estimated Amount Put to Tender (Schedule-B)",
         "value_raw": "₹1,25,00,000",
         "value_number": 12500000,
         "page": 3,
         "clause": "Clause 3.1",
-        "source_text": "The estimated amount put to tender is ₹1,25,00,000"
+        "source_text": "The estimated amount put to tender against the Schedule-B / BOQ is ₹1,25,00,000"
+      },
+      {
+        "label": "[Tender Notice Value] Approximate Overall Project Budget",
+        "value_raw": "₹6,50,00,000",
+        "value_number": 65000000,
+        "page": 1,
+        "clause": "NIT Preamble",
+        "source_text": "The overall estimated project cost is ₹6,50,00,000"
       }
     ],
     "suggested_estimated_index": 0
   }
-}`;
+}
+
+CRITICAL — financial_values / suggested_estimated_index rules:
+A tender document commonly states TWO different kinds of monetary figures, and they must never be confused:
+  (a) SCHEDULE-DERIVED figures — the sum of the priced Schedule/BOQ itself: "Estimated Amount Put to Tender" against the Schedule-B, a BOQ/price schedule grand total, a quantity × rate summary total. This is the figure a bidder's percentage/rate actually applies against.
+  (b) TENDER-NOTICE figures — the overall contract/project value quoted in the NIT/tender notice or preamble: "estimated project cost", "approximate contract value", "overall budget", EMD-basis value. This is reference-only context — it is NOT the pricing basis, and for Annual Rate Contracts / rate-contract tenders it can be many times larger than the schedule total (a ~50x gap is normal, not an error).
+EVERY entry in "financial_values" MUST start its "label" with an explicit tag identifying which kind it is — "[Schedule Total]" or "[Tender Notice Value]" — before the descriptive text, exactly as shown in the two example entries above, so the tag is machine-parseable.
+"suggested_estimated_index" MUST point at a "[Schedule Total]"-tagged entry whenever at least one exists in the array, even if a "[Tender Notice Value]"-tagged entry is larger, more prominent, or appears earlier in the document. Only fall back to a "[Tender Notice Value]" entry (or omit financial_values / leave it empty) when the document genuinely contains no schedule-derived figure at all — never guess or default to the tender-notice figure just because it's the only one you found easily.`;
 
     const response = await generateContentWithRetry(aiClient, {
       model: "gemini-3.5-flash",

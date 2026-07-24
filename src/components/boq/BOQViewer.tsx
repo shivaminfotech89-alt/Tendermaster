@@ -48,8 +48,8 @@ interface BOQViewerProps {
    *  pricing grid (relabeled "Package"/"Package Price" for lump sum). */
   boqType?: BOQType;
   /** Full BOQ pricing state, read-only here — used to render the
-   *  percentage-rate summary strip (Estimated Amount / % / Final Bid Amount)
-   *  without recomputing anything BOQSection already computes. */
+   *  percentage-rate summary strip (Schedule-B Amount / Bid % / Quoted
+   *  Schedule Amount) without recomputing anything BOQSection already computes. */
   boq?: BOQData;
   /** Fired whenever the per-item pricing grid's aggregate totals change, so
    *  the caller can feed them into the shared BOQData/BOQSection pipeline
@@ -59,6 +59,14 @@ interface BOQViewerProps {
    *  one of three weak, advisory signals BOQSection uses to hint (never
    *  auto-set) that a percentage-rate tender may be an Annual Rate Contract. */
   onQuantitySignal?: (nominalQuantities: boolean) => void;
+  /** Fired whenever the extracted schedule sum (meta.totalAmount) changes —
+   *  the real Schedule-B figure, used only for the Step 1 mis-entry warning
+   *  ("this looks like the Tender Value, not the schedule amount"). Never
+   *  feeds any calculation. */
+  onScheduleSumChange?: (scheduleSum: number | null) => void;
+  /** bid_recommendation.estimated_value, already parsed by the caller —
+   *  reference-only display in the percentage-rate summary strip below. */
+  tenderValue?: number | null;
 }
 
 const GRID_LABELS: Record<'item_rate' | 'lump_sum_epc', PricingGridLabels> = {
@@ -149,7 +157,7 @@ function ErrorUI({
   );
 }
 
-export default function BOQViewer({ projectId, onProceedToPricing, onManualExtract, boqType, boq, onItemRateTotalsChange, onQuantitySignal }: BOQViewerProps) {
+export default function BOQViewer({ projectId, onProceedToPricing, onManualExtract, boqType, boq, onItemRateTotalsChange, onQuantitySignal, onScheduleSumChange, tenderValue }: BOQViewerProps) {
   const [status, setStatus] = useState<ExtractionStatus>('loading');
   const [items, setItems] = useState<BoqItem[]>([]);
   const isGridMode = boqType === 'item_rate' || boqType === 'lump_sum_epc';
@@ -382,6 +390,11 @@ export default function BOQViewer({ projectId, onProceedToPricing, onManualExtra
     // render, and this should only re-fire when the signal itself changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [nominalQuantities]);
+
+  useEffect(() => {
+    onScheduleSumChange?.(meta ? meta.totalAmount : null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [meta?.totalAmount]);
 
   // Single source of truth for "Estimated Amount" across the whole page —
   // prefer the confirmed/synced BOQData figure (boq.estimatedAmount) over the
@@ -634,18 +647,28 @@ export default function BOQViewer({ projectId, onProceedToPricing, onManualExtra
       </div>
 
       {/* Percentage-rate summary strip — read-only, sourced entirely from
-          boq (already computed/synced by BOQSection). No new calculation. */}
+          boq (already computed/synced by BOQSection). No new calculation.
+          Order: Tender Value -> Schedule-B Amount -> Bid % -> Quoted Schedule
+          Amount — never "Final Bid Amount" here, it is a quoted figure
+          against the schedule, not a contract total. */}
       {boqType === 'percentage_rate' && (
         <div className="rounded-xl border border-indigo-100 bg-indigo-50/50 px-5 py-4">
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
             <div>
-              <p className="text-xs font-medium text-indigo-500 uppercase tracking-wide mb-1">Estimated Amount</p>
+              <p className="text-xs font-medium text-indigo-500 uppercase tracking-wide mb-1">Tender Value</p>
+              <p className="text-lg font-bold text-indigo-900">
+                {tenderValue != null ? fmtIndian(tenderValue) : '--'}
+              </p>
+              <p className="text-[10px] text-indigo-400">Reference only</p>
+            </div>
+            <div>
+              <p className="text-xs font-medium text-indigo-500 uppercase tracking-wide mb-1">Schedule-B Amount</p>
               <p className="text-lg font-bold text-indigo-900">
                 {boq?.estimatedAmount != null ? fmtIndian(boq.estimatedAmount) : '--'}
               </p>
             </div>
             <div>
-              <p className="text-xs font-medium text-indigo-500 uppercase tracking-wide mb-1">Bid</p>
+              <p className="text-xs font-medium text-indigo-500 uppercase tracking-wide mb-1">Bid %</p>
               <p className="text-lg font-bold text-indigo-900">
                 {boq?.percentage == null
                   ? 'Not Prepared'
@@ -655,7 +678,7 @@ export default function BOQViewer({ projectId, onProceedToPricing, onManualExtra
               </p>
             </div>
             <div>
-              <p className="text-xs font-medium text-indigo-500 uppercase tracking-wide mb-1">Final Bid Amount</p>
+              <p className="text-xs font-medium text-indigo-500 uppercase tracking-wide mb-1">Quoted Schedule Amount</p>
               <p className="text-lg font-bold text-indigo-900">
                 {boq?.quotedAmount != null ? fmtIndian(boq.quotedAmount) : '--'}
               </p>
@@ -663,7 +686,7 @@ export default function BOQViewer({ projectId, onProceedToPricing, onManualExtra
           </div>
           {boq?.estimatedAmount == null && (
             <p className="text-xs text-indigo-700 mt-3">
-              Confirm the estimated amount in the Bid Engine &amp; Profit Calculator tab to prepare your bid.
+              Confirm the Schedule-B Amount in the Bid Engine &amp; Profit Calculator tab to prepare your bid.
             </p>
           )}
           <p className="text-[11px] text-indigo-400 mt-2">

@@ -129,3 +129,24 @@ export function resolveRateContractRevenue(
   }
   return { gated: false, reason: null, revenue: fallbackRevenue };
 }
+
+/** "Close to Tender Value" tolerance for the Step 1 mis-entry warning. */
+const CLOSE_TO_TENDER_VALUE_TOLERANCE = 0.1;
+
+/**
+ * Advisory-only: flags when a value being typed into "Schedule-B Amount"
+ * looks like it might actually be the overall Tender Value instead — close
+ * to the AI-read tender value, while far from the BOQ's actual extracted
+ * schedule sum. Purely a UI warning on the input; never blocks confirmation,
+ * never feeds resolveRateContractRevenue or any pricing calculation.
+ */
+export function detectMisenteredScheduleAmount(
+  enteredValue: number,
+  tenderValue: number | null | undefined,
+  actualScheduleSum: number | null | undefined,
+): boolean {
+  if (!tenderValue || tenderValue <= 0) return false;
+  const closeToTenderValue = Math.abs(enteredValue - tenderValue) / tenderValue < CLOSE_TO_TENDER_VALUE_TOLERANCE;
+  if (!closeToTenderValue) return false;
+  return detectValueRatio(actualScheduleSum, enteredValue);
+}

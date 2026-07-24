@@ -168,6 +168,10 @@ export default function ProjectDetails() {
   // Weak advisory signal from BOQViewer's items (BOQSection doesn't have
   // items itself) — one of three inputs to the Rate Contract hint.
   const [nominalQuantitiesSignal, setNominalQuantitiesSignal] = useState(false);
+  // The real extracted Schedule-B sum (BOQViewer's meta.totalAmount) — used
+  // only for the Step 1 "did you enter the Tender Value by mistake?"
+  // warning, never for any calculation.
+  const [scheduleSum, setScheduleSum] = useState<number | null>(null);
   const [snapshots, setSnapshots] = useState<BidSnapshotRow[]>([]);
   const [snapshotsLoading, setSnapshotsLoading] = useState(false);
   const [downloadingPdf, setDownloadingPdf] = useState(false);
@@ -1438,6 +1442,11 @@ export default function ProjectDetails() {
   const totalExpense = materials.reduce((acc, m) => acc + (m.cost_num || 0), 0) + labour.reduce((acc, l) => acc + (l.cost_num || 0), 0);
   const estimatedProfit = revenue - totalExpense;
 
+  // bid_recommendation.estimated_value, parsed once — "Tender Value":
+  // overall AI-read contract scale, reference only (eligibility/EMD/PG/
+  // ceiling), never a pricing input. Reused below and passed to BOQViewer.
+  const tenderValue = extractBidRecommendationEstimatedValue(project?.details);
+
   // Same gate BOQSection computes for its own Gross Profit/Margin — recomputed
   // independently here (not threaded as a prop) so this panel can never show
   // a number BOQSection itself considers not-yet-determinable, even if
@@ -1446,7 +1455,7 @@ export default function ProjectDetails() {
     ? buildRateContractHint(
         extractAnalysisText(project?.details),
         boq.estimatedAmount,
-        extractBidRecommendationEstimatedValue(project?.details),
+        tenderValue,
         nominalQuantitiesSignal,
       )
     : { signals: [], reasons: [] };
@@ -2014,6 +2023,7 @@ export default function ProjectDetails() {
              snapshots={snapshots}
              snapshotsLoading={snapshotsLoading}
              nominalQuantitiesSignal={nominalQuantitiesSignal}
+             scheduleSum={scheduleSum}
            />
 
            {project.details?.bid_recommendation ? (
@@ -3250,6 +3260,8 @@ export default function ProjectDetails() {
                 boq={boq}
                 onItemRateTotalsChange={handleItemRateTotalsChange}
                 onQuantitySignal={setNominalQuantitiesSignal}
+                onScheduleSumChange={setScheduleSum}
+                tenderValue={tenderValue}
               />
             </div>
           )}

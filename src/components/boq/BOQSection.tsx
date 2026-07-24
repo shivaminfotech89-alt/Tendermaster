@@ -7,7 +7,7 @@ import type { BOQData, BidSnapshotRow, FinancialValueCandidate } from '../../lib
 import { toIndianWords } from '../../lib/boq/indianWords';
 import { netBidAmount, calcProfit, getBidWarnings, fmtINR, applyCessAndGst } from '../../lib/boq/calculator';
 import { detectBoqTypeFromAnalysis, extractAnalysisText, extractBidRecommendationEstimatedValue } from '../../lib/boq/detectBoqType';
-import { buildRateContractHint, resolveRateContractRevenue } from '../../lib/boq/detectRateContract';
+import { buildRateContractHint, resolveRateContractRevenue, detectMisenteredScheduleAmount } from '../../lib/boq/detectRateContract';
 
 interface BOQSectionProps {
   analysisResult: any;
@@ -23,6 +23,9 @@ interface BOQSectionProps {
    *  one of three inputs to the Rate Contract hint. Defaults false, which is
    *  the correct behavior when BOQViewer hasn't computed it yet. */
   nominalQuantitiesSignal?: boolean;
+  /** The real extracted Schedule-B sum (BOQViewer's meta.totalAmount) — used
+   *  only for the Step 1 mis-entry warning, never for any calculation. */
+  scheduleSum?: number | null;
 }
 
 const INR_RE = /₹?\s*[\d,]+(?:\.\d+)?/;
@@ -47,6 +50,7 @@ export default function BOQSection({
   analysisResult, boq, setBoq, totalCost,
   onRevenueSync, onFinalize, snapshots = [], snapshotsLoading = false,
   nominalQuantitiesSignal = false,
+  scheduleSum = null,
 }: BOQSectionProps) {
   // ── Local UI state ─────────────────────────────────────────────────────────
   // Session-only — a 1-signal hint is a light nudge, not a decision that
@@ -184,6 +188,10 @@ export default function BOQSection({
   const handleSetRateContract = (value: boolean) => {
     setBoq({ ...boq, isRateContract: value, boqLastChangedAt: Date.now() });
   };
+
+  // Advisory only — never blocks confirmation, never feeds any calculation.
+  const misenteredScheduleAmount = boq.boqType === 'percentage_rate' && boq.estimatedAmount != null
+    && detectMisenteredScheduleAmount(boq.estimatedAmount, aiEstimatedValue, scheduleSum);
 
   // Grid-mode bids have no user-entered percentage/direction — the net
   // quoted amount is pushed in from BOQViewer's per-item grid (summed there,
@@ -363,6 +371,13 @@ export default function BOQSection({
         totalWithGst: cessGst?.totalWithGst,
         roundOff: cessGst?.roundOff,
         roundedTotal: cessGst?.roundedTotal,
+        // Distinctly-named duplicates (see types.ts) — additive, the fields
+        // above are unchanged so nothing that already reads them breaks.
+        tenderValue: aiEstimatedValue ?? undefined,
+        scheduleBAmount: boq.estimatedAmount!,
+        quotedScheduleAmount: quotedAmount,
+        pricingMethod: isGridMode ? modeLabel : 'Percentage Rate',
+        bidPercent: derivedPercentage ?? undefined,
         remarks: boq.remarks,
       });
     } finally {
@@ -375,20 +390,28 @@ export default function BOQSection({
   const renderAmountStep = () => {
     if (boq.estimatedAmountConfirmed) {
       return (
-        <div className="flex items-center gap-3 bg-emerald-50 border border-emerald-200 rounded-lg px-4 py-2.5">
-          <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-          <div className="flex-1 min-w-0">
-            <span className="text-sm font-semibold text-emerald-800">{fmtINR(boq.estimatedAmount!)} Confirmed</span>
-            {boq.estimatedAmountClause && (
-              <span className="ml-2 text-xs text-emerald-600">{boq.estimatedAmountClause}{boq.estimatedAmountPage ? ` · Page ${boq.estimatedAmountPage}` : ''}</span>
-            )}
-            {boq.estimatedAmountEdited && (
-              <span className="ml-2 text-[10px] bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded">Edited</span>
-            )}
+        <div className="space-y-2">
+          <div className="flex items-center gap-3 bg-emerald-50 border border-emerald-200 rounded-lg px-4 py-2.5">
+            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+            <div className="flex-1 min-w-0">
+              <span className="text-sm font-semibold text-emerald-800">Schedule-B Amount: {fmtINR(boq.estimatedAmount!)} Confirmed</span>
+              {boq.estimatedAmountClause && (
+                <span className="ml-2 text-xs text-emerald-600">{boq.estimatedAmountClause}{boq.estimatedAmountPage ? ` · Page ${boq.estimatedAmountPage}` : ''}</span>
+              )}
+              {boq.estimatedAmountEdited && (
+                <span className="ml-2 text-[10px] bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded">Edited</span>
+              )}
+            </div>
+            <button onClick={handleReconfirm} className="text-xs text-emerald-700 hover:text-emerald-900 font-medium flex items-center gap-1 shrink-0">
+              <RotateCcw className="w-3 h-3" /> Re-confirm
+            </button>
           </div>
-          <button onClick={handleReconfirm} className="text-xs text-emerald-700 hover:text-emerald-900 font-medium flex items-center gap-1 shrink-0">
-            <RotateCcw className="w-3 h-3" /> Re-confirm
-          </button>
+          {misenteredScheduleAmount && (
+            <p className="text-xs text-amber-700 flex items-start gap-1.5 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+              <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+              This looks like the overall tender value, not the Schedule-B amount. The percentage applies to the schedule.
+            </p>
+          )}
         </div>
       );
     }
@@ -409,9 +432,10 @@ export default function BOQSection({
         <div className="flex items-start gap-2">
           <AlertTriangle className="w-4 h-4 text-amber-600 mt-0.5 shrink-0" />
           <div>
-            <p className="text-sm font-bold text-amber-800">Estimated Amount Put to Tender (₹)</p>
+            <p className="text-sm font-bold text-amber-800">Schedule-B Amount (₹)</p>
             <p className="text-xs text-amber-700 mt-0.5">
-              Confirm before any calculation — a wrong base changes the entire bid.
+              The figure your bid percentage is applied to — not the overall tender value.
+              Confirm before any calculation; a wrong base changes the entire bid.
             </p>
           </div>
         </div>
@@ -423,7 +447,7 @@ export default function BOQSection({
               type="text"
               value={amountInput || (boq.estimatedAmount != null ? boq.estimatedAmount.toString() : '')}
               onChange={e => handleAmountInputChange(e.target.value)}
-              placeholder="Type the amount here"
+              placeholder="Type the Schedule-B amount here"
               className="flex-1 bg-transparent text-slate-900 font-semibold text-sm outline-none"
             />
           </div>
@@ -433,6 +457,12 @@ export default function BOQSection({
           {boq.estimatedAmount != null && (
             <p className="text-xs text-amber-700 mt-1">{toIndianWords(boq.estimatedAmount)}</p>
           )}
+          {misenteredScheduleAmount && (
+            <p className="text-xs text-amber-800 font-medium flex items-start gap-1.5 mt-2 bg-white border border-amber-300 rounded-lg px-3 py-2">
+              <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+              This looks like the overall tender value, not the Schedule-B amount. The percentage applies to the schedule.
+            </p>
+          )}
         </div>
 
         <button
@@ -441,7 +471,7 @@ export default function BOQSection({
           className="w-full py-2.5 bg-amber-500 hover:bg-amber-600 disabled:opacity-50 disabled:cursor-not-allowed text-white font-semibold text-sm rounded-lg transition-colors flex items-center justify-center gap-2"
         >
           <CheckCircle2 className="w-4 h-4" />
-          Confirm Estimated Amount
+          Confirm Schedule-B Amount
         </button>
         {!boq.estimatedAmount && (
           <p className="text-xs text-amber-700 flex items-center gap-1">
@@ -537,6 +567,41 @@ export default function BOQSection({
       ? warnings.messages.join(' · ')
       : 'Healthy margin';
 
+    // Three distinct concepts, named so they can never be confused:
+    //   Tender Value           = bid_recommendation.estimated_value (AI-read
+    //                            overall contract value) — reference only
+    //                            (eligibility/EMD/PG/ceiling), never pricing.
+    //   Schedule-B Amount /
+    //   Department BOQ Total   = boq.estimatedAmount — the confirmed pricing
+    //                            basis (what the bid % is applied to).
+    //   Quoted Schedule Amount /
+    //   Quoted BOQ Total /
+    //   Quoted Lump Sum        = quotedAmount — the bidder's quoted figure
+    //                            against the schedule. Never "Final Bid
+    //                            Amount" — it is not a contract total.
+    const tenderValueRow: [string, string] = [
+      'Tender Value',
+      aiEstimatedValue != null ? `${fmtINR(aiEstimatedValue)} (reference only)` : '--',
+    ];
+
+    const typeSpecificRows: [string, string][] = boq.boqType === 'item_rate'
+      ? [
+          tenderValueRow,
+          ['Department BOQ Total', `${fmtINR(boq.estimatedAmount!)} (summed from priced BOQ items)`],
+          ['Quoted BOQ Total', fmtINR(quotedAmount)],
+        ]
+      : boq.boqType === 'lump_sum_epc'
+      ? [
+          tenderValueRow,
+          ['Quoted Lump Sum', fmtINR(quotedAmount)],
+        ]
+      : [
+          tenderValueRow,
+          ['Schedule-B Amount', `${fmtINR(boq.estimatedAmount!)} ✓${boq.estimatedAmountClause ? ` · ${boq.estimatedAmountClause}` : ''}${boq.estimatedAmountPage ? ` · Page ${boq.estimatedAmountPage}` : ''}`],
+          ['Bid %', `${derivedAboveBelow === 'above' ? '↑' : '↓'} ${boq.percentage}% ${derivedAboveBelow}`],
+          ['Quoted Schedule Amount', fmtINR(quotedAmount)],
+        ];
+
     return (
       <div className="rounded-xl border border-slate-200 overflow-hidden shadow-sm">
         <div className="bg-slate-900 px-5 py-3 flex items-center gap-2">
@@ -546,12 +611,7 @@ export default function BOQSection({
         <div className="divide-y divide-slate-100">
           {[
             ['BOQ Type', isGridMode ? modeLabel : 'Percentage Rate'],
-            ['Estimated Amount', `${fmtINR(boq.estimatedAmount!)}${isGridMode ? ' (summed from priced BOQ items)' : ' ✓'}${boq.estimatedAmountClause ? ` · ${boq.estimatedAmountClause}` : ''}${boq.estimatedAmountPage ? ` · Page ${boq.estimatedAmountPage}` : ''}`],
-            ['Bid Direction', `${derivedAboveBelow === 'above' ? '↑ Above' : '↓ Below'} Estimated Amount`],
-            ['Percentage Quoted', isGridMode
-              ? (derivedPercentage != null ? `${derivedPercentage.toFixed(2)}%` : '—')
-              : `${boq.percentage}%`],
-            [isGridMode ? 'Net Quoted Amount' : 'Final Quoted Amount', fmtINR(quotedAmount)],
+            ...typeSpecificRows,
             ...(isGridMode && cessGst && (boq.cessPercent || boq.gstPercent) ? [
               ...(boq.cessPercent ? [['Welfare Cess', `${boq.cessPercent}% = ${fmtINR(cessGst.cessAmount)}`]] : []),
               ...(boq.gstPercent ? [['GST', `${boq.gstPercent}% = ${fmtINR(cessGst.gstAmount)}`]] : []),

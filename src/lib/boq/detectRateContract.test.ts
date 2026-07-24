@@ -2,7 +2,7 @@ import { describe, test, expect } from 'vitest';
 import type { BoqItem } from '../../types/boq';
 import {
   detectTitleMention, detectValueRatio, detectNominalQuantities, buildRateContractHint,
-  resolveRateContractRevenue,
+  resolveRateContractRevenue, detectMisenteredScheduleAmount,
 } from './detectRateContract';
 
 function item(quantity: number): BoqItem {
@@ -132,5 +132,32 @@ describe('resolveRateContractRevenue', () => {
     expect(r.gated).toBe(false);
     expect(r.revenue).toBe(1800000);
     expect(r.reason).toBeNull();
+  });
+});
+
+describe('detectMisenteredScheduleAmount', () => {
+  test('flags entering the Tender Value where Schedule-B Amount belongs (Bareja-shaped)', () => {
+    // typed ~2,500,000 (close to the AI tender value), real schedule sum is ~48,265
+    expect(detectMisenteredScheduleAmount(2500000, 2500000, 48265.33)).toBe(true);
+  });
+
+  test('does not flag a value close to the real schedule sum', () => {
+    expect(detectMisenteredScheduleAmount(48265.33, 2500000, 48265.33)).toBe(false);
+  });
+
+  test('does not flag when entered value is far from the tender value too', () => {
+    expect(detectMisenteredScheduleAmount(100000, 2500000, 48265.33)).toBe(false);
+  });
+
+  test('does not flag when no AI tender value exists to compare against', () => {
+    expect(detectMisenteredScheduleAmount(2500000, null, 48265.33)).toBe(false);
+  });
+
+  test('does not flag when the actual schedule sum is unavailable (nothing to compare against)', () => {
+    expect(detectMisenteredScheduleAmount(2500000, 2500000, null)).toBe(false);
+  });
+
+  test('does not flag a normal, non-ARC percentage-rate tender (schedule sum close to tender value)', () => {
+    expect(detectMisenteredScheduleAmount(1050000, 1050000, 1000000)).toBe(false);
   });
 });

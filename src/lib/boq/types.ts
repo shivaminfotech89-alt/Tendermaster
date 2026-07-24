@@ -100,6 +100,18 @@ export interface BidSnapshot {
   totalWithGst?: number;
   roundOff?: number;
   roundedTotal?: number;
+
+  // Distinctly-named duplicates of the fields above, added so the three
+  // concepts (overall tender scale vs. pricing basis vs. quoted figure)
+  // can never be confused when reading a snapshot. The original fields
+  // above are kept unchanged for backward compatibility — these are
+  // additive, not replacements.
+  tenderValue?: number;          // bid_recommendation.estimated_value — reference only
+  scheduleBAmount?: number;      // = estimatedAmount — the confirmed pricing basis
+  quotedScheduleAmount?: number; // = quotedAmount — the bidder's figure against the schedule
+  pricingMethod?: string;        // e.g. "Percentage Rate", "Item Rate", "Lump Sum / Package"
+  bidPercent?: number;           // = percentage, re-exposed under an unambiguous name
+
   remarks: string;
   createdAt: any;
   createdBy: string;

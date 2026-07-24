@@ -2,7 +2,7 @@ import { describe, test, expect } from 'vitest';
 import type { BoqItem } from '../../types/boq';
 import {
   detectTitleMention, detectValueRatio, detectNominalQuantities, buildRateContractHint,
-  resolveRateContractRevenue, detectMisenteredScheduleAmount,
+  resolveRateContractRevenue, detectMisenteredScheduleAmount, pickScheduleMatchingCandidateIndex,
 } from './detectRateContract';
 
 function item(quantity: number): BoqItem {
@@ -159,5 +159,37 @@ describe('detectMisenteredScheduleAmount', () => {
 
   test('does not flag a normal, non-ARC percentage-rate tender (schedule sum close to tender value)', () => {
     expect(detectMisenteredScheduleAmount(1050000, 1050000, 1000000)).toBe(false);
+  });
+});
+
+describe('pickScheduleMatchingCandidateIndex', () => {
+  test('Bareja-shaped: prefers the schedule-matching candidate over the AI-suggested tender-value one', () => {
+    // candidates: [0] "Estimated Schedule B Unit Rate Sum" ~48265, [1] "Approximate Overall Project Budget" 2500000
+    // AI suggested index 1 (wrong) — the real schedule sum (48265.33) should override it to index 0.
+    const idx = pickScheduleMatchingCandidateIndex([48265, 2500000], 48265.33, 1);
+    expect(idx).toBe(0);
+  });
+
+  test('falls back to the AI-suggested index when the real schedule sum is not yet known', () => {
+    const idx = pickScheduleMatchingCandidateIndex([48265, 2500000], null, 1);
+    expect(idx).toBe(1);
+  });
+
+  test('falls back to the AI-suggested index when there are no candidates', () => {
+    expect(pickScheduleMatchingCandidateIndex([], 48265.33, 0)).toBe(0);
+  });
+
+  test('single candidate that already matches the schedule sum stays selected', () => {
+    expect(pickScheduleMatchingCandidateIndex([48265.33], 48265.33, 0)).toBe(0);
+  });
+
+  test('skips candidates with no usable value', () => {
+    const idx = pickScheduleMatchingCandidateIndex([undefined, 48265.33, 2500000], 48265.33, 0);
+    expect(idx).toBe(1);
+  });
+
+  test('does not override when the AI-suggested candidate is already the closest match', () => {
+    const idx = pickScheduleMatchingCandidateIndex([48265.33, 2500000], 48265.33, 0);
+    expect(idx).toBe(0);
   });
 });

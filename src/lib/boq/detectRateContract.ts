@@ -150,3 +150,33 @@ export function detectMisenteredScheduleAmount(
   if (!closeToTenderValue) return false;
   return detectValueRatio(actualScheduleSum, enteredValue);
 }
+
+/**
+ * Never blindly trust an AI-suggested candidate index. When the real
+ * extracted schedule sum is known, prefer whichever financial-value
+ * candidate is numerically closest to it as the Step 1 prefill — this is
+ * the actual fix for candidates mixing schedule-derived figures with
+ * overall tender-notice figures (the AI prompt gives no criterion for which
+ * one gets marked "suggested"). Falls back to the AI's own suggested index
+ * only when the real schedule sum isn't known yet or no candidate value is
+ * usable — never silently picks an unrelated index either.
+ */
+export function pickScheduleMatchingCandidateIndex(
+  candidateValues: (number | undefined)[],
+  scheduleSum: number | null | undefined,
+  fallbackIndex: number,
+): number {
+  if (scheduleSum == null || scheduleSum <= 0 || candidateValues.length === 0) return fallbackIndex;
+
+  let bestIdx = fallbackIndex;
+  let bestDiff = Infinity;
+  candidateValues.forEach((value, i) => {
+    if (value == null) return;
+    const diff = Math.abs(value - scheduleSum);
+    if (diff < bestDiff) {
+      bestDiff = diff;
+      bestIdx = i;
+    }
+  });
+  return bestIdx;
+}

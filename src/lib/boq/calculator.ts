@@ -87,6 +87,33 @@ export interface CessGstBreakdown {
  * tenders (and the Schedule-B fixture in scripts/fixtures) compute the
  * grand total in this order; applying GST first would understate the total.
  */
+export interface GstCalculationMode {
+  /** true when gstIncluded is unresolved — no cess/GST total should be computed at all. */
+  gated: boolean;
+  /** the gstPercent applyCessAndGst should actually be called with. */
+  effectiveGstPercent: number;
+}
+
+/**
+ * Two arithmetic behaviors, not three, despite gstIncluded having 4 states:
+ * 'yes' (rates already include GST) and 'no' (GST doesn't apply) both mean no
+ * GST addition — pass gstPercent 0 downstream. 'separate' means GST is added
+ * on top of the cess-inclusive subtotal — pass the real rate. 'unknown' gates
+ * the whole calculation; never silently defaults to a guessed rate.
+ */
+export function resolveGstCalculationMode(
+  gstIncluded: 'yes' | 'no' | 'separate' | 'unknown' | undefined,
+  gstPercent: number | undefined,
+): GstCalculationMode {
+  if (gstIncluded == null || gstIncluded === 'unknown') {
+    return { gated: true, effectiveGstPercent: 0 };
+  }
+  if (gstIncluded === 'separate') {
+    return { gated: false, effectiveGstPercent: gstPercent ?? 0 };
+  }
+  return { gated: false, effectiveGstPercent: 0 };
+}
+
 export function applyCessAndGst(
   netAmount: number,
   cessPercent: number,

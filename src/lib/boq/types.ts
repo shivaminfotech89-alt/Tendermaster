@@ -61,8 +61,8 @@ export interface BOQData {
   // Statutory additions on top of the net quoted amount — cess applied
   // first, then GST on the cess-inclusive total (see applyCessAndGst in
   // calculator.ts). Optional: undefined means no cess/GST entered yet.
-  // BOQ-type-agnostic, but the UI to edit these currently only exists in
-  // the item_rate branch of BOQSection.
+  // BOQ-type-agnostic, and the review/edit UI in BOQSection now covers all
+  // boqTypes (previously item_rate/lump_sum only).
   cessPercent?: number;
   gstPercent?: number;
   cessAmount?: number;
@@ -70,6 +70,27 @@ export interface BOQData {
   totalWithGst?: number;
   roundOff?: number;
   roundedTotal?: number;            // final grand-total figure for the bid
+
+  // GST/Cess detection — from detectGstCess.ts, run once on the extraction's
+  // raw text at manual-extract time (never persisted itself; only the
+  // structured result is). Tri-state 'unknown' is the explicit default —
+  // never guessed. 'yes'/'no' mean no GST addition on top of the subtotal
+  // (rates already include it, or it doesn't apply); 'separate' means GST is
+  // added on top via applyCessAndGst.
+  gstIncluded?: 'yes' | 'no' | 'separate' | 'unknown';
+  /** Percentage-rate only — where the bid % applies. Asked (not inferred)
+   *  when gstCessConfidence < 90; item-rate/lump-sum have no ambiguity here
+   *  since their subtotal is already a real summed total. */
+  bidBasis?: 'schedule_total' | 'before_gst' | 'boq_total' | 'not_sure';
+  gstCessConfidence?: number;       // 0-100
+  gstCessDetectionReason?: string;  // decision log, mirrors boqTypeReason
+  /** Presence of a key means that field was human-set and must never be
+   *  silently rewritten by re-detection/re-analysis again. */
+  manualOverride?: {
+    gstIncluded?: true;
+    bidBasis?: true;
+    scheduleValue?: true;
+  };
 
   // Tracking
   boqLastChangedAt?: number;        // Date.now() on any change

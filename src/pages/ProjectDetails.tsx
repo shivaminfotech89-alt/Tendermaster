@@ -26,6 +26,7 @@ import { decideRevenueSync, inferRevenueSource, type RevenueSource } from "../li
 import { netBidAmount } from "../lib/boq/calculator";
 import { extractAnalysisText, extractBidRecommendationEstimatedValue } from "../lib/boq/detectBoqType";
 import { buildRateContractHint, resolveRateContractRevenue } from "../lib/boq/detectRateContract";
+import { detectGstCess } from "../lib/boq/detectGstCess";
 
 function formatFileSize(bytes: number): string {
   if (bytes >= 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
@@ -381,6 +382,24 @@ export default function ProjectDetails() {
         parserDurationMs: telemetry.parserDurationMs,
         updatedAt: serverTimestamp(),
       }));
+
+      // GST/Cess detection — runs once here on the already-computed, in-memory
+      // extraction text (never persisted itself, no extraction file touched;
+      // only this structured result merges into boq). Sticky manual override:
+      // once the bidder has reviewed/edited the GST/Cess fields, re-extraction
+      // must never silently rewrite them again.
+      if (!boq.manualOverride?.gstIncluded) {
+        const gstCess = detectGstCess(extraction.rawText);
+        handleBoqChange({
+          ...boq,
+          gstIncluded: gstCess.gstIncluded,
+          cessPercent: gstCess.cessRate ?? boq.cessPercent,
+          gstPercent: gstCess.gstRate ?? boq.gstPercent,
+          gstCessConfidence: gstCess.confidence,
+          gstCessDetectionReason: gstCess.reason,
+        });
+      }
+
       console.log('[BOQ] done — extraction succeeded', {
         items: extraction.items.length,
         verificationScore: verification.score,

@@ -5,9 +5,9 @@ import {
 } from 'lucide-react';
 import type { BOQData, BidSnapshotRow, FinancialValueCandidate } from '../../lib/boq/types';
 import { toIndianWords } from '../../lib/boq/indianWords';
-import { netBidAmount, calcProfit, getBidWarnings, fmtINR, applyCessAndGst } from '../../lib/boq/calculator';
+import { netBidAmount, calcProfit, getBidWarnings, fmtINR, applyCessAndGst, resolveGstCalculationMode } from '../../lib/boq/calculator';
 import { detectBoqTypeFromAnalysis, extractAnalysisText, extractBidRecommendationEstimatedValue } from '../../lib/boq/detectBoqType';
-import { buildRateContractHint, resolveRateContractRevenue, detectMisenteredScheduleAmount } from '../../lib/boq/detectRateContract';
+import { buildRateContractHint, resolveRateContractRevenue, detectMisenteredScheduleAmount, pickScheduleMatchingCandidateIndex } from '../../lib/boq/detectRateContract';
 
 interface BOQSectionProps {
   analysisResult: any;
@@ -83,7 +83,12 @@ export default function BOQSection({
     if (!analysisResult) return;
     initializedRef.current = true;
 
-    // API may return boq_details in future; fall back to client-side detection today
+    // The API already returns boq_details.financial_values/suggested_estimated_index
+    // today (server.ts). The AI prompt gives no criterion distinguishing a
+    // schedule-derived figure from an overall tender-notice figure, and none
+    // for which one to mark "suggested" — so `suggested_estimated_index` is
+    // never trusted blindly below; it's only the fallback when the real
+    // schedule sum isn't known yet.
     const bd = (analysisResult as any)?.boq_details;
 
     const rawCandidates: FinancialValueCandidate[] = (bd?.financial_values ?? []).map((v: any) => ({
@@ -102,9 +107,16 @@ export default function BOQSection({
     const effectiveCandidates = rawCandidates.length > 0
       ? rawCandidates
       : (boq.financialCandidates ?? []);
-    const effectiveIdx = rawCandidates.length > 0
+    const aiSuggestedIdx = rawCandidates.length > 0
       ? (bd?.suggested_estimated_index ?? 0)
       : (boq.suggestedCandidateIndex ?? 0);
+    // Prefer whichever candidate actually matches the extracted schedule sum,
+    // when it's already known at this point — never just the AI's pick.
+    const effectiveIdx = pickScheduleMatchingCandidateIndex(
+      effectiveCandidates.map(c => c.valueNumber),
+      scheduleSum,
+      aiSuggestedIdx,
+    );
 
     // Determine BOQ type: API field (future) > client detection > leave as-is.
     // Only auto-set on HIGH confidence to prevent false positives (e.g. Annual Rate Contract
@@ -164,6 +176,40 @@ export default function BOQSection({
       if (prefilledAmount) setAmountInput(String(prefilledAmount));
     }
   }, [analysisResult]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // The one-shot init effect above may run before BOQ extraction completes,
+  // i.e. before the real schedule sum is known. Re-check once it arrives —
+  // never touches an already-confirmed amount, and no-ops once the current
+  // selection already matches (so this converges, not loops).
+  useEffect(() => {
+    if (boq.estimatedAmountConfirmed) return;
+    if (scheduleSum == null || scheduleSum <= 0) return;
+    const currentCandidates = boq.financialCandidates ?? [];
+    if (currentCandidates.length === 0) return;
+
+    const currentIdx = boq.suggestedCandidateIndex ?? 0;
+    const betterIdx = pickScheduleMatchingCandidateIndex(
+      currentCandidates.map(c => c.valueNumber),
+      scheduleSum,
+      currentIdx,
+    );
+    if (betterIdx === currentIdx) return;
+
+    const better = currentCandidates[betterIdx];
+    if (better?.valueNumber == null) return;
+
+    setBoq({
+      ...boq,
+      suggestedCandidateIndex: betterIdx,
+      estimatedAmount: better.valueNumber,
+      estimatedAmountPage: better.page,
+      estimatedAmountClause: better.clause,
+      estimatedAmountText: better.sourceText,
+      boqLastChangedAt: Date.now(),
+    });
+    setAmountInput(String(better.valueNumber));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scheduleSum, boq.financialCandidates, boq.suggestedCandidateIndex, boq.estimatedAmountConfirmed]);
 
   // ── Computed values ────────────────────────────────────────────────────────
   // Item-rate and lump-sum bids share the same grid-driven pipeline in
@@ -240,12 +286,19 @@ export default function BOQSection({
         })
       : null;
 
-  // Welfare cess (applied first) then GST (on the cess-inclusive total).
-  // Gated on isGridMode — percentage-rate bids have no cess/GST UI, and
-  // must not have a phantom 18% GST default silently computed and written
-  // into their finalize/snapshot data.
-  const cessGst = isGridMode && quotedAmount != null
-    ? applyCessAndGst(quotedAmount, boq.cessPercent ?? 0, boq.gstPercent ?? 18)
+  // Welfare cess (applied first) then GST (on the cess-inclusive total) —
+  // universal across all boqTypes (previously isGridMode-only). Two
+  // arithmetic behaviors, not three: gstIncluded 'yes'/'no' mean no GST
+  // addition (rates already reflect it, or it doesn't apply — gstPercent
+  // effectively 0 for this calc); 'separate' adds the real gstPercent on
+  // top. 'unknown' gates the whole calculation — never assumes a rate
+  // (no more silent `?? 18` default), matching detectGstCess's own
+  // "never guess" discipline.
+  const gstIncluded = boq.gstIncluded ?? 'unknown';
+  const gstMode = resolveGstCalculationMode(gstIncluded, boq.gstPercent);
+  const gstCessGated = gstMode.gated;
+  const cessGst = !gstCessGated && quotedAmount != null
+    ? applyCessAndGst(quotedAmount, boq.cessPercent ?? 0, gstMode.effectiveGstPercent)
     : null;
 
   // Sync computed values into boq state and parent revenue. Merged into one
@@ -255,13 +308,9 @@ export default function BOQSection({
   // the second call silently clobber the first's writes.
   const prevSyncKeyRef = useRef<string>('');
   useEffect(() => {
-    const key = `${quotedAmount}|${boq.cessPercent ?? ''}|${boq.gstPercent ?? ''}|${boq.isRateContract ?? ''}|${boq.expectedContractValue ?? ''}`;
+    const key = `${quotedAmount}|${boq.cessPercent ?? ''}|${boq.gstPercent ?? ''}|${boq.gstIncluded ?? ''}|${boq.isRateContract ?? ''}|${boq.expectedContractValue ?? ''}`;
     if (key === prevSyncKeyRef.current) return;
     prevSyncKeyRef.current = key;
-
-    const breakdown = isGridMode && quotedAmount != null
-      ? applyCessAndGst(quotedAmount, boq.cessPercent ?? 0, boq.gstPercent ?? 18)
-      : null;
 
     setBoq({
       ...boq,
@@ -274,12 +323,16 @@ export default function BOQSection({
         estimatedAmountConfirmed: true,
         percentage: derivedPercentage,
         aboveBelow: derivedAboveBelow,
-        cessAmount: breakdown?.cessAmount,
-        gstAmount: breakdown?.gstAmount,
-        totalWithGst: breakdown?.totalWithGst,
-        roundOff: breakdown?.roundOff,
-        roundedTotal: breakdown?.roundedTotal,
       } : {}),
+      // Cess/GST breakdown sync is universal now (previously isGridMode-only)
+      // — cessGst itself is gated on gstIncluded being resolved, not on
+      // boqType, so an unresolved 'unknown' correctly leaves these undefined
+      // rather than falling back to a guessed rate.
+      cessAmount: cessGst?.cessAmount,
+      gstAmount: cessGst?.gstAmount,
+      totalWithGst: cessGst?.totalWithGst,
+      roundOff: cessGst?.roundOff,
+      roundedTotal: cessGst?.roundedTotal,
       boqLastChangedAt: Date.now(),
     });
     // Never sync a gated/schedule-derived figure into the parent's revenue —
@@ -287,7 +340,7 @@ export default function BOQSection({
     // the parent's Bid Engine panel keeps whatever revenue it already has
     // rather than receiving a fabricated or wrong update.
     if (rateContractRevenue.revenue != null) onRevenueSync(rateContractRevenue.revenue);
-  }, [quotedAmount, boq.cessPercent, boq.gstPercent, boq.isRateContract, boq.expectedContractValue]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [quotedAmount, boq.cessPercent, boq.gstPercent, boq.gstIncluded, boq.isRateContract, boq.expectedContractValue]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Recompute metrics when totalCost changes independently
   const prevCostRef = useRef<number>(totalCost);
@@ -311,7 +364,14 @@ export default function BOQSection({
     const n = parseFloat(v.replace(/,/g, ''));
     if (isFinite(n)) {
       const orig = candidates[suggestedIdx]?.valueNumber ?? null;
-      setBoq({ ...boq, estimatedAmount: n, estimatedAmountEdited: orig !== null && n !== orig, estimatedAmountConfirmed: false });
+      const edited = orig !== null && n !== orig;
+      setBoq({
+        ...boq,
+        estimatedAmount: n,
+        estimatedAmountEdited: edited,
+        estimatedAmountConfirmed: false,
+        ...(edited ? { manualOverride: { ...boq.manualOverride, scheduleValue: true } } : {}),
+      });
     }
   };
 
@@ -343,10 +403,31 @@ export default function BOQSection({
     setBoq({ ...boq, gstPercent: v !== '' && isFinite(n) ? Math.max(0, n) : undefined, boqLastChangedAt: Date.now() });
   };
 
+  // Manual edits to gstIncluded/bidBasis are sticky — set the corresponding
+  // manualOverride flag so a future re-detection/re-analysis (ProjectDetails'
+  // handleManualBoqExtract) never silently rewrites what the bidder confirmed.
+  const handleGstIncludedChange = (value: 'yes' | 'no' | 'separate') => {
+    setBoq({
+      ...boq,
+      gstIncluded: value,
+      manualOverride: { ...boq.manualOverride, gstIncluded: true },
+      boqLastChangedAt: Date.now(),
+    });
+  };
+
+  const handleBidBasisChange = (value: 'schedule_total' | 'before_gst' | 'boq_total' | 'not_sure') => {
+    setBoq({
+      ...boq,
+      bidBasis: value,
+      manualOverride: { ...boq.manualOverride, bidBasis: true },
+      boqLastChangedAt: Date.now(),
+    });
+  };
+
   const handleFinalize = async () => {
     // rateContractRevenue.gated is a hard stop, independent of the button's
     // own disabled state — a bid_snapshots entry is immutable.
-    if (!onFinalize || !canCompute || !quotedAmount || !words || rateContractRevenue.gated) return;
+    if (!onFinalize || !canCompute || !quotedAmount || !words || rateContractRevenue.gated || gstCessGated) return;
     setFinalizing(true);
     try {
       await onFinalize({
@@ -546,6 +627,139 @@ export default function BOQSection({
     );
   };
 
+  // Universal Financial Review — replaces the old isGridMode-only "Statutory
+  // Additions" card. Shown for every boqType once a schedule value exists;
+  // captures GST treatment (detected or manually confirmed, sticky via
+  // manualOverride), cess/GST rates, and — only for percentage_rate tenders
+  // where detection confidence is below 90 and the bidder hasn't already
+  // answered — the one mandatory question about where the bid % applies.
+  // Never auto-picks gstIncluded: 'unknown' stays 'unknown' (and cessGst
+  // stays null / calculation gated) until the bidder or a future detection
+  // pass resolves it.
+  const renderFinancialReview = () => {
+    if (boq.estimatedAmount == null) return null;
+    const confidence = boq.gstCessConfidence ?? 0;
+    const needsBidBasisQuestion = boq.boqType === 'percentage_rate' && confidence < 90 && !boq.bidBasis;
+
+    return (
+      <div className="bg-white border border-slate-200 rounded-xl p-4 space-y-3">
+        <div className="flex items-center justify-between gap-2 flex-wrap">
+          <h4 className="text-xs font-bold text-slate-700 uppercase tracking-widest">Financial Review</h4>
+          {boq.manualOverride?.gstIncluded ? (
+            <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-indigo-100 text-indigo-700">
+              Manually confirmed
+            </span>
+          ) : boq.gstCessConfidence != null ? (
+            <span
+              className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${confidence >= 90 ? 'bg-emerald-100 text-emerald-700' : confidence >= 60 ? 'bg-amber-100 text-amber-700' : 'bg-red-100 text-red-700'}`}
+              title={boq.gstCessDetectionReason}
+            >
+              Detected · {confidence}% conf.
+            </span>
+          ) : null}
+        </div>
+
+        <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-slate-600">
+          <span>Tender Value</span>
+          <span className="text-right font-medium">{aiEstimatedValue != null ? fmtINR(aiEstimatedValue) : '--'}</span>
+          <span>Schedule Value</span>
+          <span className="text-right font-medium">{fmtINR(boq.estimatedAmount)}</span>
+          <span>Subtotal (before cess/GST)</span>
+          <span className="text-right font-medium">{quotedAmount != null ? fmtINR(quotedAmount) : '--'}</span>
+        </div>
+
+        <div>
+          <label className="block text-xs font-semibold text-slate-600 mb-1.5">GST Treatment</label>
+          <div className="flex flex-wrap gap-1.5">
+            {([
+              ['yes', 'Included'],
+              ['no', 'Not Applicable'],
+              ['separate', 'Payable Separately'],
+            ] as const).map(([v, label]) => (
+              <button
+                key={v}
+                type="button"
+                onClick={() => handleGstIncludedChange(v)}
+                className={`px-2.5 py-1 rounded-lg text-xs font-medium border transition-colors ${gstIncluded === v ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-600 border-slate-200 hover:border-indigo-300'}`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          {gstIncluded === 'unknown' && (
+            <p className="text-[11px] text-amber-600 mt-1.5 flex items-center gap-1">
+              <AlertTriangle className="w-3 h-3 shrink-0" />
+              Could not determine GST treatment from the tender text — select one above. Cess/GST totals are withheld until this is resolved.
+            </p>
+          )}
+        </div>
+
+        <div className="flex flex-wrap items-center gap-4">
+          <label className="flex items-center gap-2 text-sm text-slate-600">
+            Welfare Cess
+            <input
+              type="number"
+              min="0"
+              step="0.01"
+              value={boq.cessPercent ?? ''}
+              onChange={e => handleCessChange(e.target.value)}
+              placeholder="0"
+              className="w-20 border border-slate-200 rounded-lg px-2 py-1.5 text-sm text-slate-900 outline-none focus:ring-2 focus:ring-indigo-300"
+            />
+            %
+          </label>
+          {gstIncluded === 'separate' && (
+            <label className="flex items-center gap-2 text-sm text-slate-600">
+              GST
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                value={boq.gstPercent ?? ''}
+                onChange={e => handleGstChange(e.target.value)}
+                placeholder="0"
+                className="w-20 border border-slate-200 rounded-lg px-2 py-1.5 text-sm text-slate-900 outline-none focus:ring-2 focus:ring-indigo-300"
+              />
+              %
+            </label>
+          )}
+        </div>
+        <p className="text-[11px] text-slate-400">
+          Cess is applied to the subtotal first; GST (only when payable separately) is then applied to the cess-inclusive total.
+        </p>
+
+        {needsBidBasisQuestion && (
+          <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 space-y-2">
+            <p className="text-xs font-semibold text-amber-800">Where should the bid percentage apply?</p>
+            <div className="flex flex-wrap gap-1.5">
+              {([
+                ['schedule_total', 'Schedule Total'],
+                ['before_gst', 'Before GST'],
+                ['boq_total', 'BOQ Total'],
+                ['not_sure', 'Not sure'],
+              ] as const).map(([v, label]) => (
+                <button
+                  key={v}
+                  type="button"
+                  onClick={() => handleBidBasisChange(v)}
+                  className="px-2.5 py-1 rounded-lg text-xs font-medium border bg-white text-amber-700 border-amber-300 hover:bg-amber-100"
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+        {boq.bidBasis && (
+          <p className="text-[11px] text-slate-400">
+            Bid basis: <span className="font-medium text-slate-600">{boq.bidBasis.replace(/_/g, ' ')}</span>
+            {boq.manualOverride?.bidBasis && ' (confirmed by you)'}
+          </p>
+        )}
+      </div>
+    );
+  };
+
   const renderSummaryCard = () => {
     if (!boq.estimatedAmountConfirmed || quotedAmount == null) return null;
 
@@ -612,9 +826,14 @@ export default function BOQSection({
           {[
             ['BOQ Type', isGridMode ? modeLabel : 'Percentage Rate'],
             ...typeSpecificRows,
-            ...(isGridMode && cessGst && (boq.cessPercent || boq.gstPercent) ? [
+            // Un-gated from isGridMode-only — cessGst is itself gated on
+            // gstIncluded being resolved (see its computation above), so
+            // 'unknown' correctly shows nothing here rather than a guess.
+            ...(cessGst ? [
               ...(boq.cessPercent ? [['Welfare Cess', `${boq.cessPercent}% = ${fmtINR(cessGst.cessAmount)}`]] : []),
-              ...(boq.gstPercent ? [['GST', `${boq.gstPercent}% = ${fmtINR(cessGst.gstAmount)}`]] : []),
+              ['GST', gstIncluded === 'yes' ? 'Included in quoted rates'
+                : gstIncluded === 'no' ? 'Not applicable'
+                : `${boq.gstPercent ?? 0}% = ${fmtINR(cessGst.gstAmount)}`],
               ['Round Off', fmtINR(cessGst.roundOff)],
               ['Grand Total', fmtINR(cessGst.roundedTotal)],
             ] as [string, string][] : []),
@@ -650,6 +869,11 @@ export default function BOQSection({
       disabledReason = 'Confirm the estimated amount to finalise';
     } else if (boq.percentage == null) {
       disabledReason = isGridMode ? 'Price at least one BOQ item to finalise' : 'Enter your bid percentage to finalise';
+    } else if (gstCessGated) {
+      // Mirrors the rate-contract gate's discipline: a bid_snapshots entry is
+      // immutable, so it must never lock in a total computed with an assumed
+      // GST treatment when the tender text didn't actually say.
+      disabledReason = 'Confirm GST treatment in the Financial Review above to finalise';
     } else if (rateContractRevenue.gated) {
       // A bid_snapshots entry is immutable — must never lock in a margin
       // computed against a revenue figure that isn't determinable yet.
@@ -916,39 +1140,7 @@ export default function BOQSection({
                   No priced {boq.boqType === 'lump_sum_epc' ? 'packages' : 'BOQ items'} yet — open the BOQ tab and enter {boq.boqType === 'lump_sum_epc' ? 'Package Prices' : 'Quoted Rates'}. Totals sync here automatically.
                 </div>
               ) : (
-                <div className="bg-white border border-slate-200 rounded-xl p-4 space-y-3">
-                  <h4 className="text-xs font-bold text-slate-700 uppercase tracking-widest">Statutory Additions (optional)</h4>
-                  <div className="flex flex-wrap items-center gap-4">
-                    <label className="flex items-center gap-2 text-sm text-slate-600">
-                      Welfare Cess
-                      <input
-                        type="number"
-                        min="0"
-                        step="0.01"
-                        value={boq.cessPercent ?? ''}
-                        onChange={e => handleCessChange(e.target.value)}
-                        placeholder="0"
-                        className="w-20 border border-slate-200 rounded-lg px-2 py-1.5 text-sm text-slate-900 outline-none focus:ring-2 focus:ring-indigo-300"
-                      />
-                      %
-                    </label>
-                    <label className="flex items-center gap-2 text-sm text-slate-600">
-                      GST
-                      <input
-                        type="number"
-                        min="0"
-                        step="0.01"
-                        value={boq.gstPercent ?? 18}
-                        onChange={e => handleGstChange(e.target.value)}
-                        className="w-20 border border-slate-200 rounded-lg px-2 py-1.5 text-sm text-slate-900 outline-none focus:ring-2 focus:ring-indigo-300"
-                      />
-                      %
-                    </label>
-                  </div>
-                  <p className="text-[11px] text-slate-400">
-                    Cess is applied to the quoted amount first; GST is then applied to the cess-inclusive total.
-                  </p>
-                </div>
+                renderFinancialReview()
               )}
 
               {/* Financial Summary Card */}
@@ -969,6 +1161,9 @@ export default function BOQSection({
                 <p className="text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-widest">Step 1 — Estimated Amount</p>
                 {renderAmountStep()}
               </div>
+
+              {/* Financial Review — GST/Cess treatment + bid-basis question, mandatory before the Bid Calculator so the bidder knows the basis before entering a percentage */}
+              {renderFinancialReview()}
 
               {/* Step 2: Pricing */}
               {renderPricingStep()}

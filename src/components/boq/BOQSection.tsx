@@ -7,7 +7,7 @@ import type { BOQData, BidSnapshotRow, FinancialValueCandidate } from '../../lib
 import { toIndianWords } from '../../lib/boq/indianWords';
 import { netBidAmount, calcProfit, getBidWarnings, fmtINR, applyCessAndGst, resolveGstCalculationMode } from '../../lib/boq/calculator';
 import { detectBoqTypeFromAnalysis, extractAnalysisText, extractBidRecommendationEstimatedValue } from '../../lib/boq/detectBoqType';
-import { buildRateContractHint, resolveRateContractRevenue, detectMisenteredScheduleAmount, pickScheduleMatchingCandidateIndex, resolveExpectedRevenueConfirmation } from '../../lib/boq/detectRateContract';
+import { buildRateContractHint, resolveRateContractRevenue, detectMisenteredScheduleAmount, pickScheduleMatchingCandidateIndex, resolveExpectedRevenueConfirmation, preferExactScheduleSum } from '../../lib/boq/detectRateContract';
 
 interface BOQSectionProps {
   analysisResult: any;
@@ -60,8 +60,10 @@ export default function BOQSection({
   const [amountInput, setAmountInput] = useState('');
   const [editingRevenue, setEditingRevenue] = useState(false);
   const [revenueInput, setRevenueInput] = useState('');
-  const [editingValidity, setEditingValidity] = useState(false);
-  const [customValidityInput, setCustomValidityInput] = useState('');
+  const [editingCompletionPeriod, setEditingCompletionPeriod] = useState(false);
+  const [customCompletionPeriodInput, setCustomCompletionPeriodInput] = useState('');
+  const [editingBidValidity, setEditingBidValidity] = useState(false);
+  const [customBidValidityInput, setCustomBidValidityInput] = useState('');
   const [finalizing, setFinalizing] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   const [isExpanded, setIsExpanded] = useState(() => {
@@ -145,6 +147,12 @@ export default function BOQSection({
       }
     }
 
+    // Prefer the precise, ground-truth scheduleSum over the AI candidate's
+    // own valueNumber when they're plausibly the same figure (the AI's
+    // numeric field is sometimes rounded even though its own value_raw
+    // string is exact) — see preferExactScheduleSum's own docs.
+    const preferredAmount = preferExactScheduleSum(effectiveCandidates[effectiveIdx]?.valueNumber, scheduleSum);
+
     setBoq({
       ...boq,
       boqType: detectedType,
@@ -159,7 +167,7 @@ export default function BOQSection({
       estimatedAmount:
         boq.estimatedAmountConfirmed
           ? boq.estimatedAmount
-          : effectiveCandidates[effectiveIdx]?.valueNumber || boq.estimatedAmount || null,
+          : preferredAmount || boq.estimatedAmount || null,
       estimatedAmountPage:
         boq.estimatedAmountConfirmed
           ? boq.estimatedAmountPage
@@ -175,8 +183,7 @@ export default function BOQSection({
     });
     // Pre-fill the amount input so the simplified single-field UI shows the suggested value.
     if (!boq.estimatedAmountConfirmed && !amountInput) {
-      const prefilledAmount =
-        effectiveCandidates[effectiveIdx]?.valueNumber || boq.estimatedAmount;
+      const prefilledAmount = preferredAmount || boq.estimatedAmount;
       if (prefilledAmount) setAmountInput(String(prefilledAmount));
     }
   }, [analysisResult]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -201,17 +208,18 @@ export default function BOQSection({
 
     const better = currentCandidates[betterIdx];
     if (better?.valueNumber == null) return;
+    const preciseAmount = preferExactScheduleSum(better.valueNumber, scheduleSum)!;
 
     setBoq({
       ...boq,
       suggestedCandidateIndex: betterIdx,
-      estimatedAmount: better.valueNumber,
+      estimatedAmount: preciseAmount,
       estimatedAmountPage: better.page,
       estimatedAmountClause: better.clause,
       estimatedAmountText: better.sourceText,
       boqLastChangedAt: Date.now(),
     });
-    setAmountInput(String(better.valueNumber));
+    setAmountInput(String(preciseAmount));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scheduleSum, boq.financialCandidates, boq.suggestedCandidateIndex, boq.estimatedAmountConfirmed]);
 
@@ -481,20 +489,38 @@ export default function BOQSection({
     setRevenueInput(boq.expectedRevenueConfirmedValue?.toString() ?? '');
   };
 
-  const handleConfirmTenderValidity = (days: number) => {
+  const handleConfirmCompletionPeriod = (days: number) => {
     setBoq({
       ...boq,
-      tenderValidityDays: days,
-      tenderValidityConfirmed: true,
-      manualOverride: { ...boq.manualOverride, tenderValidity: true },
+      completionPeriodDays: days,
+      completionPeriodConfirmed: true,
+      manualOverride: { ...boq.manualOverride, completionPeriod: true },
       boqLastChangedAt: Date.now(),
     });
-    setEditingValidity(false);
+    setEditingCompletionPeriod(false);
   };
 
-  const handleEditTenderValidity = () => {
-    setBoq({ ...boq, tenderValidityConfirmed: false });
-    setEditingValidity(true);
+  const handleEditCompletionPeriod = () => {
+    setBoq({ ...boq, completionPeriodConfirmed: false });
+    setEditingCompletionPeriod(true);
+  };
+
+  // Bid Validity is captured/confirmable but never blocks Finalize — see
+  // detectTenderValidity.ts's own docs for why the two concepts are split.
+  const handleConfirmBidValidity = (days: number) => {
+    setBoq({
+      ...boq,
+      bidValidityDays: days,
+      bidValidityConfirmed: true,
+      manualOverride: { ...boq.manualOverride, bidValidity: true },
+      boqLastChangedAt: Date.now(),
+    });
+    setEditingBidValidity(false);
+  };
+
+  const handleEditBidValidity = () => {
+    setBoq({ ...boq, bidValidityConfirmed: false });
+    setEditingBidValidity(true);
   };
 
   const handleConfirmEstimatedCost = () => {
@@ -505,7 +531,7 @@ export default function BOQSection({
     // Each of these gates is a hard stop, independent of the button's own
     // disabled state — a bid_snapshots entry is immutable.
     if (!onFinalize || !canCompute || !quotedAmount || !words || gstCessGated || !gstConfirmed
-      || !estimatedCostConfirmed || !boq.tenderValidityConfirmed || expectedRevenue.gated) return;
+      || !estimatedCostConfirmed || !boq.completionPeriodConfirmed || expectedRevenue.gated) return;
     setFinalizing(true);
     try {
       await onFinalize({
@@ -538,7 +564,8 @@ export default function BOQSection({
         pricingMethod: isGridMode ? modeLabel : 'Percentage Rate',
         bidPercent: derivedPercentage ?? undefined,
         expectedRevenue: expectedRevenue.revenue ?? undefined,
-        tenderValidityDays: boq.tenderValidityDays ?? undefined,
+        bidValidityDays: boq.bidValidityDays ?? undefined,
+        completionPeriodDays: boq.completionPeriodDays ?? undefined,
         remarks: boq.remarks,
       });
     } finally {
@@ -971,8 +998,11 @@ export default function BOQSection({
       disabledReason = 'Confirm GST treatment in the Financial Review above to finalise';
     } else if (!estimatedCostConfirmed) {
       disabledReason = 'Confirm your Total Estimated Cost to finalise';
-    } else if (!boq.tenderValidityConfirmed) {
-      disabledReason = 'Confirm Tender Validity to finalise';
+    } else if (!boq.completionPeriodConfirmed) {
+      // Bid Validity is captured/confirmable too but deliberately does NOT
+      // gate here — many tenders never state it, and nothing calculates
+      // from it (see detectTenderValidity.ts).
+      disabledReason = 'Confirm Completion Period to finalise';
     } else if (expectedRevenue.gated) {
       // A bid_snapshots entry is immutable — must never lock in a margin
       // computed against a revenue figure that isn't determined and
@@ -1191,45 +1221,47 @@ export default function BOQSection({
     );
   };
 
-  // Detected from the tender text (or the AI's execution_duration as a
-  // weaker fallback) — see detectTenderValidity.ts. No calculation currently
-  // consumes this number; it's a confirmed, displayed fact and a Finalize
-  // gate only.
-  const renderTenderValidityConfirmation = () => {
+  // Detected from the tender text — see detectTenderValidity.ts. Two
+  // genuinely different concepts, kept as separate cards (never merged into
+  // one number): Completion Period gates Finalize (the field the original
+  // "profit depends on the execution period" rationale was actually about);
+  // Bid Validity is captured/confirmable but never blocks Finalize — many
+  // tenders never state it, and nothing calculates from it.
+  const renderCompletionPeriodConfirmation = () => {
     if (boq.estimatedAmount == null) return null;
 
-    if (boq.tenderValidityConfirmed && !editingValidity) {
+    if (boq.completionPeriodConfirmed && !editingCompletionPeriod) {
       return (
         <div className="flex items-center justify-between gap-3 bg-emerald-50 border border-emerald-200 rounded-lg px-4 py-2.5">
           <div className="flex items-center gap-2 min-w-0">
             <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-            <span className="text-sm font-semibold text-emerald-800">Tender Validity: {boq.tenderValidityDays} Days Confirmed</span>
+            <span className="text-sm font-semibold text-emerald-800">Completion Period: {boq.completionPeriodDays} Days Confirmed</span>
           </div>
-          <button onClick={handleEditTenderValidity} className="text-xs text-emerald-700 hover:text-emerald-900 font-medium flex items-center gap-1 shrink-0">
+          <button onClick={handleEditCompletionPeriod} className="text-xs text-emerald-700 hover:text-emerald-900 font-medium flex items-center gap-1 shrink-0">
             <Edit2 className="w-3 h-3" /> Edit
           </button>
         </div>
       );
     }
 
-    if (boq.tenderValidityDays != null && !editingValidity) {
+    if (boq.completionPeriodDays != null && !editingCompletionPeriod) {
       return (
         <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 space-y-2">
           <p className="text-xs text-amber-700">
-            Tender Validity: <span className="font-bold text-amber-900">{boq.tenderValidityDays} Days</span>
-            {boq.tenderValidityConfidence != null && (
-              <span className="italic"> (detected, {boq.tenderValidityConfidence}% conf.)</span>
+            Completion Period: <span className="font-bold text-amber-900">{boq.completionPeriodDays} Days</span>
+            {boq.completionPeriodConfidence != null && (
+              <span className="italic"> (detected, {boq.completionPeriodConfidence}% conf.)</span>
             )}
           </p>
           <div className="flex items-center gap-2 flex-wrap">
             <button
-              onClick={() => handleConfirmTenderValidity(boq.tenderValidityDays!)}
+              onClick={() => handleConfirmCompletionPeriod(boq.completionPeriodDays!)}
               className="px-3 py-1.5 text-xs font-semibold rounded bg-amber-600 text-white hover:bg-amber-700 transition-colors flex items-center gap-1"
             >
               <CheckCircle2 className="w-3.5 h-3.5" /> Confirm
             </button>
             <button
-              onClick={() => setEditingValidity(true)}
+              onClick={() => setEditingCompletionPeriod(true)}
               className="px-3 py-1.5 text-xs font-medium rounded border border-slate-300 hover:bg-slate-100 transition-colors flex items-center gap-1"
             >
               <Edit2 className="w-3.5 h-3.5" /> Edit
@@ -1241,15 +1273,15 @@ export default function BOQSection({
 
     return (
       <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 space-y-2">
-        <p className="text-xs font-semibold text-amber-800">Tender Validity</p>
-        {boq.tenderValidityDays == null && (
+        <p className="text-xs font-semibold text-amber-800">Completion Period</p>
+        {boq.completionPeriodDays == null && (
           <p className="text-[11px] text-amber-600">Could not determine this from the tender text — select below.</p>
         )}
         <div className="flex items-center gap-1.5 flex-wrap">
           {[30, 60, 90, 180].map(d => (
             <button
               key={d}
-              onClick={() => handleConfirmTenderValidity(d)}
+              onClick={() => handleConfirmCompletionPeriod(d)}
               className="px-3 py-1.5 text-xs font-medium rounded border border-slate-300 hover:bg-slate-100 transition-colors"
             >
               {d} Days
@@ -1260,18 +1292,103 @@ export default function BOQSection({
           <input
             type="number"
             min="1"
-            value={customValidityInput}
-            onChange={e => setCustomValidityInput(e.target.value)}
+            value={customCompletionPeriodInput}
+            onChange={e => setCustomCompletionPeriodInput(e.target.value)}
             placeholder="Custom (days)"
             className="w-32 border border-slate-200 rounded-lg px-2 py-1.5 text-xs text-slate-900 outline-none focus:ring-2 focus:ring-amber-300"
           />
           <button
             onClick={() => {
-              const n = parseInt(customValidityInput, 10);
-              if (isFinite(n) && n > 0) handleConfirmTenderValidity(n);
+              const n = parseInt(customCompletionPeriodInput, 10);
+              if (isFinite(n) && n > 0) handleConfirmCompletionPeriod(n);
             }}
-            disabled={!(isFinite(parseInt(customValidityInput, 10)) && parseInt(customValidityInput, 10) > 0)}
+            disabled={!(isFinite(parseInt(customCompletionPeriodInput, 10)) && parseInt(customCompletionPeriodInput, 10) > 0)}
             className="px-3 py-1.5 text-xs font-medium rounded bg-amber-600 text-white hover:bg-amber-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          >
+            Use Custom
+          </button>
+        </div>
+      </div>
+    );
+  };
+
+  // Informational only — never gates Finalize. Same detect/confirm/edit or
+  // picker structure as Completion Period, just without the mandatory-gate
+  // messaging or the "no detection yet" warning line.
+  const renderBidValidityConfirmation = () => {
+    if (boq.estimatedAmount == null) return null;
+
+    if (boq.bidValidityConfirmed && !editingBidValidity) {
+      return (
+        <div className="flex items-center justify-between gap-3 bg-emerald-50 border border-emerald-200 rounded-lg px-4 py-2.5">
+          <div className="flex items-center gap-2 min-w-0">
+            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+            <span className="text-sm font-semibold text-emerald-800">Bid Validity: {boq.bidValidityDays} Days Confirmed</span>
+          </div>
+          <button onClick={handleEditBidValidity} className="text-xs text-emerald-700 hover:text-emerald-900 font-medium flex items-center gap-1 shrink-0">
+            <Edit2 className="w-3 h-3" /> Edit
+          </button>
+        </div>
+      );
+    }
+
+    if (boq.bidValidityDays != null && !editingBidValidity) {
+      return (
+        <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 space-y-2">
+          <p className="text-xs text-slate-600">
+            Bid Validity: <span className="font-bold text-slate-800">{boq.bidValidityDays} Days</span>
+            {boq.bidValidityConfidence != null && (
+              <span className="italic"> (detected, {boq.bidValidityConfidence}% conf.)</span>
+            )}
+          </p>
+          <div className="flex items-center gap-2 flex-wrap">
+            <button
+              onClick={() => handleConfirmBidValidity(boq.bidValidityDays!)}
+              className="px-3 py-1.5 text-xs font-semibold rounded bg-slate-700 text-white hover:bg-slate-800 transition-colors flex items-center gap-1"
+            >
+              <CheckCircle2 className="w-3.5 h-3.5" /> Confirm
+            </button>
+            <button
+              onClick={() => setEditingBidValidity(true)}
+              className="px-3 py-1.5 text-xs font-medium rounded border border-slate-300 hover:bg-slate-100 transition-colors flex items-center gap-1"
+            >
+              <Edit2 className="w-3.5 h-3.5" /> Edit
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 space-y-2">
+        <p className="text-xs font-semibold text-slate-700">Bid Validity (optional)</p>
+        <div className="flex items-center gap-1.5 flex-wrap">
+          {[30, 60, 90, 180].map(d => (
+            <button
+              key={d}
+              onClick={() => handleConfirmBidValidity(d)}
+              className="px-3 py-1.5 text-xs font-medium rounded border border-slate-300 hover:bg-slate-100 transition-colors"
+            >
+              {d} Days
+            </button>
+          ))}
+        </div>
+        <div className="flex items-center gap-2">
+          <input
+            type="number"
+            min="1"
+            value={customBidValidityInput}
+            onChange={e => setCustomBidValidityInput(e.target.value)}
+            placeholder="Custom (days)"
+            className="w-32 border border-slate-200 rounded-lg px-2 py-1.5 text-xs text-slate-900 outline-none focus:ring-2 focus:ring-slate-300"
+          />
+          <button
+            onClick={() => {
+              const n = parseInt(customBidValidityInput, 10);
+              if (isFinite(n) && n > 0) handleConfirmBidValidity(n);
+            }}
+            disabled={!(isFinite(parseInt(customBidValidityInput, 10)) && parseInt(customBidValidityInput, 10) > 0)}
+            className="px-3 py-1.5 text-xs font-medium rounded bg-slate-700 text-white hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
             Use Custom
           </button>
@@ -1411,7 +1528,8 @@ export default function BOQSection({
                   {/* Expected Revenue confirmation — item_rate/lump_sum have no Rate Contract concept, so the suggestion is always quotedAmount (grid-mode item sum) */}
                   {renderExpectedRevenueConfirmation()}
                   {renderEstimatedCostConfirmation()}
-                  {renderTenderValidityConfirmation()}
+                  {renderCompletionPeriodConfirmation()}
+                  {renderBidValidityConfirmation()}
                 </>
               )}
 
@@ -1449,8 +1567,11 @@ export default function BOQSection({
               {/* Total Estimated Cost confirmation */}
               {renderEstimatedCostConfirmation()}
 
-              {/* Tender Validity confirmation */}
-              {renderTenderValidityConfirmation()}
+              {/* Completion Period confirmation */}
+              {renderCompletionPeriodConfirmation()}
+
+              {/* Bid Validity confirmation (optional — never blocks Finalize) */}
+              {renderBidValidityConfirmation()}
 
               {/* Financial Summary Card */}
               {renderSummaryCard()}

@@ -80,15 +80,28 @@ export interface BOQData {
    *  moment the underlying cost estimate changes. */
   estimatedCostConfirmedValue?: number | null;
 
-  // Tender Validity — detected from raw tender text (or the AI's
-  // execution_duration summary as a weaker fallback signal), confirmed
-  // before Finalize. No calculation currently consumes this number; it's a
-  // confirmed, displayed fact and a Finalize gate only — see
-  // detectTenderValidity.ts.
-  tenderValidityDays?: number | null;
-  tenderValidityConfirmed?: boolean;
-  tenderValidityConfidence?: number;      // 0-100
-  tenderValidityReason?: string;          // decision log, mirrors gstCessDetectionReason
+  // Two genuinely different tender concepts, kept as separate fields — see
+  // detectTenderValidity.ts. Both detected from raw tender text (Completion
+  // Period also falls back to the AI's execution_duration summary at lower
+  // confidence). No calculation currently consumes either number; they're
+  // confirmed, displayed facts.
+  //   Bid Validity      — how long the submitted bid offer stays open.
+  //                        Captured/confirmable, but does NOT block Finalize
+  //                        — many tenders never state it, nothing calculates
+  //                        from it.
+  //   Completion Period — how long executing the work takes. Blocks
+  //                        Finalize until confirmed (the field the original
+  //                        "profit depends on the execution period"
+  //                        rationale was actually about).
+  bidValidityDays?: number | null;
+  bidValidityConfirmed?: boolean;
+  bidValidityConfidence?: number;         // 0-100
+  bidValidityReason?: string;             // decision log, mirrors gstCessDetectionReason
+
+  completionPeriodDays?: number | null;
+  completionPeriodConfirmed?: boolean;
+  completionPeriodConfidence?: number;    // 0-100
+  completionPeriodReason?: string;        // decision log, mirrors gstCessDetectionReason
 
   // Statutory additions on top of the net quoted amount — cess applied
   // first, then GST on the cess-inclusive total (see applyCessAndGst in
@@ -122,7 +135,8 @@ export interface BOQData {
     gstIncluded?: true;
     bidBasis?: true;
     scheduleValue?: true;
-    tenderValidity?: true;
+    bidValidity?: true;
+    completionPeriod?: true;
   };
 
   // Tracking
@@ -166,10 +180,13 @@ export interface BidSnapshot {
   pricingMethod?: string;        // e.g. "Percentage Rate", "Item Rate", "Lump Sum / Package"
   bidPercent?: number;           // = percentage, re-exposed under an unambiguous name
 
-  // Confirmed Expected Revenue and Tender Validity at finalize time —
-  // distinct from quotedScheduleAmount (see resolveExpectedRevenueConfirmation).
+  // Confirmed Expected Revenue and validity/completion figures at finalize
+  // time — distinct from quotedScheduleAmount (see
+  // resolveExpectedRevenueConfirmation). bidValidityDays is informational
+  // only (never gated Finalize); completionPeriodDays is the one that did.
   expectedRevenue?: number;
-  tenderValidityDays?: number;
+  bidValidityDays?: number;
+  completionPeriodDays?: number;
 
   remarks: string;
   createdAt: any;

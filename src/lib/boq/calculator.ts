@@ -66,7 +66,7 @@ export function getBidWarnings(
 }
 
 export function fmtINR(n: number): string {
-  return '₹' + n.toLocaleString('en-IN');
+  return '₹' + n.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
 export interface CessGstBreakdown {

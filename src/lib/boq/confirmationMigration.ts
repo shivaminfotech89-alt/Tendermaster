@@ -32,8 +32,22 @@ export function inferLegacyConfirmations(boq: BOQData): Partial<BOQData> {
     patch.estimatedCostConfirmedValue = boq.totalCost;
   }
 
-  if (boq.tenderValidityConfirmed === undefined) {
-    patch.tenderValidityConfirmed = true;
+  // Legacy field rename: the original single "Tender Validity" concept
+  // (tenderValidityDays/tenderValidityConfirmed) predates the Bid
+  // Validity/Completion Period split and no longer exists on BOQData — but a
+  // project saved during that window may still have it in Firestore. Map it
+  // onto completionPeriodDays/completionPeriodConfirmed once (Completion
+  // Period, which blocks Finalize, was the dominant real-world shape that
+  // field was standing in for — Bid Validity is a new, non-blocking split
+  // with no old equivalent, so it isn't grandfathered here at all). Falls
+  // through to the same "just grandfather it in" rule as the other gates
+  // when there's no old field to carry forward either.
+  const legacy = boq as unknown as { tenderValidityDays?: number | null; tenderValidityConfirmed?: boolean };
+  if (boq.completionPeriodDays === undefined && legacy.tenderValidityDays != null) {
+    patch.completionPeriodDays = legacy.tenderValidityDays;
+  }
+  if (boq.completionPeriodConfirmed === undefined) {
+    patch.completionPeriodConfirmed = legacy.tenderValidityConfirmed ?? true;
   }
 
   if (boq.expectedRevenueConfirmed === undefined && boq.quotedAmount != null) {

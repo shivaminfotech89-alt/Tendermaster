@@ -1,5 +1,23 @@
 import { describe, test, expect } from 'vitest';
-import { applyCessAndGst, netBidAmount, resolveGstCalculationMode } from './calculator';
+import { applyCessAndGst, netBidAmount, resolveGstCalculationMode, fmtINR } from './calculator';
+
+describe('fmtINR', () => {
+  test('always shows exactly 2 decimals, even for a whole number', () => {
+    expect(fmtINR(5842000)).toBe('₹58,42,000.00');
+  });
+
+  test('preserves an exact 2-decimal value — the ₹48,265.33 regression case', () => {
+    expect(fmtINR(48265.33)).toBe('₹48,265.33');
+  });
+
+  test('rounds a 3rd-decimal value to 2 decimals rather than truncating', () => {
+    expect(fmtINR(48265.336)).toBe('₹48,265.34');
+  });
+
+  test('single-decimal input is padded to 2', () => {
+    expect(fmtINR(100.5)).toBe('₹100.50');
+  });
+});
 
 describe('applyCessAndGst', () => {
   // Real Schedule-B fixture (scripts/fixtures/3__Schedule_-_B_online_copy.pdf):

@@ -220,3 +220,31 @@ export function pickScheduleMatchingCandidateIndex(
   });
   return bestIdx;
 }
+
+/** Relative tolerance for treating a candidate's value as "the same figure,
+ *  just AI-rounded" rather than a genuinely different number. */
+const EXACT_SCHEDULE_SUM_TOLERANCE = 0.005; // 0.5%
+
+/**
+ * The AI's `value_number` field for a schedule-derived candidate is
+ * sometimes a rounded transcription of the real figure (e.g. 48266) even
+ * though the real extracted schedule sum is known precisely (48265.33,
+ * BOQViewer's meta.totalAmount — ground truth, summed from real item
+ * amounts) and the candidate's own `value_raw` string already says
+ * "₹48,265.33". When a candidate is within a tight tolerance of scheduleSum
+ * — i.e. it's plausibly the same number, just imprecisely transcribed —
+ * prefer the exact scheduleSum over the candidate's own value. Outside that
+ * tolerance (no schedule-shaped candidate exists at all; the closest
+ * available one is still a distant, unrelated figure) the candidate's own
+ * value is left untouched — never silently substitutes an unrelated number
+ * under that candidate's citation/page/clause.
+ */
+export function preferExactScheduleSum(
+  candidateValue: number | null | undefined,
+  scheduleSum: number | null | undefined,
+): number | null | undefined {
+  if (candidateValue == null) return scheduleSum ?? candidateValue;
+  if (scheduleSum == null || scheduleSum <= 0) return candidateValue;
+  const diff = Math.abs(candidateValue - scheduleSum);
+  return diff <= scheduleSum * EXACT_SCHEDULE_SUM_TOLERANCE ? scheduleSum : candidateValue;
+}

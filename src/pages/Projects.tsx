@@ -249,6 +249,8 @@ export default function Projects() {
                   const closingDate = t.details?.timeline_and_milestones?.submission_deadline || "TBD";
                   const score = t.details?.compatibility?.score;
                   const isActive = t.details?.tender_simplified?.is_active ?? true;
+                  const projectTitle = t.projectName || "Unnamed Project";
+                  const cardTenderName = t.details?.tender_simplified?.tender_name;
                   return (
                     <div
                       key={t.id}
@@ -259,7 +261,10 @@ export default function Projects() {
                         <div className="flex items-start gap-2 min-w-0">
                           <span className="text-xs text-slate-400 font-medium pt-0.5 shrink-0 tabular-nums">{index + 1}.</span>
                           <div className="min-w-0">
-                            <div className="text-sm font-bold text-blue-800 line-clamp-2">{t.projectName || "Unnamed Project"}</div>
+                            <div className="text-sm font-bold text-blue-800 line-clamp-2">{projectTitle}</div>
+                            {cardTenderName && cardTenderName !== projectTitle && (
+                              <div className="text-xs text-slate-400 line-clamp-1 mt-0.5">{cardTenderName}</div>
+                            )}
                             {t.savedAt && <div className="text-[10px] text-slate-400 mt-0.5">Saved {fmtDate(t.savedAt)}</div>}
                           </div>
                         </div>

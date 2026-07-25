@@ -27,7 +27,7 @@ import { netBidAmount } from "../lib/boq/calculator";
 import { extractAnalysisText, extractBidRecommendationEstimatedValue } from "../lib/boq/detectBoqType";
 import { buildRateContractHint, resolveRateContractRevenue } from "../lib/boq/detectRateContract";
 import { detectGstCess } from "../lib/boq/detectGstCess";
-import { detectTenderValidity } from "../lib/boq/detectTenderValidity";
+import { detectBidValidity, detectCompletionPeriod } from "../lib/boq/detectTenderValidity";
 import { inferLegacyConfirmations } from "../lib/boq/confirmationMigration";
 
 function formatFileSize(bytes: number): string {
@@ -402,15 +402,27 @@ export default function ProjectDetails() {
         });
       }
 
-      // Tender Validity detection — same call site, same sticky-override
-      // pattern as GST/Cess above.
-      if (!boq.manualOverride?.tenderValidity) {
-        const validity = detectTenderValidity(extraction.rawText, project?.details?.timeline_and_milestones?.execution_duration);
+      // Bid Validity / Completion Period detection — same call site, same
+      // sticky-override pattern as GST/Cess above. Two genuinely different
+      // tender concepts, detected and stored separately (see
+      // detectTenderValidity.ts's own docs for why).
+      if (!boq.manualOverride?.bidValidity) {
+        const bidValidity = detectBidValidity(extraction.rawText);
         handleBoqChange({
           ...boq,
-          tenderValidityDays: validity.days ?? boq.tenderValidityDays,
-          tenderValidityConfidence: validity.confidence,
-          tenderValidityReason: validity.reason,
+          bidValidityDays: bidValidity.days ?? boq.bidValidityDays,
+          bidValidityConfidence: bidValidity.confidence,
+          bidValidityReason: bidValidity.reason,
+        });
+      }
+
+      if (!boq.manualOverride?.completionPeriod) {
+        const completionPeriod = detectCompletionPeriod(extraction.rawText, project?.details?.timeline_and_milestones?.execution_duration);
+        handleBoqChange({
+          ...boq,
+          completionPeriodDays: completionPeriod.days ?? boq.completionPeriodDays,
+          completionPeriodConfidence: completionPeriod.confidence,
+          completionPeriodReason: completionPeriod.reason,
         });
       }
 
@@ -440,7 +452,7 @@ export default function ProjectDetails() {
         if (docSnap.exists()) {
           const data = docSnap.data();
           setProject(data);
-          setProjectName(data.projectName || data.details?.tender_simplified?.scope_of_work || "Unnamed Project");
+          setProjectName(data.projectName || data.details?.tender_simplified?.tender_name || "Unnamed Project");
           
           if (data.materials) setMaterials(data.materials);
           else if (data.details?.financial_estimate?.material_costs) {
@@ -1574,7 +1586,7 @@ export default function ProjectDetails() {
                    onKeyDown={(e) => e.key === 'Enter' && handleSaveName()}
                  />
                  <button onClick={handleSaveName} className="text-emerald-600 p-2 hover:bg-emerald-50 rounded"><Check className="w-5 h-5"/></button>
-                 <button onClick={() => { setIsEditingName(false); setProjectName(project.projectName || project.details?.tender_simplified?.scope_of_work || "Unnamed Project"); }} className="text-slate-400 p-2 hover:bg-slate-100 rounded"><X className="w-5 h-5"/></button>
+                 <button onClick={() => { setIsEditingName(false); setProjectName(project.projectName || project.details?.tender_simplified?.tender_name || "Unnamed Project"); }} className="text-slate-400 p-2 hover:bg-slate-100 rounded"><X className="w-5 h-5"/></button>
                </div>
              ) : (
                <div className="flex items-center gap-3">
@@ -1582,6 +1594,12 @@ export default function ProjectDetails() {
                  <button onClick={() => setIsEditingName(true)} className="text-slate-400 hover:text-indigo-600 transition-colors p-1 rounded-md hover:bg-slate-100"><Edit2 className="w-4 h-4" /></button>
                </div>
              )}
+             {(() => {
+               const tenderName = project.details?.tender_simplified?.tender_name;
+               return tenderName && tenderName !== projectName
+                 ? <p className="text-sm text-slate-400 mt-0.5 line-clamp-1">{tenderName}</p>
+                 : null;
+             })()}
              <p className="text-slate-500 mt-1 flex items-center gap-2">
                 Project ID: <span className="font-mono text-xs bg-slate-100 px-2 py-0.5 rounded text-slate-700">{projectId}</span>
                 <span className={`px-2 py-0.5 rounded text-xs font-bold ${project.details?.compatibility?.score >= 80 ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-800'}`}>

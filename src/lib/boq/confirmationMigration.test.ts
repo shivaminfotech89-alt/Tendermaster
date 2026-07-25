@@ -20,7 +20,7 @@ describe('inferLegacyConfirmations', () => {
     const patch = inferLegacyConfirmations(boq);
     expect(patch.manualOverride?.gstIncluded).toBe(true);
     expect(patch.estimatedCostConfirmedValue).toBe(500000);
-    expect(patch.tenderValidityConfirmed).toBe(true);
+    expect(patch.completionPeriodConfirmed).toBe(true);
     expect(patch.expectedRevenueConfirmed).toBe(true);
     expect(patch.expectedRevenueConfirmedValue).toBe(950000);
   });
@@ -34,7 +34,7 @@ describe('inferLegacyConfirmations', () => {
     };
     const patch = inferLegacyConfirmations(boq);
     expect(patch.estimatedCostConfirmedValue).toBe(500000);
-    expect(patch.tenderValidityConfirmed).toBe(true);
+    expect(patch.completionPeriodConfirmed).toBe(true);
     expect(patch.expectedRevenueConfirmed).toBe(true);
   });
 
@@ -95,15 +95,66 @@ describe('inferLegacyConfirmations', () => {
     expect(patch.manualOverride).toBeUndefined();
   });
 
-  test('legacy project already re-gated by an explicit user change (tenderValidityConfirmed already false, not undefined): not re-grandfathered', () => {
+  test('legacy project already re-gated on the NEW field (completionPeriodConfirmed already false, not undefined): not re-grandfathered', () => {
     const boq = {
       ...INITIAL_BOQ,
       finalisedAt: { seconds: 123 },
-      tenderValidityConfirmed: false,
+      completionPeriodConfirmed: false,
       totalCost: 500000,
       quotedAmount: 950000,
     };
     const patch = inferLegacyConfirmations(boq);
-    expect(patch.tenderValidityConfirmed).toBeUndefined();
+    expect(patch.completionPeriodConfirmed).toBeUndefined();
+  });
+
+  test('legacy field rename: old tenderValidityDays/tenderValidityConfirmed (pre-split, still in Firestore) map onto completionPeriodDays/completionPeriodConfirmed', () => {
+    const boq = {
+      ...INITIAL_BOQ,
+      finalisedAt: { seconds: 123 },
+      totalCost: 500000,
+      quotedAmount: 950000,
+      tenderValidityDays: 360,
+      tenderValidityConfirmed: true,
+    } as any;
+    const patch = inferLegacyConfirmations(boq);
+    expect(patch.completionPeriodDays).toBe(360);
+    expect(patch.completionPeriodConfirmed).toBe(true);
+  });
+
+  test('legacy field rename: old field present but never confirmed (mid-flow) -> preserved as unconfirmed, not silently grandfathered to true', () => {
+    const boq = {
+      ...INITIAL_BOQ,
+      finalisedAt: { seconds: 123 },
+      totalCost: 500000,
+      quotedAmount: 950000,
+      tenderValidityDays: 360,
+      tenderValidityConfirmed: false,
+    } as any;
+    const patch = inferLegacyConfirmations(boq);
+    expect(patch.completionPeriodDays).toBe(360);
+    expect(patch.completionPeriodConfirmed).toBe(false);
+  });
+
+  test('legacy project with no old field at all: falls through to the plain grandfather-in-as-confirmed rule', () => {
+    const boq = {
+      ...INITIAL_BOQ,
+      finalisedAt: { seconds: 123 },
+      totalCost: 500000,
+      quotedAmount: 950000,
+    };
+    const patch = inferLegacyConfirmations(boq);
+    expect(patch.completionPeriodDays).toBeUndefined();
+    expect(patch.completionPeriodConfirmed).toBe(true);
+  });
+
+  test('Bid Validity is never grandfathered — new, non-blocking split with no old equivalent', () => {
+    const boq = {
+      ...INITIAL_BOQ,
+      finalisedAt: { seconds: 123 },
+      totalCost: 500000,
+      quotedAmount: 950000,
+    };
+    const patch = inferLegacyConfirmations(boq);
+    expect(patch.bidValidityConfirmed).toBeUndefined();
   });
 });

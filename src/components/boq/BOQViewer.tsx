@@ -82,7 +82,7 @@ const BID_STATUS_STYLE: Record<BidStatus, string> = {
 };
 
 function fmtIndian(n: number): string {
-  return new Intl.NumberFormat('en-IN', { maximumFractionDigits: 2 }).format(n);
+  return new Intl.NumberFormat('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n);
 }
 
 function SortIcon({ field, sortField, sortDir }: { field: SortField; sortField: SortField; sortDir: SortDir }) {

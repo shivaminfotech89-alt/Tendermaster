@@ -356,6 +356,8 @@ export default function Dashboard() {
               {upcomingList.map(t => {
                 const days = daysUntil(t._dl!);
                 const urgent = days <= 3;
+                const tenderName = t.details?.tender_simplified?.tender_name;
+                const title = t.projectName || tenderName || "Unnamed Tender";
                 return (
                   <li
                     key={t.id}
@@ -363,9 +365,10 @@ export default function Dashboard() {
                     className="px-5 py-3.5 flex items-center justify-between gap-3 hover:bg-slate-50 cursor-pointer transition-colors"
                   >
                     <div className="min-w-0">
-                      <p className="text-sm font-medium text-slate-800 truncate">
-                        {t.projectName || t.details?.tender_simplified?.tender_name || "Unnamed Tender"}
-                      </p>
+                      <p className="text-sm font-medium text-slate-800 truncate">{title}</p>
+                      {tenderName && tenderName !== title && (
+                        <p className="text-xs text-slate-400 truncate">{tenderName}</p>
+                      )}
                       <p className="text-xs text-slate-400 mt-0.5">{fmtDate(t._dl!)}</p>
                     </div>
                     <span className={`shrink-0 text-xs font-bold px-2.5 py-1 rounded-full ${urgent ? "bg-rose-100 text-rose-700" : "bg-amber-100 text-amber-700"}`}>
@@ -410,6 +413,8 @@ export default function Dashboard() {
                     ? "bg-amber-50 text-amber-700"
                     : "bg-slate-100 text-slate-500";
                 const savedDate = t.savedAt?.toDate?.();
+                const tenderName = t.details?.tender_simplified?.tender_name;
+                const title = t.projectName || tenderName || "Unnamed Tender";
                 return (
                   <li
                     key={t.id}
@@ -417,9 +422,10 @@ export default function Dashboard() {
                     className="px-5 py-3.5 flex items-center justify-between gap-3 hover:bg-slate-50 cursor-pointer transition-colors"
                   >
                     <div className="min-w-0">
-                      <p className="text-sm font-medium text-slate-800 truncate">
-                        {t.projectName || t.details?.tender_simplified?.tender_name || "Unnamed Tender"}
-                      </p>
+                      <p className="text-sm font-medium text-slate-800 truncate">{title}</p>
+                      {tenderName && tenderName !== title && (
+                        <p className="text-xs text-slate-400 truncate">{tenderName}</p>
+                      )}
                       <p className="text-xs text-slate-400 mt-0.5">
                         {savedDate ? fmtDate(savedDate) : "—"}
                       </p>

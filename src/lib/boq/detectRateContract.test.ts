@@ -3,7 +3,7 @@ import type { BoqItem } from '../../types/boq';
 import {
   detectTitleMention, detectValueRatio, detectNominalQuantities, buildRateContractHint,
   resolveRateContractRevenue, detectMisenteredScheduleAmount, pickScheduleMatchingCandidateIndex,
-  resolveExpectedRevenueConfirmation,
+  resolveExpectedRevenueConfirmation, preferExactScheduleSum,
 } from './detectRateContract';
 
 function item(quantity: number): BoqItem {
@@ -256,5 +256,49 @@ describe('resolveExpectedRevenueConfirmation', () => {
     const r = resolveExpectedRevenueConfirmation(rcr, false, null);
     expect(r.gated).toBe(true);
     expect(r.revenue).toBeNull();
+  });
+});
+
+describe('preferExactScheduleSum', () => {
+  test('Bareja-shaped regression: AI-rounded candidate (48266) within tolerance of the exact scheduleSum (48265.33) -> uses the exact figure', () => {
+    expect(preferExactScheduleSum(48266, 48265.33)).toBe(48265.33);
+  });
+
+  test('candidate already exactly matches scheduleSum -> unchanged (no-op substitution)', () => {
+    expect(preferExactScheduleSum(48265.33, 48265.33)).toBe(48265.33);
+  });
+
+  test('candidate is a genuinely different, unrelated figure (no schedule-shaped candidate exists) -> left untouched, not silently replaced', () => {
+    expect(preferExactScheduleSum(2500000, 48265.33)).toBe(2500000);
+  });
+
+  test('no scheduleSum known yet (extraction not complete) -> candidate value used as-is', () => {
+    expect(preferExactScheduleSum(48266, null)).toBe(48266);
+    expect(preferExactScheduleSum(48266, undefined)).toBe(48266);
+  });
+
+  test('no candidate value at all -> falls back to scheduleSum if known', () => {
+    expect(preferExactScheduleSum(null, 48265.33)).toBe(48265.33);
+    expect(preferExactScheduleSum(undefined, 48265.33)).toBe(48265.33);
+  });
+
+  test('no candidate and no scheduleSum -> null/undefined passes through', () => {
+    expect(preferExactScheduleSum(null, null)).toBeNull();
+    expect(preferExactScheduleSum(undefined, undefined)).toBeUndefined();
+  });
+
+  test('zero/negative scheduleSum treated as unknown -> candidate value used as-is', () => {
+    expect(preferExactScheduleSum(48266, 0)).toBe(48266);
+    expect(preferExactScheduleSum(48266, -5)).toBe(48266);
+  });
+
+  test('just outside the 0.5% tolerance -> candidate value left untouched', () => {
+    // 48265.33 * 0.5% = ~241.33 -> a diff of 300 should NOT be substituted
+    expect(preferExactScheduleSum(48565.33, 48265.33)).toBe(48565.33);
+  });
+
+  test('just inside the 0.5% tolerance -> substituted', () => {
+    // diff of 200 is within ~241.33 tolerance
+    expect(preferExactScheduleSum(48465.33, 48265.33)).toBe(48265.33);
   });
 });

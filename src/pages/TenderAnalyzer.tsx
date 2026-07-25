@@ -22,6 +22,8 @@ import BOQSection from "../components/boq/BOQSection";
 import type { BOQData } from "../lib/boq/types";
 import { INITIAL_BOQ } from "../lib/boq/types";
 import { detectBoqTypeFromText } from "../lib/boq/detectBoqType";
+import { detectGstCess } from "../lib/boq/detectGstCess";
+import { detectBidValidity, detectCompletionPeriod } from "../lib/boq/detectTenderValidity";
 import { removeUndefined } from "../lib/firestore";
 import { extractBoqWithFallback } from "../services/boqExtractionOrchestrator";
 
@@ -743,6 +745,69 @@ export default function TenderAnalyzer() {
                 parserDurationMs: telemetry.parserDurationMs,
                 updatedAt: serverTimestamp(),
               }));
+
+              // GST/Cess + Bid Validity + Completion Period detection — the
+              // main "analyze a tender" flow never ran any of these before;
+              // only ProjectDetails.tsx's manual re-extract did, so a
+              // freshly analyzed tender got no auto-fill at all until the
+              // user later reopened the project. Own try/catch: the 'done'
+              // status above is already committed by the time this runs, so
+              // a detector throwing must never turn a successful extraction
+              // into a reported failure.
+              try {
+                const gstCess = detectGstCess(extraction.rawText);
+                const bidValidity = detectBidValidity(extraction.rawText);
+                const completionPeriod = detectCompletionPeriod(extraction.rawText, data.analysis?.timeline_and_milestones?.execution_duration);
+
+                // boq is still INITIAL_BOQ-derived here — this fires right
+                // after a fresh analysis, before the user has ever reached
+                // BOQSection's UI, so manualOverride cannot yet be set;
+                // reading the outer closure for this gate is safe. The
+                // actual state merge below is still a proper functional
+                // update — never a stale full-object spread — since this
+                // async callback's closed-over `boq` can otherwise be stale
+                // by the time it runs. Never write a field on a miss either:
+                // a miss is confidence 30 + a "no signal" reason, and
+                // writing that would overwrite a real detection (or an
+                // already-good display) with noise.
+                const detectionPatch: Partial<BOQData> = {};
+                if (!boq.manualOverride?.gstIncluded && gstCess.gstIncluded !== 'unknown') {
+                  detectionPatch.gstIncluded = gstCess.gstIncluded;
+                  detectionPatch.cessPercent = gstCess.cessRate ?? boq.cessPercent;
+                  detectionPatch.gstPercent = gstCess.gstRate ?? boq.gstPercent;
+                  detectionPatch.gstCessConfidence = gstCess.confidence;
+                  detectionPatch.gstCessDetectionReason = gstCess.reason;
+                }
+                if (!boq.manualOverride?.bidValidity && bidValidity.days != null) {
+                  detectionPatch.bidValidityDays = bidValidity.days;
+                  detectionPatch.bidValidityLabel = bidValidity.label;
+                  detectionPatch.bidValidityConfidence = bidValidity.confidence;
+                  detectionPatch.bidValidityReason = bidValidity.reason;
+                }
+                if (!boq.manualOverride?.completionPeriod && completionPeriod.days != null) {
+                  detectionPatch.completionPeriodDays = completionPeriod.days;
+                  detectionPatch.completionPeriodLabel = completionPeriod.label;
+                  detectionPatch.completionPeriodConfidence = completionPeriod.confidence;
+                  detectionPatch.completionPeriodReason = completionPeriod.reason;
+                }
+
+                if (Object.keys(detectionPatch).length > 0) {
+                  setBoq(prev => ({ ...prev, ...detectionPatch }));
+                  // TenderAnalyzer's local boq state isn't otherwise synced
+                  // to Firestore (unlike ProjectDetails.tsx's debounced
+                  // handleBoqChange) — mirror the existing boq.boqType write
+                  // just above via the same dot-notation updateDoc pattern,
+                  // so the auto-fill survives even if the user navigates
+                  // away before any other save happens.
+                  if (data.projectId) {
+                    const firestorePatch: Record<string, unknown> = {};
+                    Object.entries(detectionPatch).forEach(([k, v]) => { firestorePatch[`boq.${k}`] = v; });
+                    updateDoc(doc(db, 'saved_tenders', data.projectId), removeUndefined(firestorePatch)).catch(console.error);
+                  }
+                }
+              } catch (detErr) {
+                console.warn('[BOQ] GST/validity detection failed (non-fatal):', detErr);
+              }
             } catch (err: any) {
               setDoc(latestRef, removeUndefined({
                 status: 'failed',

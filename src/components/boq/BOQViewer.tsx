@@ -420,6 +420,39 @@ export default function BOQViewer({ projectId, onProceedToPricing, onManualExtra
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isGridMode, itemRateTotals.estimatedAmount, itemRateTotals.quotedAmount, itemRateTotals.pricedItemCount]);
 
+  // Six-column summary rows appended after the item rows in both exports —
+  // label in column 5 (under "Est. Rate (Rs)"), value in column 6 (under
+  // "Amount (Rs)"), so they align visually with the item table above them.
+  // Reads only fields BOQSection's cess/GST sync effect already computed and
+  // stored on `boq` — never recomputes, never shows a guessed figure while
+  // GST treatment is unresolved (cessAmount/gstAmount/roundedTotal are all
+  // undefined in that case, so those rows simply don't emit). An
+  // unprepared/unpriced bid exports unchanged — no summary rows at all.
+  const exportSummaryRows = (): (string | number)[][] => {
+    const rows: (string | number)[][] = [];
+    if (meta?.totalAmount != null) {
+      rows.push(['', '', '', '', 'Schedule Total (Rs)', meta.totalAmount]);
+    }
+    if (boqType === 'percentage_rate' && boq?.percentage != null) {
+      const bidPctLabel = boq.percentage === 0 ? 'At Par' : `${boq.percentage}% ${boq.aboveBelow ?? 'above'}`;
+      rows.push(['', '', '', '', 'Bid %', bidPctLabel]);
+    }
+    if (boq?.quotedAmount != null) {
+      rows.push(['', '', '', '', 'Quoted Amount (Rs)', boq.quotedAmount]);
+    }
+    if (boq?.cessAmount != null && boq.cessAmount > 0) {
+      rows.push(['', '', '', '', `Welfare Cess @ ${boq.cessPercent ?? 0}% (Rs)`, boq.cessAmount]);
+    }
+    if (boq?.gstAmount != null && boq.gstAmount > 0) {
+      rows.push(['', '', '', '', `GST @ ${boq.gstPercent ?? 0}% (Rs)`, boq.gstAmount]);
+    }
+    const finalTotal = boq?.roundedTotal ?? boq?.totalWithGst;
+    if (finalTotal != null) {
+      rows.push(['', '', '', '', 'Final Total incl. GST (Rs)', finalTotal]);
+    }
+    return rows;
+  };
+
   const exportCsv = () => {
     const rows = [
       ['Item No', 'Description', 'Unit', 'Quantity', 'Est. Rate (Rs)', 'Amount (Rs)'],
@@ -427,6 +460,7 @@ export default function BOQViewer({ projectId, onProceedToPricing, onManualExtra
         it.itemNo, it.description, it.unit, it.quantity,
         it.estimatedRate ?? '', it.amount ?? '',
       ]),
+      ...exportSummaryRows(),
     ];
     const csv = rows.map(r =>
       r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(','),
@@ -448,6 +482,10 @@ export default function BOQViewer({ projectId, onProceedToPricing, onManualExtra
       'Amount (Rs)': it.amount ?? '',
     }));
     const ws = XLSX.utils.json_to_sheet(data);
+    // sheet_add_aoa (array-of-arrays), not sheet_add_json — json would
+    // re-key each row by its own object keys and misalign columns against
+    // the item table above it.
+    XLSX.utils.sheet_add_aoa(ws, exportSummaryRows(), { origin: -1 });
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'BOQ');
     XLSX.writeFile(wb, 'boq.xlsx');
@@ -651,9 +689,14 @@ export default function BOQViewer({ projectId, onProceedToPricing, onManualExtra
           Order: Tender Value -> Schedule-B Amount -> Bid % -> Quoted Schedule
           Amount — never "Final Bid Amount" here, it is a quoted figure
           against the schedule, not a contract total. */}
-      {boqType === 'percentage_rate' && (
+      {boqType === 'percentage_rate' && (() => {
+        // Reads BOQSection's already-synced cess/GST fields — never
+        // recomputes, never shows a guessed figure while GST treatment is
+        // still unresolved (both are undefined in that case).
+        const finalTotal = boq?.roundedTotal ?? boq?.totalWithGst;
+        return (
         <div className="rounded-xl border border-indigo-100 bg-indigo-50/50 px-5 py-4">
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+          <div className={`grid grid-cols-2 gap-4 ${finalTotal != null ? 'sm:grid-cols-5' : 'sm:grid-cols-4'}`}>
             <div>
               <p className="text-xs font-medium text-indigo-500 uppercase tracking-wide mb-1">Tender Value</p>
               <p className="text-lg font-bold text-indigo-900">
@@ -683,6 +726,19 @@ export default function BOQViewer({ projectId, onProceedToPricing, onManualExtra
                 {boq?.quotedAmount != null ? fmtIndian(boq.quotedAmount) : '--'}
               </p>
             </div>
+            {finalTotal != null && (
+              <div>
+                <p className="text-xs font-medium text-emerald-600 uppercase tracking-wide mb-1">Final Total (incl. GST)</p>
+                <p className="text-lg font-bold text-emerald-800">
+                  {fmtIndian(finalTotal)}
+                </p>
+                {(boq?.gstAmount ?? 0) > 0 && (
+                  <p className="text-[10px] text-emerald-500">
+                    incl. GST {fmtIndian(boq!.gstAmount!)}{(boq?.cessAmount ?? 0) > 0 ? ` + Cess ${fmtIndian(boq!.cessAmount!)}` : ''}
+                  </p>
+                )}
+              </div>
+            )}
           </div>
           {boq?.estimatedAmount == null && (
             <p className="text-xs text-indigo-700 mt-3">
@@ -693,7 +749,8 @@ export default function BOQViewer({ projectId, onProceedToPricing, onManualExtra
             Percentage-rate tenders submit a single percentage and total — these figures are presentational only, not per-item rates.
           </p>
         </div>
-      )}
+        );
+      })()}
 
       {/* Table */}
       {isGridMode ? (

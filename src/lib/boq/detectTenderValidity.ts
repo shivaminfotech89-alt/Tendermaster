@@ -1,9 +1,36 @@
 export interface ValidityDetectionResult {
   days: number | undefined;
+  /** Exactly as written/detected, e.g. "12 Months", "2 Years" — what the UI
+   *  should display. Built from the same number+unit match that produces
+   *  `days`, never reverse-derived from `days` afterward (lossy/ambiguous:
+   *  360 days could mean 12 months or 360 days). Undefined whenever `days`
+   *  is undefined. */
+  label: string | undefined;
   /** 0-100. Never a guess — undefined days with low confidence is the
    *  explicit default when no signal is found. */
   confidence: number;
   reason: string;
+}
+
+/**
+ * Shared formatter — the one place a period gets turned into display text.
+ * Used by both detectors below (at the point their own regex match still has
+ * the original number+unit, before it's discarded) and by BOQSection.tsx's
+ * manual Months/Years entry, so all three producers of a period label agree
+ * on pluralization/casing.
+ */
+export function formatPeriodLabel(n: number, unit: 'days' | 'months' | 'years'): string {
+  const singular = n === 1;
+  if (unit === 'months') return `${n} ${singular ? 'Month' : 'Months'}`;
+  if (unit === 'years') return `${n} ${singular ? 'Year' : 'Years'}`;
+  return `${n} ${singular ? 'Day' : 'Days'}`;
+}
+
+function normalizeUnit(raw: string): 'days' | 'months' | 'years' {
+  const u = raw.toLowerCase();
+  if (u.startsWith('month')) return 'months';
+  if (u.startsWith('year')) return 'years';
+  return 'days';
 }
 
 // Two genuinely different tender concepts, kept as separate detectors/fields
@@ -43,15 +70,17 @@ export function detectBidValidity(rawText: string): ValidityDetectionResult {
     const m = BID_VALIDITY_RE.exec(rawText);
     if (m) {
       const n = parseInt(m[1], 10);
+      const unit = normalizeUnit(m[2]);
       const days = toDays(n, m[2]);
       return {
         days,
+        label: formatPeriodLabel(n, unit),
         confidence: 90,
         reason: `Tender text: "${m[0].trim()}" — ${n} ${m[2]} (~${days} days)`,
       };
     }
   }
-  return { days: undefined, confidence: 30, reason: 'No Bid Validity / Tender Validity signal found' };
+  return { days: undefined, label: undefined, confidence: 30, reason: 'No Bid Validity / Tender Validity signal found' };
 }
 
 /**
@@ -67,9 +96,11 @@ export function detectCompletionPeriod(
     const m = COMPLETION_PERIOD_RE.exec(rawText);
     if (m) {
       const n = parseInt(m[1], 10);
+      const unit = normalizeUnit(m[2]);
       const days = toDays(n, m[2]);
       return {
         days,
+        label: formatPeriodLabel(n, unit),
         confidence: 90,
         reason: `Tender text: "${m[0].trim()}" — ${n} ${m[2]} (~${days} days)`,
       };
@@ -80,14 +111,16 @@ export function detectCompletionPeriod(
     const m = NUMBER_UNIT_RE.exec(executionDurationText);
     if (m) {
       const n = parseInt(m[1], 10);
+      const unit = normalizeUnit(m[2]);
       const days = toDays(n, m[2]);
       return {
         days,
+        label: formatPeriodLabel(n, unit),
         confidence: 55,
         reason: `AI-summarized execution duration (capped lower — not a primary signal): "${executionDurationText.trim()}" — ${n} ${m[2]} (~${days} days)`,
       };
     }
   }
 
-  return { days: undefined, confidence: 30, reason: 'No Completion Period / execution duration signal found' };
+  return { days: undefined, label: undefined, confidence: 30, reason: 'No Completion Period / execution duration signal found' };
 }

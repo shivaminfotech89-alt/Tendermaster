@@ -1,16 +1,29 @@
 import { describe, test, expect } from 'vitest';
-import { detectBidValidity, detectCompletionPeriod } from './detectTenderValidity';
+import { detectBidValidity, detectCompletionPeriod, formatPeriodLabel } from './detectTenderValidity';
+
+describe('formatPeriodLabel', () => {
+  test('pluralizes correctly for each unit', () => {
+    expect(formatPeriodLabel(1, 'days')).toBe('1 Day');
+    expect(formatPeriodLabel(45, 'days')).toBe('45 Days');
+    expect(formatPeriodLabel(1, 'months')).toBe('1 Month');
+    expect(formatPeriodLabel(12, 'months')).toBe('12 Months');
+    expect(formatPeriodLabel(1, 'years')).toBe('1 Year');
+    expect(formatPeriodLabel(2, 'years')).toBe('2 Years');
+  });
+});
 
 describe('detectBidValidity', () => {
-  test('"Bid Validity: 180 Days" -> high confidence, 180 days', () => {
+  test('"Bid Validity: 180 Days" -> high confidence, 180 days, label "180 Days"', () => {
     const r = detectBidValidity('Clause 12: Bid Validity: 180 Days from the date of opening of the bid.');
     expect(r.days).toBe(180);
+    expect(r.label).toBe('180 Days');
     expect(r.confidence).toBeGreaterThanOrEqual(90);
   });
 
   test('"Tender Validity" phrasing also matches', () => {
     const r = detectBidValidity('Tender Validity shall be 90 days from the last date of submission.');
     expect(r.days).toBe(90);
+    expect(r.label).toBe('90 Days');
   });
 
   test('does NOT match Completion Period phrasing (the two concepts stay separate)', () => {
@@ -19,9 +32,10 @@ describe('detectBidValidity', () => {
     expect(r.confidence).toBeLessThan(50);
   });
 
-  test('no signal -> undefined days, low confidence, never guesses', () => {
+  test('no signal -> undefined days, undefined label, low confidence, never guesses', () => {
     const r = detectBidValidity('This tender is for construction of a community hall.');
     expect(r.days).toBeUndefined();
+    expect(r.label).toBeUndefined();
     expect(r.confidence).toBeLessThan(50);
   });
 
@@ -32,9 +46,10 @@ describe('detectBidValidity', () => {
 });
 
 describe('detectCompletionPeriod', () => {
-  test('the real-world regression case: "Period of Completion: 12 Months" -> 360 days', () => {
+  test('the real-world regression case: "Period of Completion: 12 Months" -> 360 days, label "12 Months" (exactly as written)', () => {
     const r = detectCompletionPeriod('Special Conditions: Period of Completion: 12 Months from the date of work order.');
     expect(r.days).toBe(360);
+    expect(r.label).toBe('12 Months');
     expect(r.confidence).toBeGreaterThanOrEqual(90);
   });
 
@@ -68,12 +83,19 @@ describe('detectCompletionPeriod', () => {
   test('raw text signal takes priority over the AI fallback when both are present', () => {
     const r = detectCompletionPeriod('Period of Completion: 12 Months.', '6 months');
     expect(r.days).toBe(360);
+    expect(r.label).toBe('12 Months');
     expect(r.confidence).toBeGreaterThanOrEqual(90);
   });
 
-  test('no signal anywhere -> undefined days, low confidence, never guesses', () => {
+  test('AI fallback also produces a label', () => {
+    const r = detectCompletionPeriod('This tender is for construction of a community hall.', '6 months');
+    expect(r.label).toBe('6 Months');
+  });
+
+  test('no signal anywhere -> undefined days, undefined label, low confidence, never guesses', () => {
     const r = detectCompletionPeriod('This tender is for construction of a community hall.');
     expect(r.days).toBeUndefined();
+    expect(r.label).toBeUndefined();
     expect(r.confidence).toBeLessThan(50);
   });
 });

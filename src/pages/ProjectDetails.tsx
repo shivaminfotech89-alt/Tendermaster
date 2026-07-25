@@ -385,45 +385,57 @@ export default function ProjectDetails() {
         updatedAt: serverTimestamp(),
       }));
 
-      // GST/Cess detection — runs once here on the already-computed, in-memory
-      // extraction text (never persisted itself, no extraction file touched;
-      // only this structured result merges into boq). Sticky manual override:
-      // once the bidder has reviewed/edited the GST/Cess fields, re-extraction
-      // must never silently rewrite them again.
+      // GST/Cess + Bid Validity + Completion Period detection — runs once
+      // here on the already-computed, in-memory extraction text (never
+      // persisted itself, no extraction file touched; only this structured
+      // result merges into boq). Sticky manual override per field: once the
+      // bidder has reviewed/edited a field, re-extraction must never
+      // silently rewrite it again.
+      //
+      // Combined into ONE patch + ONE handleBoqChange call — three
+      // sequential handleBoqChange({...boq, ...}) calls here used to each
+      // spread the same stale `boq` snapshot (state doesn't update
+      // synchronously within this function), so the last call silently
+      // discarded whatever the first two had just detected. Never write a
+      // field on a miss either: a miss is confidence 30 + a "no signal"
+      // reason, and writing that would overwrite a real detection (or an
+      // already-good display) with noise — the gate has to happen before a
+      // field group is added to the patch, not after.
+      const detectionPatch: Partial<BOQData> = {};
+
       if (!boq.manualOverride?.gstIncluded) {
         const gstCess = detectGstCess(extraction.rawText);
-        handleBoqChange({
-          ...boq,
-          gstIncluded: gstCess.gstIncluded,
-          cessPercent: gstCess.cessRate ?? boq.cessPercent,
-          gstPercent: gstCess.gstRate ?? boq.gstPercent,
-          gstCessConfidence: gstCess.confidence,
-          gstCessDetectionReason: gstCess.reason,
-        });
+        if (gstCess.gstIncluded !== 'unknown') {
+          detectionPatch.gstIncluded = gstCess.gstIncluded;
+          detectionPatch.cessPercent = gstCess.cessRate ?? boq.cessPercent;
+          detectionPatch.gstPercent = gstCess.gstRate ?? boq.gstPercent;
+          detectionPatch.gstCessConfidence = gstCess.confidence;
+          detectionPatch.gstCessDetectionReason = gstCess.reason;
+        }
       }
 
-      // Bid Validity / Completion Period detection — same call site, same
-      // sticky-override pattern as GST/Cess above. Two genuinely different
-      // tender concepts, detected and stored separately (see
-      // detectTenderValidity.ts's own docs for why).
       if (!boq.manualOverride?.bidValidity) {
         const bidValidity = detectBidValidity(extraction.rawText);
-        handleBoqChange({
-          ...boq,
-          bidValidityDays: bidValidity.days ?? boq.bidValidityDays,
-          bidValidityConfidence: bidValidity.confidence,
-          bidValidityReason: bidValidity.reason,
-        });
+        if (bidValidity.days != null) {
+          detectionPatch.bidValidityDays = bidValidity.days;
+          detectionPatch.bidValidityLabel = bidValidity.label;
+          detectionPatch.bidValidityConfidence = bidValidity.confidence;
+          detectionPatch.bidValidityReason = bidValidity.reason;
+        }
       }
 
       if (!boq.manualOverride?.completionPeriod) {
         const completionPeriod = detectCompletionPeriod(extraction.rawText, project?.details?.timeline_and_milestones?.execution_duration);
-        handleBoqChange({
-          ...boq,
-          completionPeriodDays: completionPeriod.days ?? boq.completionPeriodDays,
-          completionPeriodConfidence: completionPeriod.confidence,
-          completionPeriodReason: completionPeriod.reason,
-        });
+        if (completionPeriod.days != null) {
+          detectionPatch.completionPeriodDays = completionPeriod.days;
+          detectionPatch.completionPeriodLabel = completionPeriod.label;
+          detectionPatch.completionPeriodConfidence = completionPeriod.confidence;
+          detectionPatch.completionPeriodReason = completionPeriod.reason;
+        }
+      }
+
+      if (Object.keys(detectionPatch).length > 0) {
+        handleBoqChange({ ...boq, ...detectionPatch });
       }
 
       console.log('[BOQ] done — extraction succeeded', {

@@ -8,6 +8,7 @@ import { toIndianWords } from '../../lib/boq/indianWords';
 import { netBidAmount, calcProfit, getBidWarnings, fmtINR, applyCessAndGst, resolveGstCalculationMode } from '../../lib/boq/calculator';
 import { detectBoqTypeFromAnalysis, extractAnalysisText, extractBidRecommendationEstimatedValue } from '../../lib/boq/detectBoqType';
 import { buildRateContractHint, resolveRateContractRevenue, detectMisenteredScheduleAmount, pickScheduleMatchingCandidateIndex, resolveExpectedRevenueConfirmation, preferExactScheduleSum } from '../../lib/boq/detectRateContract';
+import { formatPeriodLabel } from '../../lib/boq/detectTenderValidity';
 
 interface BOQSectionProps {
   analysisResult: any;
@@ -62,6 +63,7 @@ export default function BOQSection({
   const [revenueInput, setRevenueInput] = useState('');
   const [editingCompletionPeriod, setEditingCompletionPeriod] = useState(false);
   const [customCompletionPeriodInput, setCustomCompletionPeriodInput] = useState('');
+  const [completionPeriodUnit, setCompletionPeriodUnit] = useState<'months' | 'years'>('months');
   const [editingBidValidity, setEditingBidValidity] = useState(false);
   const [customBidValidityInput, setCustomBidValidityInput] = useState('');
   const [finalizing, setFinalizing] = useState(false);
@@ -489,10 +491,11 @@ export default function BOQSection({
     setRevenueInput(boq.expectedRevenueConfirmedValue?.toString() ?? '');
   };
 
-  const handleConfirmCompletionPeriod = (days: number) => {
+  const handleConfirmCompletionPeriod = (days: number, label?: string) => {
     setBoq({
       ...boq,
       completionPeriodDays: days,
+      completionPeriodLabel: label ?? (days === boq.completionPeriodDays ? boq.completionPeriodLabel : undefined),
       completionPeriodConfirmed: true,
       manualOverride: { ...boq.manualOverride, completionPeriod: true },
       boqLastChangedAt: Date.now(),
@@ -502,6 +505,7 @@ export default function BOQSection({
 
   const handleEditCompletionPeriod = () => {
     setBoq({ ...boq, completionPeriodConfirmed: false });
+    setCustomCompletionPeriodInput('');
     setEditingCompletionPeriod(true);
   };
 
@@ -511,6 +515,11 @@ export default function BOQSection({
     setBoq({
       ...boq,
       bidValidityDays: days,
+      // Preserve the detected label only when confirming that exact detected
+      // value unchanged; a manually-typed different number has no matching
+      // label and must fall back to "${days} Days" rather than showing a
+      // stale label from a previous value.
+      bidValidityLabel: days === boq.bidValidityDays ? boq.bidValidityLabel : undefined,
       bidValidityConfirmed: true,
       manualOverride: { ...boq.manualOverride, bidValidity: true },
       boqLastChangedAt: Date.now(),
@@ -520,6 +529,7 @@ export default function BOQSection({
 
   const handleEditBidValidity = () => {
     setBoq({ ...boq, bidValidityConfirmed: false });
+    setCustomBidValidityInput(boq.bidValidityDays?.toString() ?? '');
     setEditingBidValidity(true);
   };
 
@@ -1235,7 +1245,7 @@ export default function BOQSection({
         <div className="flex items-center justify-between gap-3 bg-emerald-50 border border-emerald-200 rounded-lg px-4 py-2.5">
           <div className="flex items-center gap-2 min-w-0">
             <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-            <span className="text-sm font-semibold text-emerald-800">Completion Period: {boq.completionPeriodDays} Days Confirmed</span>
+            <span className="text-sm font-semibold text-emerald-800">Completion Period: {boq.completionPeriodLabel ?? `${boq.completionPeriodDays} Days`} Confirmed</span>
           </div>
           <button onClick={handleEditCompletionPeriod} className="text-xs text-emerald-700 hover:text-emerald-900 font-medium flex items-center gap-1 shrink-0">
             <Edit2 className="w-3 h-3" /> Edit
@@ -1248,20 +1258,20 @@ export default function BOQSection({
       return (
         <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 space-y-2">
           <p className="text-xs text-amber-700">
-            Completion Period: <span className="font-bold text-amber-900">{boq.completionPeriodDays} Days</span>
+            Completion Period: <span className="font-bold text-amber-900">{boq.completionPeriodLabel ?? `${boq.completionPeriodDays} Days`}</span>
             {boq.completionPeriodConfidence != null && (
               <span className="italic"> (detected, {boq.completionPeriodConfidence}% conf.)</span>
             )}
           </p>
           <div className="flex items-center gap-2 flex-wrap">
             <button
-              onClick={() => handleConfirmCompletionPeriod(boq.completionPeriodDays!)}
+              onClick={() => handleConfirmCompletionPeriod(boq.completionPeriodDays!, boq.completionPeriodLabel)}
               className="px-3 py-1.5 text-xs font-semibold rounded bg-amber-600 text-white hover:bg-amber-700 transition-colors flex items-center gap-1"
             >
               <CheckCircle2 className="w-3.5 h-3.5" /> Confirm
             </button>
             <button
-              onClick={() => setEditingCompletionPeriod(true)}
+              onClick={handleEditCompletionPeriod}
               className="px-3 py-1.5 text-xs font-medium rounded border border-slate-300 hover:bg-slate-100 transition-colors flex items-center gap-1"
             >
               <Edit2 className="w-3.5 h-3.5" /> Edit
@@ -1271,41 +1281,44 @@ export default function BOQSection({
       );
     }
 
+    // Undetected, or editing an existing value: Months/Years entry — never
+    // raw day presets. Completion Period still gates Finalize, so unlike Bid
+    // Validity this fallback must always offer a way in.
+    const n = parseInt(customCompletionPeriodInput, 10);
+    const validCustom = isFinite(n) && n > 0;
     return (
       <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 space-y-2">
         <p className="text-xs font-semibold text-amber-800">Completion Period</p>
         {boq.completionPeriodDays == null && (
-          <p className="text-[11px] text-amber-600">Could not determine this from the tender text — select below.</p>
+          <p className="text-[11px] text-amber-600">Could not determine this from the tender text — enter it in months or years below.</p>
         )}
-        <div className="flex items-center gap-1.5 flex-wrap">
-          {[30, 60, 90, 180].map(d => (
-            <button
-              key={d}
-              onClick={() => handleConfirmCompletionPeriod(d)}
-              className="px-3 py-1.5 text-xs font-medium rounded border border-slate-300 hover:bg-slate-100 transition-colors"
-            >
-              {d} Days
-            </button>
-          ))}
-        </div>
         <div className="flex items-center gap-2">
           <input
             type="number"
             min="1"
             value={customCompletionPeriodInput}
             onChange={e => setCustomCompletionPeriodInput(e.target.value)}
-            placeholder="Custom (days)"
-            className="w-32 border border-slate-200 rounded-lg px-2 py-1.5 text-xs text-slate-900 outline-none focus:ring-2 focus:ring-amber-300"
+            placeholder="e.g. 12"
+            className="w-24 border border-slate-200 rounded-lg px-2 py-1.5 text-xs text-slate-900 outline-none focus:ring-2 focus:ring-amber-300"
           />
+          <select
+            value={completionPeriodUnit}
+            onChange={e => setCompletionPeriodUnit(e.target.value as 'months' | 'years')}
+            className="border border-slate-200 rounded-lg px-2 py-1.5 text-xs text-slate-900 outline-none focus:ring-2 focus:ring-amber-300"
+          >
+            <option value="months">Months</option>
+            <option value="years">Years</option>
+          </select>
           <button
             onClick={() => {
-              const n = parseInt(customCompletionPeriodInput, 10);
-              if (isFinite(n) && n > 0) handleConfirmCompletionPeriod(n);
+              if (!validCustom) return;
+              const days = n * (completionPeriodUnit === 'years' ? 365 : 30);
+              handleConfirmCompletionPeriod(days, formatPeriodLabel(n, completionPeriodUnit));
             }}
-            disabled={!(isFinite(parseInt(customCompletionPeriodInput, 10)) && parseInt(customCompletionPeriodInput, 10) > 0)}
+            disabled={!validCustom}
             className="px-3 py-1.5 text-xs font-medium rounded bg-amber-600 text-white hover:bg-amber-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
-            Use Custom
+            Save
           </button>
         </div>
       </div>
@@ -1315,6 +1328,9 @@ export default function BOQSection({
   // Informational only — never gates Finalize. Same detect/confirm/edit or
   // picker structure as Completion Period, just without the mandatory-gate
   // messaging or the "no detection yet" warning line.
+  // Auto-detect only — never prompts for a value when detection missed.
+  // Informational only (never blocks Finalize), so absence needs no manual
+  // fallback prompt; the only manual path is editing an already-detected value.
   const renderBidValidityConfirmation = () => {
     if (boq.estimatedAmount == null) return null;
 
@@ -1323,7 +1339,7 @@ export default function BOQSection({
         <div className="flex items-center justify-between gap-3 bg-emerald-50 border border-emerald-200 rounded-lg px-4 py-2.5">
           <div className="flex items-center gap-2 min-w-0">
             <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-            <span className="text-sm font-semibold text-emerald-800">Bid Validity: {boq.bidValidityDays} Days Confirmed</span>
+            <span className="text-sm font-semibold text-emerald-800">Bid Validity: {boq.bidValidityLabel ?? `${boq.bidValidityDays} Days`} Confirmed</span>
           </div>
           <button onClick={handleEditBidValidity} className="text-xs text-emerald-700 hover:text-emerald-900 font-medium flex items-center gap-1 shrink-0">
             <Edit2 className="w-3 h-3" /> Edit
@@ -1336,7 +1352,7 @@ export default function BOQSection({
       return (
         <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 space-y-2">
           <p className="text-xs text-slate-600">
-            Bid Validity: <span className="font-bold text-slate-800">{boq.bidValidityDays} Days</span>
+            Bid Validity: <span className="font-bold text-slate-800">{boq.bidValidityLabel ?? `${boq.bidValidityDays} Days`}</span>
             {boq.bidValidityConfidence != null && (
               <span className="italic"> (detected, {boq.bidValidityConfidence}% conf.)</span>
             )}
@@ -1349,7 +1365,7 @@ export default function BOQSection({
               <CheckCircle2 className="w-3.5 h-3.5" /> Confirm
             </button>
             <button
-              onClick={() => setEditingBidValidity(true)}
+              onClick={handleEditBidValidity}
               className="px-3 py-1.5 text-xs font-medium rounded border border-slate-300 hover:bg-slate-100 transition-colors flex items-center gap-1"
             >
               <Edit2 className="w-3.5 h-3.5" /> Edit
@@ -1359,42 +1375,35 @@ export default function BOQSection({
       );
     }
 
-    return (
-      <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 space-y-2">
-        <p className="text-xs font-semibold text-slate-700">Bid Validity (optional)</p>
-        <div className="flex items-center gap-1.5 flex-wrap">
-          {[30, 60, 90, 180].map(d => (
+    if (editingBidValidity) {
+      return (
+        <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 space-y-2">
+          <p className="text-xs font-semibold text-slate-700">Bid Validity — edit</p>
+          <div className="flex items-center gap-2">
+            <input
+              type="number"
+              min="1"
+              value={customBidValidityInput}
+              onChange={e => setCustomBidValidityInput(e.target.value)}
+              placeholder="Days"
+              className="w-32 border border-slate-200 rounded-lg px-2 py-1.5 text-xs text-slate-900 outline-none focus:ring-2 focus:ring-slate-300"
+            />
             <button
-              key={d}
-              onClick={() => handleConfirmBidValidity(d)}
-              className="px-3 py-1.5 text-xs font-medium rounded border border-slate-300 hover:bg-slate-100 transition-colors"
+              onClick={() => {
+                const n = parseInt(customBidValidityInput, 10);
+                if (isFinite(n) && n > 0) handleConfirmBidValidity(n);
+              }}
+              disabled={!(isFinite(parseInt(customBidValidityInput, 10)) && parseInt(customBidValidityInput, 10) > 0)}
+              className="px-3 py-1.5 text-xs font-medium rounded bg-slate-700 text-white hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
-              {d} Days
+              Save
             </button>
-          ))}
+          </div>
         </div>
-        <div className="flex items-center gap-2">
-          <input
-            type="number"
-            min="1"
-            value={customBidValidityInput}
-            onChange={e => setCustomBidValidityInput(e.target.value)}
-            placeholder="Custom (days)"
-            className="w-32 border border-slate-200 rounded-lg px-2 py-1.5 text-xs text-slate-900 outline-none focus:ring-2 focus:ring-slate-300"
-          />
-          <button
-            onClick={() => {
-              const n = parseInt(customBidValidityInput, 10);
-              if (isFinite(n) && n > 0) handleConfirmBidValidity(n);
-            }}
-            disabled={!(isFinite(parseInt(customBidValidityInput, 10)) && parseInt(customBidValidityInput, 10) > 0)}
-            className="px-3 py-1.5 text-xs font-medium rounded bg-slate-700 text-white hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-          >
-            Use Custom
-          </button>
-        </div>
-      </div>
-    );
+      );
+    }
+
+    return null;
   };
 
   const renderHistory = () => {

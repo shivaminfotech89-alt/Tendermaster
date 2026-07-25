@@ -94,11 +94,19 @@ export interface BOQData {
   //                        "profit depends on the execution period"
   //                        rationale was actually about).
   bidValidityDays?: number | null;
+  /** Exactly as written/entered, e.g. "4 Months" — what the UI displays.
+   *  Undefined for older confirmed values that predate this field; those
+   *  fall back to `${bidValidityDays} Days` at display time. */
+  bidValidityLabel?: string;
   bidValidityConfirmed?: boolean;
   bidValidityConfidence?: number;         // 0-100
   bidValidityReason?: string;             // decision log, mirrors gstCessDetectionReason
 
   completionPeriodDays?: number | null;
+  /** Exactly as written/entered, e.g. "12 Months" — what the UI displays.
+   *  Undefined for older confirmed values that predate this field; those
+   *  fall back to `${completionPeriodDays} Days` at display time. */
+  completionPeriodLabel?: string;
   completionPeriodConfirmed?: boolean;
   completionPeriodConfidence?: number;    // 0-100
   completionPeriodReason?: string;        // decision log, mirrors gstCessDetectionReason

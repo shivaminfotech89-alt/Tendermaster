@@ -19,9 +19,10 @@ import { useModeBFlow } from "../lib/modeb/useModeBFlow";
 import ModeBReviewPanel from "../components/modeb/ModeBReviewPanel";
 import { isTemplated, fillTemplate, saveCandidateTemplate } from "../lib/docTemplates";
 import BOQSection from "../components/boq/BOQSection";
+import BOQViewer from "../components/boq/BOQViewer";
 import type { BOQData } from "../lib/boq/types";
 import { INITIAL_BOQ } from "../lib/boq/types";
-import { detectBoqTypeFromText } from "../lib/boq/detectBoqType";
+import { detectBoqTypeFromText, extractBidRecommendationEstimatedValue } from "../lib/boq/detectBoqType";
 import { detectGstCess } from "../lib/boq/detectGstCess";
 import { detectBidValidity, detectCompletionPeriod } from "../lib/boq/detectTenderValidity";
 import { removeUndefined } from "../lib/firestore";
@@ -139,7 +140,11 @@ export default function TenderAnalyzer() {
   const [docExported, setDocExported] = useState(false);
   
   // Chat state
-  const [activeTab, setActiveTab] = useState<'overview'|'docs'|'calculator'|'chat'|'saved_docs'|'notes'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview'|'docs'|'calculator'|'chat'|'saved_docs'|'notes'|'boq'>('overview');
+  // Mirrors ProjectDetails.tsx's identical state — advisory signals for
+  // BOQSection's Rate-Contract hint and Step-1 mis-entry warning.
+  const [nominalQuantitiesSignal, setNominalQuantitiesSignal] = useState(false);
+  const [scheduleSum, setScheduleSum] = useState<number | null>(null);
   const [analysisRemarks, setAnalysisRemarks] = useState<any>(null);
   const [analyzedPayloadNames, setAnalyzedPayloadNames] = useState<string[]>([]);
   const [chatOpen, setChatOpen] = useState(false);
@@ -211,6 +216,16 @@ export default function TenderAnalyzer() {
     setBoq(updated);
     if (generatedDoc) setBoqChangedSinceDocGen(true);
   };
+
+  // Pushed up from BOQViewer's item-rate pricing grid whenever its aggregate
+  // totals change — mirrors ProjectDetails.tsx's identical handler. Without
+  // this, item_rate/lump_sum_epc tenders would have no working pricing grid
+  // at all in this page (the grid lives inside BOQViewer, not BOQSection).
+  const handleItemRateTotalsChange = (estimatedAmount: number, quotedAmount: number) => {
+    handleBoqChange({ ...boq, estimatedAmount, quotedAmount });
+  };
+
+  const tenderValue = extractBidRecommendationEstimatedValue(analysisResult);
 
   // Mode B Vision fill — onSave handler + state machine hook
   const handleModeBSave = async (blob: Blob, filename: string) => {
@@ -734,6 +749,13 @@ export default function TenderAnalyzer() {
               }
 
               const totalAmount = extraction.items.reduce((s, it) => s + (it.amount ?? 0), 0);
+              // Populate scheduleSum the moment extraction finishes,
+              // independent of whether the user is on the BOQ tab —
+              // BOQViewer's onScheduleSumChange (fired only once that tab
+              // mounts) would otherwise leave this null if the user goes
+              // straight to the Calculator tab, silently skipping
+              // BOQSection's precision-snap fix (preferExactScheduleSum).
+              if (totalAmount > 0) setScheduleSum(totalAmount);
               await setDoc(latestRef, removeUndefined({
                 status: 'done',
                 items: extraction.items,
@@ -1483,6 +1505,7 @@ export default function TenderAnalyzer() {
                   {savedDocs.length > 0 && <span className="bg-indigo-100 text-indigo-700 text-[10px] font-bold px-1.5 py-0.5 rounded-full">{savedDocs.length}</span>}
                 </button>
                 <button onClick={() => setActiveTab('notes')} className={`px-6 py-4 font-semibold text-sm border-b-2 whitespace-nowrap transition-colors ${activeTab === 'notes' ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>Analysis Notes</button>
+                <button onClick={() => setActiveTab('boq')} className={`px-6 py-4 font-semibold text-sm border-b-2 whitespace-nowrap transition-colors ${activeTab === 'boq' ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>BOQ</button>
              </div>
 
             {activeTab === 'overview' && (
@@ -1534,6 +1557,8 @@ export default function TenderAnalyzer() {
                   setBoq={handleBoqChange}
                   totalCost={totalExpense}
                   onRevenueSync={(amount) => setRevenue(amount)}
+                  nominalQuantitiesSignal={nominalQuantitiesSignal}
+                  scheduleSum={scheduleSum}
                 />
 
                 {/* AI Bid Recommendation — shown only when the field is present */}
@@ -2459,6 +2484,25 @@ export default function TenderAnalyzer() {
                       <p className="text-sm text-slate-500">All files were analyzed successfully with no issues detected.</p>
                     )}
                   </div>
+                )}
+              </div>
+            )}
+
+            {activeTab === 'boq' && (
+              <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6">
+                {savedProjectId ? (
+                  <BOQViewer
+                    projectId={savedProjectId}
+                    onProceedToPricing={() => setActiveTab('calculator')}
+                    boqType={boq.boqType}
+                    boq={boq}
+                    onItemRateTotalsChange={handleItemRateTotalsChange}
+                    onQuantitySignal={setNominalQuantitiesSignal}
+                    onScheduleSumChange={setScheduleSum}
+                    tenderValue={tenderValue}
+                  />
+                ) : (
+                  <span className="text-xs text-slate-400 italic">Saving project…</span>
                 )}
               </div>
             )}

@@ -80,6 +80,29 @@ export interface BOQForPlaceholders {
   grossProfit?: number | null;
   marginPercent?: number | null;
   remarks?: string;
+
+  // Finalized-bid fields — only meaningful once boq.finalisedAt is set; each
+  // still individually gated (in resolver.ts) on its own live confirm flag
+  // below, so a mid-edit/unconfirmed field renders blank rather than stale
+  // data. See ProjectDetails.tsx's `finalizedBid` construction for the same
+  // shape/gating logic, mirrored here for the local template-fill path.
+  finalisedAt?: any;
+  gstIncluded?: 'yes' | 'no' | 'separate' | 'unknown';
+  manualOverride?: { gstIncluded?: true };
+  cessPercent?: number;
+  cessAmount?: number;
+  gstPercent?: number;
+  gstAmount?: number;
+  roundedTotal?: number;
+  totalWithGst?: number;
+  completionPeriodConfirmed?: boolean;
+  completionPeriodDays?: number | null;
+  completionPeriodLabel?: string;
+  bidValidityConfirmed?: boolean;
+  bidValidityDays?: number | null;
+  bidValidityLabel?: string;
+  expectedRevenueConfirmed?: boolean;
+  expectedRevenueConfirmedValue?: number | null;
 }
 
 export interface PlaceholderContext {
@@ -87,4 +110,5 @@ export interface PlaceholderContext {
   analysis: FullTenderAnalysis | null;
   directors?: Array<{ name: string; designation: string; din: string; pan: string }>;
   boq?: BOQForPlaceholders;
+  projectName?: string;
 }

@@ -13,6 +13,8 @@ export const BID_SUBMISSION_LETTER: ApprovedTemplate = {
     'emdAmount', 'enclosuresList',
     'gstNumber', 'panNumber',
     'authorizedSignatoryName', 'authorizedSignatoryDesignation', 'place',
+    'quotedAmount', 'aboveBelow', 'estimatedAmount', 'percentage',
+    'gstIncluded', 'finalTotal', 'completionPeriod',
   ],
   content: `{{date}}
 
@@ -36,6 +38,13 @@ We hereby declare and confirm that:
 4. There is no conflict of interest in our participation in this tender.
 5. The prices quoted in our financial bid are firm and binding, and include all applicable taxes, duties, levies, and other charges.
 6. We agree to execute the work in full conformity with the tender specifications, drawings, and conditions of contract.
+
+**Financial Bid Summary:**
+
+Quoted Amount: {{quotedAmount}} ({{aboveBelow}} the Schedule-B estimate of {{estimatedAmount}} by {{percentage}})
+GST Treatment: {{gstIncluded}}
+Final Total (incl. GST): {{finalTotal}}
+Completion Period: {{completionPeriod}}
 
 **Documents Enclosed:**
 

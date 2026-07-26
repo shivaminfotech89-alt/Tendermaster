@@ -15,6 +15,7 @@ import { promisify } from "util";
 // Bundled by esbuild (--bundle inlines local files; --packages=external only skips npm deps).
 import { PLANS, TRIAL_CREDITS, TRIAL_DOC_LIMIT, CREDIT_VALIDITY_MONTHS } from './src/lib/plans';
 import { probeAllPagesFromBuffer, isRetryable as isProbeRetryable } from './src/lib/modeb/probe-helpers';
+import { fmtINR } from './src/lib/boq/calculator';
 
 const lookupPromise = promisify(dns.lookup);
 
@@ -2438,7 +2439,7 @@ app.post(
   requireTrialAwareAccess("doc"),
   async (req: AuthenticatedRequest, res) => {
     try {
-      const { docType, tenderDetails, userProfile, financialData, extraInstructions, language,
+      const { docType, tenderDetails, userProfile, financialData, finalizedBid, extraInstructions, language,
               exactFormBase64, exactFormMimeType, exactFormUrl } =
         req.body;
       if (!tenderDetails) {
@@ -2452,6 +2453,40 @@ app.post(
       let financialContext = "";
       if (financialData?.revenue) {
         financialContext = `\n--- PREPARED BID FINANCIALS ---\nTotal Bid Amount: ₹${financialData.revenue}\nMaterial Costs: ${JSON.stringify(financialData.materials)}\nLabour Costs: ${JSON.stringify(financialData.labour)}\nEnsure that if the document is a commercial / financial bid proposal or cost breakdown, you strictly use these final user-approved numbers.`;
+      }
+
+      // Populated only once a bid has been finalized at least once (see
+      // ProjectDetails.tsx's `finalizedBid` construction, gated on
+      // boq.finalisedAt with per-field confirm flags) — every currency
+      // figure is pre-formatted with fmtINR (the same formatter BOQSection's
+      // Financial Summary and BOQViewer's exports use) so the model only
+      // ever echoes an already-correct string, never formats one itself.
+      let finalizedBidContext = "";
+      if (finalizedBid) {
+        const lines: string[] = [];
+        if (finalizedBid.projectName) lines.push(`Project Name: ${finalizedBid.projectName}`);
+        if (finalizedBid.tenderName) lines.push(`Tender Name: ${finalizedBid.tenderName}`);
+        if (finalizedBid.tenderValue) lines.push(`Tender Value (reference only): ${finalizedBid.tenderValue}`);
+        if (finalizedBid.pricingMethod) lines.push(`Pricing Method: ${finalizedBid.pricingMethod}`);
+        if (finalizedBid.scheduleBAmount != null) lines.push(`Schedule-B Amount: ${fmtINR(finalizedBid.scheduleBAmount)}`);
+        if (finalizedBid.bidPercent != null) lines.push(`Bid %: ${finalizedBid.bidPercent}% ${finalizedBid.aboveBelow ?? ''}`.trim());
+        if (finalizedBid.quotedAmount != null) lines.push(`Quoted Amount: ${fmtINR(finalizedBid.quotedAmount)}${finalizedBid.quotedAmountWords ? ` (${finalizedBid.quotedAmountWords})` : ''}`);
+        if (finalizedBid.gstIncluded) {
+          const gstLabel = finalizedBid.gstIncluded === 'yes' ? 'Rates are inclusive of GST'
+            : finalizedBid.gstIncluded === 'no' ? 'GST is not applicable'
+            : `GST payable separately${finalizedBid.gstPercent != null ? ` @ ${finalizedBid.gstPercent}%` : ''}`;
+          lines.push(`GST Treatment: ${gstLabel}`);
+        }
+        if (finalizedBid.cessAmount != null) lines.push(`Welfare Cess: ${fmtINR(finalizedBid.cessAmount)}${finalizedBid.cessPercent != null ? ` (${finalizedBid.cessPercent}%)` : ''}`);
+        if (finalizedBid.gstAmount != null) lines.push(`GST Amount: ${fmtINR(finalizedBid.gstAmount)}`);
+        if (finalizedBid.finalTotal != null) lines.push(`Final Total (incl. GST): ${fmtINR(finalizedBid.finalTotal)}`);
+        if (finalizedBid.completionPeriodLabel) lines.push(`Completion Period: ${finalizedBid.completionPeriodLabel}`);
+        if (finalizedBid.bidValidityLabel) lines.push(`Bid Validity: ${finalizedBid.bidValidityLabel}`);
+        if (finalizedBid.expectedRevenue != null) lines.push(`Expected Revenue: ${fmtINR(finalizedBid.expectedRevenue)}`);
+
+        if (lines.length > 0) {
+          finalizedBidContext = `\n--- FINALIZED BID DATA ---\nUse these EXACT figures verbatim wherever the document needs bid-pricing/financial figures — they are already correctly formatted; do not reformat, recompute, round, or re-derive them.\n${lines.join('\n')}\nIf a bid-pricing figure is needed but not listed above, output __________ (12 underscores) — never guess or derive one.`;
+        }
       }
 
       let extraContext = "";
@@ -2496,7 +2531,7 @@ CASE B — Tender does NOT specify a format for this document:
           ? `\nCRITICAL LANGUAGE REQUIREMENT: You MUST draft the document STRICTLY in ${language === "hi" ? "Hindi" : language === "gu" ? "Gujarati" : language}, unless the user asks otherwise.`
           : `\nCRITICAL LANGUAGE REQUIREMENT: You MUST draft the document STRICTLY in English, unless the user asks otherwise.`
       }
-${financialContext}${extraContext}
+${financialContext}${finalizedBidContext}${extraContext}
 
 --- BUSINESS PROFILE ---
 ${userProfile ? JSON.stringify(userProfile) : "Not provided."}
@@ -2558,7 +2593,7 @@ STRICT RULES — follow every one without exception:
 ${userProfile ? JSON.stringify(userProfile) : "Not provided."}
 
 --- TENDER DETAILS ---
-${JSON.stringify(tenderDetails)}${financialContext}${extraContext}`;
+${JSON.stringify(tenderDetails)}${financialContext}${finalizedBidContext}${extraContext}`;
 
         // Resolve base64 + mimeType from URL (Storage-first path) or direct upload (fallback)
         let resolvedBase64 = exactFormBase64 as string;

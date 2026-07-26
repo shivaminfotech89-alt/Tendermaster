@@ -1143,9 +1143,43 @@ export default function ProjectDetails() {
     setIsEditingDoc(false);
     setGeneratedFromTemplate(false);
 
+    // Only enrich generated documents once the bid has actually been
+    // finalized at least once (boq.finalisedAt, already written by
+    // handleFinalize — unchanged here) — sourced from the LIVE boq, not the
+    // immutable bid_snapshots entry, so a regenerated document matches what
+    // the user currently sees on screen (boqChangedSinceDocGen already
+    // covers awareness of drift since the last generation). Every field is
+    // additionally gated on its own live confirm flag, so a field the user
+    // is mid-editing (unconfirmed) is omitted rather than shown stale.
+    const finalizedBid = boq.finalisedAt != null ? {
+      projectName,
+      tenderName: project.details?.tender_simplified?.tender_name,
+      tenderValue: project.details?.tender_simplified?.tender_value,
+      pricingMethod: boq.boqType === 'item_rate' ? 'Item Rate' : boq.boqType === 'lump_sum_epc' ? 'Lump Sum / Package' : 'Percentage Rate',
+      scheduleBAmount: boq.estimatedAmountConfirmed ? boq.estimatedAmount ?? undefined : undefined,
+      bidPercent: boq.percentage ?? undefined,
+      aboveBelow: boq.aboveBelow,
+      quotedAmount: boq.quotedAmount ?? undefined,
+      quotedAmountWords: boq.quotedAmountWords ?? undefined,
+      // Mirrors BOQSection.tsx's own `gstConfirmed` exactly — the flag
+      // Finalize itself gates on (handleFinalize's guard and
+      // renderFinalizeButton's disabledReason chain both use this same
+      // two-part condition), so any bid that passed Finalize is guaranteed
+      // to populate this whenever GST treatment was actually resolved.
+      gstIncluded: (boq.gstIncluded && boq.gstIncluded !== 'unknown' && boq.manualOverride?.gstIncluded) ? boq.gstIncluded : undefined,
+      cessPercent: boq.cessAmount ? boq.cessPercent : undefined,
+      cessAmount: boq.cessAmount ?? undefined,
+      gstPercent: boq.gstIncluded === 'separate' ? boq.gstPercent : undefined,
+      gstAmount: boq.gstIncluded === 'separate' ? boq.gstAmount ?? undefined : undefined,
+      finalTotal: boq.roundedTotal ?? boq.totalWithGst ?? undefined,
+      completionPeriodLabel: boq.completionPeriodConfirmed ? (boq.completionPeriodLabel ?? (boq.completionPeriodDays != null ? `${boq.completionPeriodDays} Days` : undefined)) : undefined,
+      bidValidityLabel: boq.bidValidityConfirmed ? (boq.bidValidityLabel ?? (boq.bidValidityDays != null ? `${boq.bidValidityDays} Days` : undefined)) : undefined,
+      expectedRevenue: boq.expectedRevenueConfirmed ? boq.expectedRevenueConfirmedValue ?? undefined : undefined,
+    } : undefined;
+
     // ── Template path: instant generation, no API call ────────────────────────
     if (!exactFormMode && isTemplated(docType, project.details?.tender_simplified?.authority_name)) {
-      const md = fillTemplate(docType, businessProfile, project.details, project.details?.tender_simplified?.authority_name, boq);
+      const md = fillTemplate(docType, businessProfile, project.details, project.details?.tender_simplified?.authority_name, boq, projectName);
       if (md) {
         setGeneratedDoc(md);
         setGeneratedDocIsHtml(false);
@@ -1182,6 +1216,7 @@ export default function ProjectDetails() {
               materials,
               labour
             },
+            ...(finalizedBid ? { finalizedBid } : {}),
             language: i18n.language,
             ...(exactFormUrl ? { exactFormUrl, exactFormMimeType } : {}),
          })

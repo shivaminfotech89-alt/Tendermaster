@@ -49,6 +49,7 @@ export function fillTemplate(
   analysis: any | null,
   authorityName?: string | null,
   boq?: BOQForPlaceholders | null,
+  projectName?: string,
 ): string | null {
   const template = findTemplate(docType, authorityName);
   if (!template) return null;
@@ -57,6 +58,7 @@ export function fillTemplate(
     analysis,
     directors: (profile as any)?.directors ?? [],
     boq: boq ?? undefined,
+    projectName,
   };
   return resolve(template.content, ctx);
 }

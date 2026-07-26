@@ -1,4 +1,5 @@
 import type { PlaceholderContext } from './types';
+import { fmtINR } from '../boq/calculator';
 
 // Printed in the document wherever a value is missing — consistent with the
 // rest of the document pipeline and legible on printed forms.
@@ -128,7 +129,7 @@ const PLACEHOLDERS: Record<string, Resolver> = {
   boqType: (c) => v(c.boq?.boqType),
   estimatedAmount: (c) => {
     const n = c.boq?.estimatedAmount;
-    return (n != null && Number.isFinite(n)) ? `₹${n.toLocaleString('en-IN')}` : BLANK;
+    return (n != null && Number.isFinite(n)) ? fmtINR(n) : BLANK;
   },
   estimatedAmountConfirmed: (c) => c.boq?.estimatedAmountConfirmed ? 'Yes' : BLANK,
   percentage: (c) => {
@@ -138,7 +139,7 @@ const PLACEHOLDERS: Record<string, Resolver> = {
   aboveBelow: (c) => v(c.boq?.aboveBelow),
   quotedAmount: (c) => {
     const n = c.boq?.quotedAmount;
-    return (n != null && Number.isFinite(n)) ? `₹${n.toLocaleString('en-IN')}` : BLANK;
+    return (n != null && Number.isFinite(n)) ? fmtINR(n) : BLANK;
   },
   quotedAmountWords: (c) => v(c.boq?.quotedAmountWords),
   profitPercentage: (c) => {
@@ -147,13 +148,68 @@ const PLACEHOLDERS: Record<string, Resolver> = {
   },
   grossProfit: (c) => {
     const n = c.boq?.grossProfit;
-    return (n != null && Number.isFinite(n)) ? `₹${n.toLocaleString('en-IN')}` : BLANK;
+    return (n != null && Number.isFinite(n)) ? fmtINR(n) : BLANK;
   },
   marginPercentage: (c) => {
     const n = c.boq?.marginPercent;
     return (n != null && Number.isFinite(n)) ? `${n.toFixed(2)}%` : BLANK;
   },
   boqRemarks: (c) => v(c.boq?.remarks),
+
+  // ── Finalized-bid placeholders ─────────────────────────────────────────────
+  // Every one of these requires boq.finalisedAt to be set — matching the AI
+  // path exactly, where the whole `finalizedBid` object is undefined pre-
+  // finalize (see ProjectDetails.tsx) — so the two paths show identical
+  // values for the same boq state, never partially enriching pre-finalize.
+  // Within that, each is still individually gated on its own live confirm
+  // flag, so a field the user is mid-editing (unconfirmed) since the last
+  // finalize renders blank rather than stale/half-updated data.
+  projectName: (c) => v(c.projectName),
+  gstIncluded: (c) => {
+    const b = c.boq;
+    if (!b || b.finalisedAt == null) return BLANK;
+    // Mirrors BOQSection.tsx's own `gstConfirmed` exactly — the flag
+    // Finalize itself gates on.
+    const gstConfirmed = b.gstIncluded != null && b.gstIncluded !== 'unknown' && !!b.manualOverride?.gstIncluded;
+    if (!gstConfirmed) return BLANK;
+    return b.gstIncluded === 'yes' ? 'Rates are inclusive of GST'
+      : b.gstIncluded === 'no' ? 'GST is not applicable'
+      : `GST payable separately${b.gstPercent != null ? ` @ ${b.gstPercent}%` : ''}`;
+  },
+  cessAmount: (c) => {
+    const b = c.boq;
+    if (!b || b.finalisedAt == null) return BLANK;
+    const n = b.cessAmount;
+    return (n != null && n > 0) ? fmtINR(n) : BLANK;
+  },
+  gstAmount: (c) => {
+    const b = c.boq;
+    if (!b || b.finalisedAt == null || b.gstIncluded !== 'separate') return BLANK;
+    const n = b.gstAmount;
+    return (n != null && n > 0) ? fmtINR(n) : BLANK;
+  },
+  finalTotal: (c) => {
+    const b = c.boq;
+    if (!b || b.finalisedAt == null) return BLANK;
+    const n = b.roundedTotal ?? b.totalWithGst;
+    return (n != null && Number.isFinite(n)) ? fmtINR(n) : BLANK;
+  },
+  completionPeriod: (c) => {
+    const b = c.boq;
+    if (!b || b.finalisedAt == null || !b.completionPeriodConfirmed) return BLANK;
+    return b.completionPeriodLabel ?? (b.completionPeriodDays != null ? `${b.completionPeriodDays} Days` : BLANK);
+  },
+  bidValidity: (c) => {
+    const b = c.boq;
+    if (!b || b.finalisedAt == null || !b.bidValidityConfirmed) return BLANK;
+    return b.bidValidityLabel ?? (b.bidValidityDays != null ? `${b.bidValidityDays} Days` : BLANK);
+  },
+  expectedRevenue: (c) => {
+    const b = c.boq;
+    if (!b || b.finalisedAt == null || !b.expectedRevenueConfirmed) return BLANK;
+    const n = b.expectedRevenueConfirmedValue;
+    return (n != null && Number.isFinite(n)) ? fmtINR(n) : BLANK;
+  },
 
   // ── Derived: enclosures list from required_documents_checklist ────────────
   enclosuresList: (c) => {

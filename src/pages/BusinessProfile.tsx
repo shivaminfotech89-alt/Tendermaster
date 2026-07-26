@@ -112,6 +112,19 @@ const emptyProject = (): ProjectExperience => ({
   status: "Completed",
 });
 
+// ── Turnover year row type ────────────────────────────────────────────────────
+// Kept as a separate array state (same pattern as directors/projects below),
+// not embedded in the flat `profile` object. Mirrored into the legacy
+// turnoverYear1/2/3Label flat fields on save so resolver.ts, companyProfile.ts,
+// and fieldMapper.ts keep working unchanged against those exact field names.
+interface TurnoverYear {
+  label: string;
+  value: string;
+}
+
+const emptyTurnoverYear = (): TurnoverYear => ({ label: "", value: "" });
+const MAX_TURNOVER_YEARS = 7;
+
 // ── Default profile ───────────────────────────────────────────────────────────
 const defaultProfile = {
   // existing
@@ -200,6 +213,10 @@ export default function BusinessProfile() {
   const [profile, setProfile] = useState<ProfileState>(defaultProfile);
   const [directors, setDirectors] = useState<Director[]>([]);
   const [projects, setProjects] = useState<ProjectExperience[]>([]);
+  // Default for new profiles: 3 empty rows — unchanged first impression.
+  const [turnoverYears, setTurnoverYears] = useState<TurnoverYear[]>([
+    emptyTurnoverYear(), emptyTurnoverYear(), emptyTurnoverYear(),
+  ]);
 
   // Track which sections are open (all open by default)
   const [open, setOpen] = useState<Record<string, boolean>>({
@@ -273,6 +290,17 @@ export default function BusinessProfile() {
           }));
           if (Array.isArray(data.directors)) setDirectors(data.directors);
           if (Array.isArray(data.projects)) setProjects(data.projects);
+          if (Array.isArray(data.turnoverYears) && data.turnoverYears.length > 0) {
+            setTurnoverYears(data.turnoverYears);
+          } else {
+            // Legacy profile — seed from the flat fields, keeping empty
+            // entries so the table still shows 3 editable rows.
+            setTurnoverYears([
+              { label: data.turnoverYear1Label || "", value: data.turnoverYear1 || "" },
+              { label: data.turnoverYear2Label || "", value: data.turnoverYear2 || "" },
+              { label: data.turnoverYear3Label || "", value: data.turnoverYear3 || "" },
+            ]);
+          }
         }
       } catch (e) {
         console.error("Failed to load profile", e);
@@ -318,6 +346,17 @@ export default function BusinessProfile() {
         experienceYears: Number(profile.experienceYears) || 0,
         directors,
         projects,
+        // Write BOTH representations: the full array, and the legacy flat
+        // fields mirrored from its first 3 entries — keeps resolver.ts,
+        // companyProfile.ts, and fieldMapper.ts working with zero changes to
+        // their matching logic.
+        turnoverYears,
+        turnoverYear1Label: turnoverYears[0]?.label ?? "",
+        turnoverYear1: turnoverYears[0]?.value ?? "",
+        turnoverYear2Label: turnoverYears[1]?.label ?? "",
+        turnoverYear2: turnoverYears[1]?.value ?? "",
+        turnoverYear3Label: turnoverYears[2]?.label ?? "",
+        turnoverYear3: turnoverYears[2]?.value ?? "",
       };
       await setDoc(doc(db, "business_profiles", user.uid), dataToSave);
       toast.success("Profile updated successfully!");
@@ -392,6 +431,12 @@ export default function BusinessProfile() {
   const updateProject = (idx: number, field: keyof ProjectExperience, value: string) =>
     setProjects((prev) =>
       prev.map((p, i) => (i === idx ? { ...p, [field]: value } : p))
+    );
+
+  // ── Turnover year helpers ──────────────────────────────────────────────────
+  const updateTurnoverYear = (idx: number, field: keyof TurnoverYear, value: string) =>
+    setTurnoverYears((prev) =>
+      prev.map((y, i) => (i === idx ? { ...y, [field]: value } : y))
     );
 
   // ── Extract profile data from uploaded certificates ───────────────────────
@@ -1115,36 +1160,49 @@ export default function BusinessProfile() {
                   </select>
                 </div>
               </div>
-              {[
-                { labelField: "turnoverYear1Label", valueField: "turnoverYear1", placeholder: "e.g. 2023-24" },
-                { labelField: "turnoverYear2Label", valueField: "turnoverYear2", placeholder: "e.g. 2022-23" },
-                { labelField: "turnoverYear3Label", valueField: "turnoverYear3", placeholder: "e.g. 2021-22" },
-              ].map(({ labelField, valueField, placeholder }, i) => (
+              {turnoverYears.map((ty, idx) => (
                 <div
-                  key={i}
-                  className="grid grid-cols-2 gap-0 border-b last:border-b-0 border-slate-100"
+                  key={idx}
+                  className="grid grid-cols-2 gap-0 border-b last:border-b-0 border-slate-100 relative"
                 >
                   <div className="px-3 py-2 border-r border-slate-100">
                     <input
-                      name={labelField}
-                      value={(profile as any)[labelField]}
-                      onChange={handleChange}
+                      value={ty.label}
+                      onChange={(e) => updateTurnoverYear(idx, "label", e.target.value)}
                       className="w-full text-sm outline-none bg-transparent text-slate-700"
-                      placeholder={placeholder}
+                      placeholder="e.g. 2023-24"
                     />
                   </div>
-                  <div className="px-3 py-2">
+                  <div className="px-3 py-2 flex items-center gap-2">
                     <input
-                      name={valueField}
-                      value={(profile as any)[valueField]}
-                      onChange={handleChange}
+                      value={ty.value}
+                      onChange={(e) => updateTurnoverYear(idx, "value", e.target.value)}
                       className="w-full text-sm outline-none bg-transparent text-slate-700"
                       placeholder="0.00"
                     />
+                    {idx > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setTurnoverYears((prev) => prev.filter((_, i) => i !== idx))}
+                        className="text-slate-400 hover:text-red-500 transition-colors shrink-0"
+                        title="Remove"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    )}
                   </div>
                 </div>
               ))}
             </div>
+            {turnoverYears.length < MAX_TURNOVER_YEARS && (
+              <button
+                type="button"
+                onClick={() => setTurnoverYears((prev) => [...prev, emptyTurnoverYear()])}
+                className="flex items-center gap-2 text-sm font-semibold text-indigo-600 hover:text-indigo-800 border border-dashed border-indigo-300 rounded-lg px-4 py-2 w-full justify-center hover:bg-indigo-50 transition-colors"
+              >
+                <Plus className="w-4 h-4" /> Add Financial Year
+              </button>
+            )}
             <p className="text-[11px] text-slate-400">Values are interpreted in the selected unit.</p>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-5 mt-2">

@@ -499,7 +499,15 @@ export function mapFields(
         ['turnoverYear3Label', 'turnoverYear3'],
       ] as const;
       const [labelKey, valueKey] = keys[tvIdx];
-      const rawValue = String(profile[valueKey] ?? '').trim();
+      // Prefer the turnoverYears array when present — kept in sync with the
+      // flat fields by BusinessProfile.tsx's save path — falling back to the
+      // legacy flat fields for older profiles that never populated it. Note:
+      // extractTurnoverIdx only matches indices 1-3 today; a PDF field for
+      // "Turnover Year 4/5" won't reach this branch at all — a known
+      // limitation, not expanded here since only the value source (not the
+      // matching regex) is in scope for this change.
+      const fromArray = profile.turnoverYears?.[tvIdx];
+      const rawValue = String(fromArray?.value ?? profile[valueKey] ?? '').trim();
       const unit = profile.turnoverUnit || 'Lakhs';
       const value = rawValue ? `${rawValue} ${unit}` : '';
       const source = `profile.${valueKey}`;

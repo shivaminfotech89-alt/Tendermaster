@@ -44,6 +44,11 @@ export interface BusinessProfile {
   turnoverYear2: string;
   turnoverYear3Label: string;
   turnoverYear3: string;
+  // Optional: full year list beyond the first 3, kept in sync with the flat
+  // turnoverYear1/2/3 fields above by BusinessProfile.tsx's save path. The
+  // flat fields remain the source of truth for existing consumers (fieldMapper
+  // RULES/special-case, docTemplates resolver) — this is additive.
+  turnoverYears?: Array<{ label: string; value: string }>;
   netWorth: string;
   netWorthUnit: string;      // Lakhs | Crores
   // Bank

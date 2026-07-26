@@ -17,6 +17,7 @@ export const COMPANY_PROFILE: ApprovedTemplate = {
     'turnoverYear1Label', 'turnoverYear1',
     'turnoverYear2Label', 'turnoverYear2',
     'turnoverYear3Label', 'turnoverYear3',
+    'turnoverAdditionalRows',
     'authorizedSignatoryName', 'authorizedSignatoryDesignation', 'authorizedSignatoryDin',
     'bankName', 'bankBranch', 'bankAccountNumber', 'bankIfsc', 'bankAccountType',
     'experienceSummary', 'date',
@@ -97,7 +98,7 @@ export const COMPANY_PROFILE: ApprovedTemplate = {
 | {{turnoverYear1Label}} | {{turnoverYear1}} |
 | {{turnoverYear2Label}} | {{turnoverYear2}} |
 | {{turnoverYear3Label}} | {{turnoverYear3}} |
-
+{{turnoverAdditionalRows}}
 ---
 
 ## 7. Authorised Signatory

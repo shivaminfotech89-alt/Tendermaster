@@ -89,6 +89,25 @@ const PLACEHOLDERS: Record<string, Resolver> = {
     if (!val) return BLANK;
     return `₹ ${val} ${c.profile?.turnoverUnit || 'Lakhs'}`;
   },
+  // Extra markdown table rows for turnoverYears[3..] (years beyond the first
+  // 3, which the fixed turnoverYear1/2/3 placeholders above already cover).
+  // Resolves to '' (NOT the blank marker) when there are 3 or fewer years,
+  // so companyProfile.ts's table renders byte-identical to before this
+  // feature for every existing profile. Trailing newline only when non-empty
+  // — reproduces the same blank-line-before-"---" spacing the template used
+  // before, whether or not there's extra content.
+  turnoverAdditionalRows: (c) => {
+    const years = c.profile?.turnoverYears;
+    if (!Array.isArray(years) || years.length <= 3) return '';
+    const unit = c.profile?.turnoverUnit || 'Lakhs';
+    const rows = years.slice(3).map((y) => {
+      const label = y?.label?.trim() || BLANK;
+      const val = y?.value?.toString().trim();
+      const amount = val ? `₹ ${val} ${unit}` : BLANK;
+      return `| ${label} | ${amount} |`;
+    });
+    return rows.join('\n') + '\n';
+  },
 
   // ── Tender ────────────────────────────────────────────────────────────────
   tenderNumber:       (c) => v(c.analysis?.tender_simplified?.tender_number),

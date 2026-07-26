@@ -71,6 +71,8 @@ const inputCls =
   "border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 outline-none w-full";
 const selectCls =
   "border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 outline-none w-full bg-white";
+const unitSelectCls =
+  "text-xs border border-slate-200 rounded px-1.5 py-0.5 bg-white text-slate-700 outline-none focus:ring-2 focus:ring-indigo-400";
 
 // ── Director row type ─────────────────────────────────────────────────────────
 interface Director {
@@ -125,7 +127,7 @@ const defaultProfile = {
   services: "",
   keywords: "",
   turnover: "",
-  turnoverUnit: "Lakhs",
+  turnoverUnit: "Crores",
   experienceYears: "",
   certifications: "",
   majorClients: "",
@@ -164,6 +166,7 @@ const defaultProfile = {
   turnoverYear3Label: "",
   turnoverYear3: "",
   netWorth: "",
+  netWorthUnit: "Crores",
   bankName: "",
   bankBranch: "",
   bankAccountNumber: "",
@@ -264,6 +267,7 @@ export default function BusinessProfile() {
             services: data.services?.join(", ") || "",
             keywords: data.keywords?.join(", ") || "",
             turnoverUnit: data.turnoverUnit || "Lakhs",
+            netWorthUnit: data.netWorthUnit || "Lakhs",
             certifications: data.certifications?.join(", ") || "",
             majorClients: data.majorClients?.join(", ") || "",
           }));
@@ -310,6 +314,7 @@ export default function BusinessProfile() {
         majorClients: profile.majorClients.split(",").map((s) => s.trim()).filter(Boolean),
         turnover: Number(profile.turnover) || 0,
         turnoverUnit: profile.turnoverUnit || "Lakhs",
+        netWorthUnit: profile.netWorthUnit || "Lakhs",
         experienceYears: Number(profile.experienceYears) || 0,
         directors,
         projects,
@@ -1095,9 +1100,20 @@ export default function BusinessProfile() {
             </p>
             {/* Turnover table */}
             <div className="border border-slate-200 rounded-lg overflow-hidden">
-              <div className="grid grid-cols-2 gap-0 bg-slate-50 border-b border-slate-200 px-4 py-2">
+              <div className="grid grid-cols-2 gap-0 bg-slate-50 border-b border-slate-200 px-4 py-2 items-center">
                 <span className="text-xs font-semibold text-slate-500 uppercase">Financial Year</span>
-                <span className="text-xs font-semibold text-slate-500 uppercase">Turnover (₹ Lakhs)</span>
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-xs font-semibold text-slate-500 uppercase">Turnover (₹ {profile.turnoverUnit || "Lakhs"})</span>
+                  <select
+                    name="turnoverUnit"
+                    value={profile.turnoverUnit}
+                    onChange={handleChange}
+                    className={unitSelectCls}
+                  >
+                    <option value="Lakhs">Lakhs</option>
+                    <option value="Crores">Crores</option>
+                  </select>
+                </div>
               </div>
               {[
                 { labelField: "turnoverYear1Label", valueField: "turnoverYear1", placeholder: "e.g. 2023-24" },
@@ -1129,9 +1145,22 @@ export default function BusinessProfile() {
                 </div>
               ))}
             </div>
+            <p className="text-[11px] text-slate-400">Values are interpreted in the selected unit.</p>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-5 mt-2">
-              <Field label="Net Worth (₹ Lakhs)">
+              <div className="flex flex-col gap-1.5">
+                <div className="flex items-center justify-between gap-2">
+                  <label className="text-sm font-semibold text-slate-700">Net Worth (₹ {profile.netWorthUnit || "Lakhs"})</label>
+                  <select
+                    name="netWorthUnit"
+                    value={profile.netWorthUnit}
+                    onChange={handleChange}
+                    className={unitSelectCls}
+                  >
+                    <option value="Lakhs">Lakhs</option>
+                    <option value="Crores">Crores</option>
+                  </select>
+                </div>
                 <input
                   name="netWorth"
                   value={profile.netWorth}
@@ -1139,7 +1168,7 @@ export default function BusinessProfile() {
                   className={inputCls}
                   placeholder="0.00"
                 />
-              </Field>
+              </div>
               <Field label="Bank Name">
                 <input
                   name="bankName"

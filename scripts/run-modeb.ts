@@ -245,6 +245,7 @@ const profile: BusinessProfile = {
   turnoverYear3Label:             '2023-24',
   turnoverYear3:                  '91',
   netWorth:                       '120',
+  netWorthUnit:                   'Lakhs',
   bankName:                       'State Bank of India',
   bankBranch:                     'Vatva Industrial Area',
   bankAccountNumber:              '10234567890',

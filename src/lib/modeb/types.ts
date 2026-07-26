@@ -45,6 +45,7 @@ export interface BusinessProfile {
   turnoverYear3Label: string;
   turnoverYear3: string;
   netWorth: string;
+  netWorthUnit: string;      // Lakhs | Crores
   // Bank
   bankName: string;
   bankBranch: string;

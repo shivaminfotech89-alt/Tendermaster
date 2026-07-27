@@ -2,7 +2,8 @@ import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import {
   CheckCircle2, FileText, ArrowRight, Menu, X, Calendar, MessageSquare,
-  TrendingUp, Building2, Languages, CreditCard, Folder, LayoutGrid
+  Building2, Languages, CreditCard, Folder, LayoutGrid,
+  FileSpreadsheet, Calculator
 } from 'lucide-react';
 import { useAuth } from '../auth/AuthProvider';
 import toast from 'react-hot-toast';
@@ -254,7 +255,33 @@ export default function LandingPage() {
                 <CheckCircle2 className="w-5 h-5" />
               </div>
               <h3 className="font-bold text-slate-900 text-sm mb-1.5">Tender analysis</h3>
-              <p className="text-sm text-slate-500 leading-relaxed">Match score, eligibility, compliance matrix, win probability and risk flags from the full document.</p>
+              <p className="text-sm text-slate-500 leading-relaxed">Match score, eligibility, compliance matrix, risk flags and win probability from the full document — plus an eligibility checklist, missing-document alerts, key highlights and smart recommendations.</p>
+            </div>
+
+            <div className="bg-white border border-slate-100 rounded-2xl p-6">
+              <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center mb-4">
+                <FileSpreadsheet className="w-5 h-5" />
+              </div>
+              <h3 className="font-bold text-slate-900 text-sm mb-1.5">Universal BOQ Engine</h3>
+              <p className="text-sm text-slate-500 leading-relaxed">Works with Percentage Rate, Item Rate and Lump Sum / EPC schedules — automatic Schedule-B detection, multi-page BOQ extraction and confidence verification.</p>
+              <p className="text-sm text-slate-500 leading-relaxed mt-1.5">Reviewed on its own BOQ Review Dashboard with smart validation before you price it.</p>
+            </div>
+
+            <div className="bg-white border border-slate-100 rounded-2xl p-6">
+              <div className="w-10 h-10 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center mb-4">
+                <Calculator className="w-5 h-5" />
+              </div>
+              <h3 className="font-bold text-slate-900 text-sm mb-1.5">Smart Financial Engine</h3>
+              <p className="text-sm text-slate-500 leading-relaxed">Percentage above/below, item-wise and lump-sum pricing, GST &amp; cess handling, expected revenue vs. estimated cost, and profit &amp; margin.</p>
+              <p className="text-sm text-slate-500 leading-relaxed mt-1.5">A Financial Review confirms Schedule-B amount, pricing basis, GST and completion period before you finalise.</p>
+            </div>
+
+            <div className="bg-white border border-slate-100 rounded-2xl p-6">
+              <div className="w-10 h-10 rounded-xl bg-teal-50 text-teal-600 flex items-center justify-center mb-4">
+                <FileText className="w-5 h-5" />
+              </div>
+              <h3 className="font-bold text-slate-900 text-sm mb-1.5">AI Document Generator</h3>
+              <p className="text-sm text-slate-500 leading-relaxed">Bid Submission Letters, Cover Letters, Company Profiles, Technical Proposals, Declaration Letters, Annexures and Tender Forms — generated in the department's exact format, with intelligent field-by-field form filling.</p>
             </div>
 
             <div className="bg-white border border-slate-100 rounded-2xl p-6">
@@ -263,14 +290,6 @@ export default function LandingPage() {
               </div>
               <h3 className="font-bold text-slate-900 text-sm mb-1.5">Business profile</h3>
               <p className="text-sm text-slate-500 leading-relaxed">Fill your statutory details once — GST, PAN, Udyam, turnover, directors — auto-filled from certificates.</p>
-            </div>
-
-            <div className="bg-white border border-slate-100 rounded-2xl p-6">
-              <div className="w-10 h-10 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center mb-4">
-                <TrendingUp className="w-5 h-5" />
-              </div>
-              <h3 className="font-bold text-slate-900 text-sm mb-1.5">Bid engine &amp; profit calculator</h3>
-              <p className="text-sm text-slate-500 leading-relaxed">Enter revenue, materials, labour and overheads — get margin and a recommended bid amount.</p>
             </div>
 
             <div className="bg-white border border-slate-100 rounded-2xl p-6">
@@ -290,14 +309,6 @@ export default function LandingPage() {
             </div>
 
             <div className="bg-white border border-slate-100 rounded-2xl p-6">
-              <div className="w-10 h-10 rounded-xl bg-red-50 text-red-600 flex items-center justify-center mb-4">
-                <CreditCard className="w-5 h-5" />
-              </div>
-              <h3 className="font-bold text-slate-900 text-sm mb-1.5">Payments tracker</h3>
-              <p className="text-sm text-slate-500 leading-relaxed">Every EMD and Security Deposit tracked Paid → Pending Refund → Refunded, so your capital doesn't sit forgotten.</p>
-            </div>
-
-            <div className="bg-white border border-slate-100 rounded-2xl p-6">
               <div className="w-10 h-10 rounded-xl bg-cyan-50 text-cyan-600 flex items-center justify-center mb-4">
                 <Folder className="w-5 h-5" />
               </div>
@@ -314,11 +325,20 @@ export default function LandingPage() {
             </div>
 
             <div className="bg-white border border-slate-100 rounded-2xl p-6">
+              <div className="w-10 h-10 rounded-xl bg-red-50 text-red-600 flex items-center justify-center mb-4">
+                <CreditCard className="w-5 h-5" />
+              </div>
+              <h3 className="font-bold text-slate-900 text-sm mb-1.5">Payments tracker</h3>
+              <p className="text-sm text-slate-500 leading-relaxed">Track EMD / tender-fee payments per project — Paid → Pending Refund → Refunded — so your capital is never lost track of.</p>
+            </div>
+
+            <div className="bg-white border border-slate-100 rounded-2xl p-6">
               <div className="w-10 h-10 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center mb-4">
                 <LayoutGrid className="w-5 h-5" />
               </div>
-              <h3 className="font-bold text-slate-900 text-sm mb-1.5">Dashboard &amp; pipeline</h3>
-              <p className="text-sm text-slate-500 leading-relaxed">Active tenders, high-match count, deadlines this week and your whole bidding operation on one screen.</p>
+              <h3 className="font-bold text-slate-900 text-sm mb-1.5">Project management &amp; dashboard</h3>
+              <p className="text-sm text-slate-500 leading-relaxed">Unlimited projects, editable project names with the original tender name preserved, bid revision history, financial snapshots and auto-save.</p>
+              <p className="text-sm text-slate-500 leading-relaxed mt-1.5">Active tenders, high-match count and this week's deadlines, all on one screen.</p>
             </div>
 
           </div>
@@ -329,7 +349,7 @@ export default function LandingPage() {
       <section className="max-w-5xl mx-auto px-6 lg:px-14 py-16">
         <div className="grid grid-cols-2 md:grid-cols-4 border-t border-b border-slate-100">
           <div className="py-6 px-3 text-center border-r border-slate-100">
-            <div className="text-base font-extrabold text-slate-900 leading-tight">Under 60 seconds</div>
+            <div className="text-base font-extrabold text-slate-900 leading-tight">Fast AI processing</div>
             <div className="text-xs text-slate-400 mt-1">Per tender analysis</div>
           </div>
           <div className="py-6 px-3 text-center md:border-r border-slate-100">

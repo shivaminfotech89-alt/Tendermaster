@@ -35,12 +35,12 @@ function GapNotice({ text }: { text: string }) {
   );
 }
 
-function StatCard({ label, value, sub, accent }: { label: string; value: string; sub?: string; accent?: string }) {
+function StatCard({ label, value, sub, accent, border }: { label: string; value: string; sub?: string; accent?: string; border?: string }) {
   return (
-    <div className="bg-slate-900 text-white p-5 rounded-xl border border-slate-800">
-      <p className="text-xs font-semibold text-slate-400 uppercase tracking-widest mb-1">{label}</p>
-      <p className={`text-2xl font-black ${accent || "text-white"}`}>{value}</p>
-      {sub && <p className="text-xs text-slate-400 mt-1">{sub}</p>}
+    <div className={`bg-white p-5 rounded-2xl border border-slate-200 border-l-4 ${border || "border-l-slate-300"} shadow-sm`}>
+      <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1.5">{label}</p>
+      <p className={`text-2xl font-extrabold ${accent || "text-slate-900"}`}>{value}</p>
+      {sub && <p className="text-xs text-slate-500 mt-1">{sub}</p>}
     </div>
   );
 }
@@ -48,7 +48,7 @@ function StatCard({ label, value, sub, accent }: { label: string; value: string;
 function RoleBadge({ role }: { role: string }) {
   const styles: Record<string, string> = {
     superadmin: "bg-purple-100 text-purple-700",
-    admin: "bg-blue-100 text-blue-700",
+    admin: "bg-indigo-100 text-indigo-700",
     premium: "bg-amber-100 text-amber-700",
     free: "bg-slate-100 text-slate-500",
   };
@@ -62,7 +62,7 @@ function RoleBadge({ role }: { role: string }) {
 // ── types ─────────────────────────────────────────────────────────────────────
 
 interface UserRow {
-  id: string; email?: string; name?: string; role: string;
+  id: string; email?: string; name?: string; phone?: string; role: string;
   creditsTotal?: number; creditsUsed?: number; creditsExpiry?: any;
   createdAt?: any; trialClaimed?: boolean;
 }
@@ -281,7 +281,7 @@ export default function SuperAdminPanel() {
   ];
 
   const TAB_CLS = (id: Tab) =>
-    `flex items-center gap-1.5 px-3 py-2 rounded-md font-medium text-sm transition-colors whitespace-nowrap ${activeTab === id ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-slate-100"}`;
+    `flex items-center gap-1.5 px-3 py-2 rounded-lg font-semibold text-sm transition-colors whitespace-nowrap ${activeTab === id ? "bg-indigo-50 text-indigo-700" : "text-slate-600 hover:bg-slate-100"}`;
 
   // ─────────────────────────────────────────────────────────────────────────
 
@@ -290,18 +290,18 @@ export default function SuperAdminPanel() {
       {/* header */}
       <div className="mb-6 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight text-slate-900 flex items-center gap-2">
+          <h1 className="text-3xl font-extrabold tracking-tight text-slate-900 flex items-center gap-2">
             <Shield className="w-7 h-7 text-purple-600" /> Super Admin Dashboard
           </h1>
           <p className="text-slate-500 mt-1">Revenue, usage, cost, funnel, and health.</p>
         </div>
-        <button onClick={() => window.history.back()} className="flex items-center gap-2 px-4 py-2 bg-slate-100 text-slate-700 hover:bg-slate-200 rounded-lg font-medium text-sm border border-slate-200">
+        <button onClick={() => window.history.back()} className="flex items-center gap-2 px-4 py-2.5 bg-white text-slate-700 hover:bg-slate-50 rounded-xl font-semibold text-sm border border-slate-200 shadow-sm">
           <ArrowLeft className="w-4 h-4" /> Back
         </button>
       </div>
 
       {/* tabs */}
-      <div className="flex gap-1 bg-white rounded-lg p-1 border border-slate-200 mb-8 overflow-x-auto">
+      <div className="flex gap-1 bg-white rounded-xl p-1 border border-slate-200 mb-8 overflow-x-auto">
         {TABS.map(t => (
           <button key={t.id} onClick={() => setActiveTab(t.id)} className={TAB_CLS(t.id)}>
             <t.Icon className="w-3.5 h-3.5" /> {t.label}
@@ -314,13 +314,13 @@ export default function SuperAdminPanel() {
         <div className="space-y-6">
           {!usersLoading && (
             <div className="grid grid-cols-3 gap-4">
-              <StatCard label="Total Users" value={String(totalUsers)} accent="text-blue-400" />
-              <StatCard label="Trial Used" value={String(trialUsers)} accent="text-amber-400" />
-              <StatCard label="Active Plans" value={String(users.filter(u => (u.creditsTotal || 0) > (u.creditsUsed || 0)).length)} accent="text-emerald-400" />
+              <StatCard label="Total Users" value={String(totalUsers)} accent="text-indigo-600" border="border-l-indigo-600" />
+              <StatCard label="Trial Used" value={String(trialUsers)} accent="text-amber-600" border="border-l-amber-600" />
+              <StatCard label="Active Plans" value={String(users.filter(u => (u.creditsTotal || 0) > (u.creditsUsed || 0)).length)} accent="text-emerald-600" border="border-l-emerald-600" />
             </div>
           )}
 
-          <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
             <div className="p-4 border-b border-slate-100 flex items-center gap-3">
               <div className="relative flex-1 max-w-sm">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
@@ -333,6 +333,14 @@ export default function SuperAdminPanel() {
               <div className="p-12 flex justify-center"><Loader2 className="w-6 h-6 animate-spin text-purple-600" /></div>
             ) : (
               <div className="divide-y divide-slate-100">
+                <div className="hidden md:grid grid-cols-[2fr_1fr_1fr_1fr_1fr_auto] gap-3 px-4 py-2.5 bg-slate-50 border-b border-slate-100">
+                  <div className="text-[11px] font-extrabold tracking-widest text-slate-400 uppercase">Member</div>
+                  <div className="text-[11px] font-extrabold tracking-widest text-slate-400 uppercase">Mobile No.</div>
+                  <div className="text-[11px] font-extrabold tracking-widest text-slate-400 uppercase">Credits</div>
+                  <div className="text-[11px] font-extrabold tracking-widest text-slate-400 uppercase">Joined</div>
+                  <div className="text-[11px] font-extrabold tracking-widest text-slate-400 uppercase">Actions</div>
+                  <div />
+                </div>
                 {filtered.map(u => {
                   const isExpanded = expandedUid === u.id;
                   const isAdminUser = u.role === "admin" || u.role === "superadmin";
@@ -343,7 +351,7 @@ export default function SuperAdminPanel() {
 
                   return (
                     <div key={u.id}>
-                      <div className="grid grid-cols-[1fr_auto] md:grid-cols-[2fr_1fr_1fr_1fr_auto] gap-3 p-4 hover:bg-slate-50/60 cursor-pointer items-center" onClick={() => openDrawer(u.id)}>
+                      <div className="grid grid-cols-[1fr_auto] md:grid-cols-[2fr_1fr_1fr_1fr_1fr_auto] gap-3 p-4 hover:bg-slate-50 cursor-pointer items-center transition-colors" onClick={() => openDrawer(u.id)}>
                         <div className="min-w-0">
                           <div className="flex items-center gap-2 flex-wrap">
                             <span className="font-semibold text-slate-800 text-sm truncate">{u.name || "—"}</span>
@@ -351,8 +359,9 @@ export default function SuperAdminPanel() {
                           </div>
                           <div className="text-xs text-slate-500 mt-0.5 truncate">{u.email}</div>
                         </div>
+                        <div className="hidden md:block text-sm text-slate-600 font-medium tabular-nums">{u.phone || "—"}</div>
                         <div className="hidden md:block text-sm">
-                          {isAdminUser ? <span className="text-blue-600 font-semibold text-xs">Unlimited</span> : credTotal === 0 ? <span className="text-slate-400 text-xs">No plan</span> : (
+                          {isAdminUser ? <span className="text-indigo-600 font-semibold text-xs">Unlimited</span> : credTotal === 0 ? <span className="text-slate-400 text-xs">No plan</span> : (
                             <div>
                               <span className={`font-semibold text-sm ${expired ? "text-red-500" : "text-slate-800"}`}>{credTotal - credUsed} / {credTotal}</span>
                               <div className="text-[10px] text-slate-400 mt-0.5">{expiry ? `Exp ${fmtDate(expiry)}` : "No expiry"}</div>
@@ -361,12 +370,12 @@ export default function SuperAdminPanel() {
                         </div>
                         <div className="hidden md:block text-xs text-slate-500">{fmtDate(u.createdAt)}</div>
                         <div className="hidden md:flex items-center gap-1.5 flex-wrap" onClick={e => e.stopPropagation()}>
-                          {u.role !== "superadmin" && <button onClick={() => handleRoleUpdate(u, "superadmin")} className="px-2 py-1 bg-purple-50 text-purple-700 text-[10px] font-bold rounded hover:bg-purple-100 whitespace-nowrap">→ SA</button>}
-                          {u.role !== "admin" && <button onClick={() => handleRoleUpdate(u, "admin")} className="px-2 py-1 bg-blue-50 text-blue-700 text-[10px] font-bold rounded hover:bg-blue-100 whitespace-nowrap">→ Admin</button>}
-                          {u.role !== "free" && u.role !== "superadmin" && <button onClick={() => handleRoleUpdate(u, "free")} className="px-2 py-1 bg-slate-100 text-slate-600 text-[10px] font-bold rounded hover:bg-slate-200">→ Free</button>}
+                          {u.role !== "superadmin" && <button onClick={() => handleRoleUpdate(u, "superadmin")} className="px-2.5 py-1 bg-purple-50 text-purple-700 text-[10px] font-bold rounded-md hover:bg-purple-100 whitespace-nowrap transition-colors">→ SA</button>}
+                          {u.role !== "admin" && <button onClick={() => handleRoleUpdate(u, "admin")} className="px-2.5 py-1 bg-indigo-50 text-indigo-700 text-[10px] font-bold rounded-md hover:bg-indigo-100 whitespace-nowrap transition-colors">→ Admin</button>}
+                          {u.role !== "free" && u.role !== "superadmin" && <button onClick={() => handleRoleUpdate(u, "free")} className="px-2.5 py-1 bg-slate-100 text-slate-600 text-[10px] font-bold rounded-md hover:bg-slate-200 transition-colors">→ Free</button>}
                           <div className="flex items-center gap-1">
-                            <input type="number" min={1} value={grantInputs[u.id] || ""} onChange={e => setGrantInputs(prev => ({ ...prev, [u.id]: e.target.value }))} placeholder="N" className="w-12 border border-slate-200 rounded px-1.5 py-1 text-xs focus:ring-1 focus:ring-emerald-400 outline-none" />
-                            <button onClick={() => handleGrant(u, parseInt(grantInputs[u.id] || "0"))} className="px-2 py-1 bg-emerald-50 text-emerald-700 text-[10px] font-bold rounded hover:bg-emerald-100 whitespace-nowrap">Grant</button>
+                            <input type="number" min={1} value={grantInputs[u.id] || ""} onChange={e => setGrantInputs(prev => ({ ...prev, [u.id]: e.target.value }))} placeholder="N" className="w-12 border border-slate-200 rounded-md px-1.5 py-1 text-xs focus:ring-1 focus:ring-emerald-400 outline-none" />
+                            <button onClick={() => handleGrant(u, parseInt(grantInputs[u.id] || "0"))} className="px-2.5 py-1 bg-emerald-50 text-emerald-700 text-[10px] font-bold rounded-md hover:bg-emerald-100 whitespace-nowrap transition-colors">Grant</button>
                           </div>
                         </div>
                         <div className="text-slate-400">{isExpanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}</div>
@@ -376,12 +385,12 @@ export default function SuperAdminPanel() {
                         <div className="bg-slate-50 border-t border-slate-100 px-4 pb-4 pt-3">
                           {/* mobile actions */}
                           <div className="flex md:hidden flex-wrap gap-2 mb-3" onClick={e => e.stopPropagation()}>
-                            {u.role !== "superadmin" && <button onClick={() => handleRoleUpdate(u, "superadmin")} className="px-3 py-1.5 bg-purple-50 text-purple-700 text-xs font-bold rounded hover:bg-purple-100">→ SA</button>}
-                            {u.role !== "admin" && <button onClick={() => handleRoleUpdate(u, "admin")} className="px-3 py-1.5 bg-blue-50 text-blue-700 text-xs font-bold rounded hover:bg-blue-100">→ Admin</button>}
-                            {u.role !== "free" && u.role !== "superadmin" && <button onClick={() => handleRoleUpdate(u, "free")} className="px-3 py-1.5 bg-slate-100 text-slate-600 text-xs font-bold rounded hover:bg-slate-200">→ Free</button>}
+                            {u.role !== "superadmin" && <button onClick={() => handleRoleUpdate(u, "superadmin")} className="px-3 py-1.5 bg-purple-50 text-purple-700 text-xs font-bold rounded-md hover:bg-purple-100 transition-colors">→ SA</button>}
+                            {u.role !== "admin" && <button onClick={() => handleRoleUpdate(u, "admin")} className="px-3 py-1.5 bg-indigo-50 text-indigo-700 text-xs font-bold rounded-md hover:bg-indigo-100 transition-colors">→ Admin</button>}
+                            {u.role !== "free" && u.role !== "superadmin" && <button onClick={() => handleRoleUpdate(u, "free")} className="px-3 py-1.5 bg-slate-100 text-slate-600 text-xs font-bold rounded-md hover:bg-slate-200 transition-colors">→ Free</button>}
                             <div className="flex items-center gap-1">
-                              <input type="number" min={1} value={grantInputs[u.id] || ""} onChange={e => setGrantInputs(prev => ({ ...prev, [u.id]: e.target.value }))} placeholder="N" className="w-14 border border-slate-200 rounded px-2 py-1 text-xs focus:ring-1 focus:ring-emerald-400 outline-none" />
-                              <button onClick={() => handleGrant(u, parseInt(grantInputs[u.id] || "0"))} className="px-3 py-1.5 bg-emerald-50 text-emerald-700 text-xs font-bold rounded hover:bg-emerald-100">Grant</button>
+                              <input type="number" min={1} value={grantInputs[u.id] || ""} onChange={e => setGrantInputs(prev => ({ ...prev, [u.id]: e.target.value }))} placeholder="N" className="w-14 border border-slate-200 rounded-md px-2 py-1 text-xs focus:ring-1 focus:ring-emerald-400 outline-none" />
+                              <button onClick={() => handleGrant(u, parseInt(grantInputs[u.id] || "0"))} className="px-3 py-1.5 bg-emerald-50 text-emerald-700 text-xs font-bold rounded-md hover:bg-emerald-100 transition-colors">Grant</button>
                             </div>
                           </div>
 
@@ -438,13 +447,13 @@ export default function SuperAdminPanel() {
           {rev && (
             <>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                <StatCard label="Total Revenue" value={fmt(rev.allTime?.totalRevenuePaise ?? 0)} accent="text-emerald-400" />
-                <StatCard label="This Month" value={fmt(rev.thisMonth?.totalRevenuePaise ?? 0)} sub={`${rev.thisMonth?.count ?? 0} payments`} accent="text-blue-400" />
-                <StatCard label="Paying Customers" value={String(rev.allTime?.payingUsersCount ?? 0)} accent="text-amber-400" />
-                <StatCard label="Avg / Customer" value={(rev.allTime?.payingUsersCount ?? 0) > 0 ? fmt(rev.allTime.avgRevenuePaise) : "—"} accent="text-purple-400" />
+                <StatCard label="Total Revenue" value={fmt(rev.allTime?.totalRevenuePaise ?? 0)} accent="text-emerald-600" border="border-l-emerald-600" />
+                <StatCard label="This Month" value={fmt(rev.thisMonth?.totalRevenuePaise ?? 0)} sub={`${rev.thisMonth?.count ?? 0} payments`} accent="text-indigo-600" border="border-l-indigo-600" />
+                <StatCard label="Paying Customers" value={String(rev.allTime?.payingUsersCount ?? 0)} accent="text-amber-600" border="border-l-amber-600" />
+                <StatCard label="Avg / Customer" value={(rev.allTime?.payingUsersCount ?? 0) > 0 ? fmt(rev.allTime.avgRevenuePaise) : "—"} accent="text-purple-600" border="border-l-purple-600" />
               </div>
 
-              <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+              <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
                 <div className="p-4 border-b border-slate-100"><h3 className="font-bold text-slate-800">Revenue by Plan</h3></div>
                 <div className="divide-y divide-slate-100">
                   {Object.entries(rev.allTime?.byPlan ?? {}).map(([plan, data]) => (
@@ -460,7 +469,7 @@ export default function SuperAdminPanel() {
                 </div>
               </div>
 
-              <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+              <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
                 <div className="p-4 border-b border-slate-100"><h3 className="font-bold text-slate-800">Recent Payments</h3></div>
                 <div className="divide-y divide-slate-100">
                   {(rev.recentPayments ?? []).slice(0, 20).map((p, i) => (
@@ -489,7 +498,7 @@ export default function SuperAdminPanel() {
           <div className="flex items-center gap-3">
             <span className="text-sm font-medium text-slate-600">Last</span>
             {[7, 14, 30, 90].map(d => (
-              <button key={d} onClick={() => setUsageDays(d)} className={`px-3 py-1.5 rounded-lg text-sm font-semibold border transition-colors ${usageDays === d ? "bg-slate-900 text-white border-slate-900" : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"}`}>{d}d</button>
+              <button key={d} onClick={() => setUsageDays(d)} className={`px-3 py-1.5 rounded-lg text-sm font-semibold border transition-colors ${usageDays === d ? "bg-indigo-50 text-indigo-700 border-indigo-200" : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"}`}>{d}d</button>
             ))}
             {usageLoading && <Loader2 className="w-4 h-4 animate-spin text-slate-400" />}
           </div>
@@ -500,13 +509,13 @@ export default function SuperAdminPanel() {
           {usage && (
             <>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                <StatCard label="Total Analyses" value={String((usage.totals?.analysis ?? 0) + (usage.totals?.reanalysis ?? 0))} accent="text-blue-400" />
-                <StatCard label="Documents Generated" value={String((usage.totals?.document ?? 0) + (usage.totals?.extraction ?? 0))} accent="text-purple-400" />
-                <StatCard label="Chat Messages" value={String(usage.totals?.chat ?? 0)} accent="text-emerald-400" />
-                <StatCard label="Failed Events" value={String(usage.health?.failedCount ?? 0)} accent={(usage.health?.failedCount ?? 0) > 0 ? "text-red-400" : "text-slate-400"} />
+                <StatCard label="Total Analyses" value={String((usage.totals?.analysis ?? 0) + (usage.totals?.reanalysis ?? 0))} accent="text-indigo-600" border="border-l-indigo-600" />
+                <StatCard label="Documents Generated" value={String((usage.totals?.document ?? 0) + (usage.totals?.extraction ?? 0))} accent="text-purple-600" border="border-l-purple-600" />
+                <StatCard label="Chat Messages" value={String(usage.totals?.chat ?? 0)} accent="text-emerald-600" border="border-l-emerald-600" />
+                <StatCard label="Failed Events" value={String(usage.health?.failedCount ?? 0)} accent={(usage.health?.failedCount ?? 0) > 0 ? "text-red-600" : "text-slate-400"} border={(usage.health?.failedCount ?? 0) > 0 ? "border-l-red-600" : "border-l-slate-300"} />
               </div>
 
-              <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+              <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
                 <div className="p-4 border-b border-slate-100"><h3 className="font-bold text-slate-800">Daily Breakdown — last {usageDays} days</h3></div>
                 {(usage.daily ?? []).length === 0 ? (
                   <p className="text-sm text-slate-400 p-6 text-center">No usage events in this period — this will populate as analyses and documents are generated.</p>
@@ -546,7 +555,7 @@ export default function SuperAdminPanel() {
                 )}
               </div>
 
-              <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+              <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
                 <div className="p-4 border-b border-slate-100">
                   <h3 className="font-bold text-slate-800">Top Consumers</h3>
                   <p className="text-xs text-slate-400 mt-0.5">Ranked by total events. Flag users running disproportionately many analyses.</p>
@@ -579,7 +588,7 @@ export default function SuperAdminPanel() {
       {/* ═══ COST & MARGIN TAB ═══ */}
       {activeTab === "cost" && (
         <div className="space-y-6">
-          <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6 space-y-4">
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 space-y-4">
             <h3 className="font-bold text-slate-800">Billing Inputs</h3>
             <p className="text-xs text-slate-500">Enter your actual Google Cloud bill and per-analysis cost estimate. Saved to Firestore and used to compute real margin.</p>
             <div className="grid md:grid-cols-2 gap-4">
@@ -598,7 +607,7 @@ export default function SuperAdminPanel() {
                 </div>
               </div>
             </div>
-            <button onClick={saveBillingSettings} disabled={costSaving} className="flex items-center gap-2 px-5 py-2 bg-slate-900 text-white rounded-lg font-semibold text-sm hover:bg-slate-800 disabled:opacity-50">
+            <button onClick={saveBillingSettings} disabled={costSaving} className="flex items-center gap-2 px-5 py-2.5 bg-indigo-600 text-white rounded-xl font-semibold text-sm hover:bg-indigo-700 disabled:opacity-50 shadow-sm transition-colors">
               {costSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />} Save
             </button>
           </div>
@@ -612,10 +621,10 @@ export default function SuperAdminPanel() {
               return (
                 <div className="space-y-4">
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                    <StatCard label={`Analyses (${usageDays}d)`} value={String(totalAnalyses)} accent="text-blue-400" />
-                    <StatCard label="Est. Gemini Spend" value={!isNaN(cpa) && cpa > 0 ? `₹${(totalAnalyses * cpa).toLocaleString("en-IN")}` : "—"} sub={!isNaN(cpa) && cpa > 0 ? `@ ₹${cpa}/analysis` : "Enter cost above"} accent="text-amber-400" />
-                    <StatCard label="This Month Revenue" value={fmt(rev.thisMonth.totalRevenuePaise)} accent="text-emerald-400" />
-                    <StatCard label="Real Margin" value={!isNaN(bill) && bill > 0 ? `₹${(revRs - bill).toLocaleString("en-IN")}` : "—"} sub={!isNaN(bill) && bill > 0 ? "Revenue − actual bill" : "Enter bill above"} accent={!isNaN(bill) && bill > 0 ? (revRs - bill >= 0 ? "text-emerald-400" : "text-red-400") : "text-slate-400"} />
+                    <StatCard label={`Analyses (${usageDays}d)`} value={String(totalAnalyses)} accent="text-indigo-600" border="border-l-indigo-600" />
+                    <StatCard label="Est. Gemini Spend" value={!isNaN(cpa) && cpa > 0 ? `₹${(totalAnalyses * cpa).toLocaleString("en-IN")}` : "—"} sub={!isNaN(cpa) && cpa > 0 ? `@ ₹${cpa}/analysis` : "Enter cost above"} accent="text-amber-600" border="border-l-amber-600" />
+                    <StatCard label="This Month Revenue" value={fmt(rev.thisMonth.totalRevenuePaise)} accent="text-emerald-600" border="border-l-emerald-600" />
+                    <StatCard label="Real Margin" value={!isNaN(bill) && bill > 0 ? `₹${(revRs - bill).toLocaleString("en-IN")}` : "—"} sub={!isNaN(bill) && bill > 0 ? "Revenue − actual bill" : "Enter bill above"} accent={!isNaN(bill) && bill > 0 ? (revRs - bill >= 0 ? "text-emerald-600" : "text-red-600") : "text-slate-400"} border={!isNaN(bill) && bill > 0 ? (revRs - bill >= 0 ? "border-l-emerald-600" : "border-l-red-600") : "border-l-slate-300"} />
                   </div>
                   <GapNotice text="Estimated Gemini spend uses the cost-per-analysis figure you entered above — it is an estimate, not a measured cost. Use your actual Google Cloud bill for real margin." />
                   <GapNotice text="Cost-per-analysis trend over time is not available — usage_events does not record token counts. Consider adding inputChars to usage_events if trend analysis is needed later." />
@@ -626,7 +635,7 @@ export default function SuperAdminPanel() {
             <div className="py-8 flex justify-center">
               <div className="text-slate-400 text-sm text-center">
                 <p>Load the Revenue and Usage tabs first to compute margin.</p>
-                <button onClick={() => setActiveTab("revenue")} className="mt-3 px-4 py-2 bg-slate-100 rounded-lg text-xs font-medium text-slate-700 hover:bg-slate-200">Go to Revenue →</button>
+                <button onClick={() => setActiveTab("revenue")} className="mt-3 px-4 py-2 bg-slate-100 rounded-xl text-xs font-semibold text-slate-700 hover:bg-slate-200 transition-colors">Go to Revenue →</button>
               </div>
             </div>
           )}
@@ -640,7 +649,7 @@ export default function SuperAdminPanel() {
             <div className="py-12 flex justify-center"><Loader2 className="w-6 h-6 animate-spin text-purple-600" /></div>
           ) : (
             <>
-              <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+              <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
                 <div className="p-4 border-b border-slate-100">
                   <h3 className="font-bold text-slate-800">Conversion Funnel</h3>
                   <p className="text-xs text-slate-400 mt-0.5">All-time. Load the Revenue tab to see the Paid step.</p>
@@ -679,7 +688,7 @@ export default function SuperAdminPanel() {
           <div className="flex items-center gap-3">
             <span className="text-sm font-medium text-slate-600">Period</span>
             {[7, 14, 30, 90].map(d => (
-              <button key={d} onClick={() => setUsageDays(d)} className={`px-3 py-1.5 rounded-lg text-sm font-semibold border transition-colors ${usageDays === d ? "bg-slate-900 text-white border-slate-900" : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"}`}>{d}d</button>
+              <button key={d} onClick={() => setUsageDays(d)} className={`px-3 py-1.5 rounded-lg text-sm font-semibold border transition-colors ${usageDays === d ? "bg-indigo-50 text-indigo-700 border-indigo-200" : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"}`}>{d}d</button>
             ))}
             {usageLoading && <Loader2 className="w-4 h-4 animate-spin text-slate-400" />}
           </div>
@@ -689,13 +698,41 @@ export default function SuperAdminPanel() {
           )}
           {usage && (
             <>
-              <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-                <StatCard label="Failed Events" value={String(usage.health?.failedCount ?? 0)} accent={(usage.health?.failedCount ?? 0) > 0 ? "text-red-400" : "text-emerald-400"} />
-                <StatCard label="Low-Confidence Results" value={String(usage.health?.lowConfidenceCount ?? 0)} accent={(usage.health?.lowConfidenceCount ?? 0) > 0 ? "text-amber-400" : "text-emerald-400"} />
-                <StatCard label="Payment Errors" value={String((usage.health?.paymentErrors ?? []).length)} accent={(usage.health?.paymentErrors ?? []).length > 0 ? "text-red-400" : "text-emerald-400"} sub={(usage.health?.paymentErrors ?? []).length === 0 ? "Zero unrecognised amounts — good" : undefined} />
+              {/* Severity summary — bar fill reflects PROBLEM severity, not uptime:
+                  0 = minimal green bar (good), >0 = full amber/red bar (bad). The
+                  count itself is the only real number here; the bar communicates
+                  "more failures = more alarming" without fabricating a percentage
+                  or denominator that doesn't exist for these metrics. */}
+              <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6">
+                <h3 className="font-bold text-slate-800 mb-4">Health Summary <span className="text-slate-400 font-normal text-sm">— last {usageDays} days</span></h3>
+                <div className="flex flex-col gap-4">
+                  {[
+                    { key: "failed", label: "Failed Events", count: usage.health?.failedCount ?? 0, tone: "red" as const, goodNote: "No failures in this period" },
+                    { key: "lowconf", label: "Low-Confidence Results", count: usage.health?.lowConfidenceCount ?? 0, tone: "amber" as const, goodNote: "No low-confidence results" },
+                    { key: "payerr", label: "Payment Errors", count: (usage.health?.paymentErrors ?? []).length, tone: "red" as const, goodNote: "Zero unrecognised amounts" },
+                  ].map(m => {
+                    const bad = m.count > 0;
+                    const fillColor = bad ? (m.tone === "amber" ? "bg-amber-500" : "bg-red-500") : "bg-emerald-500";
+                    const textColor = bad ? (m.tone === "amber" ? "text-amber-600" : "text-red-600") : "text-emerald-600";
+                    return (
+                      <div key={m.key}>
+                        <div className="flex items-center justify-between gap-4">
+                          <div className="text-sm font-semibold text-slate-700">{m.label}</div>
+                          <div className="flex items-center gap-2.5">
+                            <div className="w-32 h-1.5 rounded-full bg-slate-100 overflow-hidden">
+                              <div className={`h-full rounded-full transition-all ${fillColor}`} style={{ width: bad ? "100%" : "6%" }} />
+                            </div>
+                            <div className={`text-sm font-extrabold w-6 text-right ${textColor}`}>{m.count}</div>
+                          </div>
+                        </div>
+                        {!bad && <div className="text-xs text-emerald-600 mt-0.5">{m.goodNote} — good</div>}
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
 
-              <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+              <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
                 <div className="p-4 border-b border-slate-100"><h3 className="font-bold text-slate-800">Failed Events <span className="text-slate-400 font-normal text-sm">— last {usageDays} days</span></h3></div>
                 {(usage.health?.failedEvents ?? []).length === 0 ? (
                   <div className="p-6 flex items-center gap-2 text-emerald-600"><CheckCircle2 className="w-5 h-5" /><span className="text-sm font-medium">No failures in this period.</span></div>
@@ -718,7 +755,7 @@ export default function SuperAdminPanel() {
                 )}
               </div>
 
-              <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+              <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
                 <div className="p-4 border-b border-slate-100">
                   <h3 className="font-bold text-slate-800 flex items-center gap-2">
                     Payment Errors
@@ -752,7 +789,7 @@ export default function SuperAdminPanel() {
       {/* ═══ SETTINGS TAB ═══ */}
       {activeTab === "settings" && (
         <div className="space-y-6">
-          <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6 space-y-4">
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 space-y-4">
             <h3 className="font-bold text-slate-800">System Settings</h3>
             {sysSettings === null ? (
               <div className="py-6 flex justify-center"><Loader2 className="w-5 h-5 animate-spin text-slate-400" /></div>
@@ -788,7 +825,7 @@ export default function SuperAdminPanel() {
                     className="w-full font-mono text-xs border border-slate-200 rounded-lg px-3 py-2 focus:ring-2 focus:ring-purple-500 outline-none resize-y"
                   />
                 </div>
-                <button onClick={saveSysSettings} disabled={settSaving} className="flex items-center gap-2 px-5 py-2 bg-slate-900 text-white rounded-lg font-semibold text-sm hover:bg-slate-800 disabled:opacity-50">
+                <button onClick={saveSysSettings} disabled={settSaving} className="flex items-center gap-2 px-5 py-2.5 bg-indigo-600 text-white rounded-xl font-semibold text-sm hover:bg-indigo-700 disabled:opacity-50 shadow-sm transition-colors">
                   {settSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />} Save Settings
                 </button>
               </>

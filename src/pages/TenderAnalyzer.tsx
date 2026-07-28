@@ -2859,7 +2859,7 @@ export default function TenderAnalyzer() {
                         <ul className="space-y-1">
                           {analysisRemarks.filesSkipped.map((s: any, idx: number) => (
                             <li key={idx} className="flex items-start gap-2 text-sm text-amber-700 bg-amber-50 rounded-lg px-3 py-2">
-                              <span className="font-medium shrink-0">File {s.index + 1}:</span>
+                              <span className="font-medium shrink-0">{s.fileName || `File ${s.index + 1}`}:</span>
                               <span>{s.reason}</span>
                             </li>
                           ))}

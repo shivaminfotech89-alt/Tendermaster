@@ -3194,20 +3194,34 @@ export default function ProjectDetails() {
               const skippedMap = new Map<number, string>(
                 (runEntry?.filesSkipped || []).map((s: any) => [s.index as number, s.reason as string]),
               );
-              const noteMap = new Map<number, string>();
-              for (const note of (runEntry?.notes || []) as string[]) {
-                const m = /^file (\d+): (.+)$/i.exec(note);
-                if (m) noteMap.set(parseInt(m[1], 10), m[2]);
-              }
               const totalCount: number = runEntry?.totalFilesProvided ?? fNames.length;
               const skippedCount: number = runEntry?.filesSkipped?.length ?? 0;
               const analyzedCount: number = runEntry?.filesAnalyzed ?? Math.max(0, totalCount - skippedCount);
               const rowCount = Math.max(totalCount, fNames.length);
+              // Notes are pushed server-side once per NON-skipped file, strictly
+              // in ascending index order (see server.ts's storage_urls loop) —
+              // so the note for row i is simply the next unconsumed entry in
+              // `notes`, skipping any row that's in skippedMap. This is
+              // positional, not string-parsed, so it doesn't care whether the
+              // note's own label prefix is a real filename or a "File N"
+              // fallback — both were baked in server-side already.
+              const notesList: string[] = (runEntry?.notes || []) as string[];
+              let noteCursor = 0;
+              const noteMap = new Map<number, string>();
+              for (let i = 0; i < rowCount; i++) {
+                if (skippedMap.has(i)) continue;
+                const note = notesList[noteCursor];
+                noteCursor++;
+                if (typeof note === 'string') {
+                  const sepIdx = note.indexOf(': ');
+                  noteMap.set(i, sepIdx >= 0 ? note.slice(sepIdx + 2) : note);
+                }
+              }
               const rows = Array.from({ length: rowCount }, (_, i) => {
                 const name = fNames[i] ?? `File ${i + 1}`;
                 const skipped = skippedMap.has(i);
                 const skipReason = skippedMap.get(i) ?? '';
-                const noteText = noteMap.get(i + 1) ?? '';
+                const noteText = noteMap.get(i) ?? '';
                 const isTextLayer = noteText.startsWith('text-layer');
                 const isImagePath = noteText.startsWith('image/pdf') || noteText.startsWith('image') || noteText.includes('image/pdf');
                 return { name, skipped, skipReason, noteText, isTextLayer, isImagePath };

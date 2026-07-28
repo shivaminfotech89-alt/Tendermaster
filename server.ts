@@ -1001,6 +1001,20 @@ function detectLowConfidence(parsed: any): LowConfidenceResult {
   return { isLow: missing.length > 0, missing };
 }
 
+/** Resolves the real uploaded filename for a positional index, given the
+ *  request's parallel-indexed `fileNames` array (present for storage_urls
+ *  uploads — multi-PDF and ZIP alike, ZIP entries use their in-zip
+ *  basename; absent for the text/url-paste paths, which have no file
+ *  identity to begin with). Falls back to a positional label ONLY when a
+ *  real name is genuinely missing for that index — never silently renders
+ *  a wrong name. Shared by both the Tier-1 storage_urls skip/notes
+ *  messages and Tier-2's chunk-planning sourceLabels so the two tiers
+ *  never disagree on what a file is called. */
+function resolveFileLabel(fileNames: unknown, index: number): string {
+  const rawName = Array.isArray(fileNames) ? fileNames[index] : null;
+  return typeof rawName === "string" && rawName.trim().length > 0 ? rawName : `File ${index + 1}`;
+}
+
 // ---------------------------------------------------------------------------
 // Shared analysis prompt + schema — used by BOTH the Tier-1 synchronous path
 // (/api/analyze-tender) and the Tier-2 async job path (/api/process-analysis-job).
@@ -1157,8 +1171,7 @@ async function fetchTier2FileEntries(
         continue;
       }
       const url = allUrls[i];
-      const rawName = Array.isArray(fileNames) ? fileNames[i] : null;
-      const label = typeof rawName === "string" && rawName.trim().length > 0 ? rawName : `file ${i + 1}`;
+      const label = resolveFileLabel(fileNames, i);
       try {
         const fetched = await safeFetch(url);
         if (!fetched.ok) {
@@ -1905,7 +1918,7 @@ app.post("/api/analyze-tender", verifyFirebaseToken, async (req: AuthenticatedRe
       const MAX_FILES = 10;
       const allUrls: string[] = Array.isArray(actualContent) ? actualContent : [];
       const totalFilesProvided = allUrls.length;
-      const filesSkipped: { index: number; reason: string }[] = [];
+      const filesSkipped: { index: number; fileName: string; reason: string }[] = [];
       let filesAnalyzed = 0;
 
       const notes: string[] = [];
@@ -1914,15 +1927,16 @@ app.post("/api/analyze-tender", verifyFirebaseToken, async (req: AuthenticatedRe
       ];
 
       for (let i = 0; i < allUrls.length; i++) {
+        const label = resolveFileLabel(fileNames, i);
         if (i >= MAX_FILES) {
-          filesSkipped.push({ index: i, reason: "Exceeded 10-file limit — file not analyzed" });
+          filesSkipped.push({ index: i, fileName: label, reason: "Exceeded 10-file limit — file not analyzed" });
           continue;
         }
         const url = allUrls[i];
         try {
           const fetched = await safeFetch(url);
           if (!fetched.ok) {
-            filesSkipped.push({ index: i, reason: `Fetch failed (HTTP ${fetched.status})` });
+            filesSkipped.push({ index: i, fileName: label, reason: `Fetch failed (HTTP ${fetched.status})` });
             continue;
           }
           const contentType = fetched.headers.get("content-type") || "application/pdf";
@@ -1930,17 +1944,17 @@ app.post("/api/analyze-tender", verifyFirebaseToken, async (req: AuthenticatedRe
           if (contentType.includes("text/plain")) {
             const text = Buffer.from(buffer).toString("utf-8");
             docContents.push(`\n--- DOCUMENT CONTENT ---\n${text}\n`);
-            notes.push(`file ${i + 1}: text-layer path (${text.length} chars)`);
+            notes.push(`${label}: text-layer path (${text.length} chars)`);
           } else {
             const base64 = Buffer.from(buffer).toString("base64");
             docContents.push({ inlineData: { mimeType: contentType, data: base64 } });
-            notes.push(`file ${i + 1}: image/pdf path (${contentType})`);
-            console.log(`[analyze-tender] file ${i + 1} using image/PDF path — content-type: ${contentType}, size: ${buffer.byteLength} bytes`);
+            notes.push(`${label}: image/pdf path (${contentType})`);
+            console.log(`[analyze-tender] ${label} using image/PDF path — content-type: ${contentType}, size: ${buffer.byteLength} bytes`);
           }
           filesAnalyzed++;
         } catch (err) {
           console.error("Failed to fetch storage URL", url, err);
-          filesSkipped.push({ index: i, reason: "Network error fetching file" });
+          filesSkipped.push({ index: i, fileName: label, reason: "Network error fetching file" });
         }
       }
 

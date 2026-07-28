@@ -222,36 +222,73 @@ export default function BOQSection({
   // selection already matches (so this converges, not loops).
   useEffect(() => {
     if (boq.estimatedAmountConfirmed) return;
-    if (scheduleSum == null || scheduleSum <= 0) return;
-    const currentCandidates = boq.financialCandidates ?? [];
-    const currentIdx = boq.suggestedCandidateIndex ?? 0;
 
     // Percentage-rate: scheduleSum is the source of truth once valid — see
     // the init effect's own comment for the "Schedule-B Amount showed
-    // Tender Value" bug this guards against. Runs independently of (and
-    // before) the candidate-matching branch below and its
-    // `betterIdx === currentIdx` early return, because when no candidate is
-    // actually the schedule figure, pickScheduleMatchingCandidateIndex has
-    // nothing better to switch to — betterIdx stays === currentIdx forever
-    // — and would otherwise never correct an out-of-tolerance value like a
-    // tender-notice figure that got prefilled before scheduleSum arrived.
+    // Tender Value" bug this guards against. Deliberately checked BEFORE
+    // (and independent of) the `scheduleSum == null` guard below — that
+    // guard exists for the candidate-matching branch further down, which
+    // has nothing useful to do without a scheduleSum. This branch does:
+    // while scheduleSum is still pending (BOQ extraction — async, often
+    // slower than the boqType text classification that can already have
+    // resolved to percentage_rate by now), any pre-fill can only have come
+    // from the candidate-fallback path, never from a real schedule figure —
+    // so it must not sit there confirmable. Runs independently of, and
+    // before, the `betterIdx === currentIdx` early return too: when no
+    // candidate is actually the schedule figure, pickScheduleMatchingCandidateIndex
+    // has nothing better to switch to (betterIdx stays === currentIdx
+    // forever) and would otherwise never correct an out-of-tolerance value.
     if (boq.boqType === 'percentage_rate') {
-      if (boq.estimatedAmount === scheduleSum) return; // already correct
+      const currentCandidates = boq.financialCandidates ?? [];
+      const currentIdx = boq.suggestedCandidateIndex ?? 0;
       const currentCandidateValue = currentCandidates[currentIdx]?.valueNumber;
-      const rawOverride = currentCandidateValue == null
-        || preferExactScheduleSum(currentCandidateValue, scheduleSum) !== scheduleSum;
-      setBoq({
-        ...boq,
-        estimatedAmount: scheduleSum,
-        estimatedAmountPage: rawOverride ? undefined : currentCandidates[currentIdx]?.page,
-        estimatedAmountClause: rawOverride ? undefined : currentCandidates[currentIdx]?.clause,
-        estimatedAmountText: rawOverride ? undefined : currentCandidates[currentIdx]?.sourceText,
-        boqLastChangedAt: Date.now(),
-      });
-      setAmountInput(String(scheduleSum));
+      const scheduleSumValid = scheduleSum != null && scheduleSum > 0;
+
+      if (scheduleSumValid) {
+        if (boq.estimatedAmount === scheduleSum) return; // already correct
+        const rawOverride = currentCandidateValue == null
+          || preferExactScheduleSum(currentCandidateValue, scheduleSum) !== scheduleSum;
+        setBoq({
+          ...boq,
+          estimatedAmount: scheduleSum,
+          estimatedAmountPage: rawOverride ? undefined : currentCandidates[currentIdx]?.page,
+          estimatedAmountClause: rawOverride ? undefined : currentCandidates[currentIdx]?.clause,
+          estimatedAmountText: rawOverride ? undefined : currentCandidates[currentIdx]?.sourceText,
+          boqLastChangedAt: Date.now(),
+        });
+        setAmountInput(String(scheduleSum));
+        return;
+      }
+
+      // scheduleSum still pending. Only clear a value we're CONFIDENT is
+      // our own unedited auto-prefill — exactly the currently-suggested
+      // candidate's own raw value, never touched by the user (estimatedAmountEdited
+      // is set the moment handleAmountInputChange runs). Any ambiguity
+      // biases toward leaving it alone: a spuriously-blanked field
+      // mid-typing is merely annoying (the user is still typing into it),
+      // a wrongly-frozen tender value confirmed by the user is dangerous —
+      // and only the former is self-correcting.
+      const isKnownAutoPrefill = !boq.estimatedAmountEdited
+        && boq.estimatedAmount != null
+        && currentCandidateValue != null
+        && boq.estimatedAmount === currentCandidateValue;
+      if (isKnownAutoPrefill) {
+        setBoq({
+          ...boq,
+          estimatedAmount: null,
+          estimatedAmountPage: undefined,
+          estimatedAmountClause: undefined,
+          estimatedAmountText: undefined,
+          boqLastChangedAt: Date.now(),
+        });
+        setAmountInput('');
+      }
       return;
     }
 
+    if (scheduleSum == null || scheduleSum <= 0) return;
+    const currentCandidates = boq.financialCandidates ?? [];
+    const currentIdx = boq.suggestedCandidateIndex ?? 0;
     if (currentCandidates.length === 0) return;
     const betterIdx = pickScheduleMatchingCandidateIndex(
       currentCandidates.map(c => c.valueNumber),

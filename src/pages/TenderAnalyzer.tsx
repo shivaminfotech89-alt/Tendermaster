@@ -516,6 +516,35 @@ export default function TenderAnalyzer() {
     setSavedProjectId(null);
     setDocExported(false);
 
+    // A new analysis must never inherit a prior tender's per-tender state in
+    // this same session (boq, chat thread, financial estimate, generated
+    // doc, etc.) — see the "Schedule-B Amount showed Tender Value" bug this
+    // guards a different entry point of. activeTab reset to 'overview' is
+    // not cosmetic: it unmounts BOQSection/BOQViewer, which is what clears
+    // their own local state (amountInput, the one-shot initializedRef) —
+    // without it, resetting `boq` here would be silently defeated by a
+    // surviving child component.
+    setBoq({ ...INITIAL_BOQ });
+    setBoqChangedSinceDocGen(false);
+    setScheduleSum(null);
+    setNominalQuantitiesSignal(false);
+    setPendingProjectName("");
+    setActiveTab('overview');
+    setMaterials([]);
+    setLabour([]);
+    setRevenue(0);
+    setMessages([]);
+    setChatInput("");
+    setChatOpen(false);
+    setConfirmClearChat(false);
+    setGeneratedDoc("");
+    setGeneratedDocIsHtml(false);
+    setGeneratingDoc(false);
+    setSavedDocs([]);
+    setSavedDocDownloadingId(null);
+    setSavedDocDownloadingType(null);
+    setDocSaved(false);
+
     try {
       const { doc: firestoreDoc, getDoc: fGetDoc } = await import("firebase/firestore");
       const { db: firestoreDb } = await import("../lib/firebase");

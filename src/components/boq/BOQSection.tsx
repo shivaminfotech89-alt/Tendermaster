@@ -153,7 +153,33 @@ export default function BOQSection({
     // own valueNumber when they're plausibly the same figure (the AI's
     // numeric field is sometimes rounded even though its own value_raw
     // string is exact) — see preferExactScheduleSum's own docs.
-    const preferredAmount = preferExactScheduleSum(effectiveCandidates[effectiveIdx]?.valueNumber, scheduleSum);
+    const candidateValue = effectiveCandidates[effectiveIdx]?.valueNumber;
+    const isPercentageRate = detectedType === 'percentage_rate';
+    const scheduleSumValid = scheduleSum != null && scheduleSum > 0;
+    // Percentage-rate pricing basis must be the real extracted schedule sum
+    // (ground truth from BOQ item extraction) — never a text-mentioned
+    // tender-notice figure. A percentage_rate tender's AI-read
+    // financial_values commonly contains ONLY the tender-notice figure,
+    // since the true schedule total is rarely restated as prose in the
+    // document — so pickScheduleMatchingCandidateIndex/preferExactScheduleSum
+    // above can end up "closest-matching" an unrelated, wildly-off value
+    // (e.g. a ₹25,00,000 tender value standing in for a ₹48,265.33 schedule
+    // sum) with nothing better to compare it against. When scheduleSum is
+    // valid it always wins here for percentage_rate — matching
+    // preferExactScheduleSum's own tolerance-matched result when a
+    // candidate genuinely is a rounded transcription of it (citation kept
+    // below), and additionally covering the case that function can't: no
+    // candidate resembles the schedule sum at all (raw scheduleSum used,
+    // uncited). When scheduleSum isn't known/valid yet, this deliberately
+    // does NOT fall back to the candidate value (which may be the wrong
+    // tender-notice figure) — falls through to whatever was already loaded,
+    // same as every other boqType; a blank field the user must confirm is
+    // safe, a wrong pre-filled basis is not.
+    const percentageRateRawOverride = isPercentageRate && scheduleSumValid && candidateValue != null
+      && preferExactScheduleSum(candidateValue, scheduleSum) !== scheduleSum;
+    const preferredAmount = isPercentageRate
+      ? (scheduleSumValid ? scheduleSum : null)
+      : preferExactScheduleSum(candidateValue, scheduleSum);
 
     setBoq({
       ...boq,
@@ -173,15 +199,15 @@ export default function BOQSection({
       estimatedAmountPage:
         boq.estimatedAmountConfirmed
           ? boq.estimatedAmountPage
-          : effectiveCandidates[effectiveIdx]?.page ?? boq.estimatedAmountPage,
+          : percentageRateRawOverride ? undefined : (effectiveCandidates[effectiveIdx]?.page ?? boq.estimatedAmountPage),
       estimatedAmountClause:
         boq.estimatedAmountConfirmed
           ? boq.estimatedAmountClause
-          : effectiveCandidates[effectiveIdx]?.clause ?? boq.estimatedAmountClause,
+          : percentageRateRawOverride ? undefined : (effectiveCandidates[effectiveIdx]?.clause ?? boq.estimatedAmountClause),
       estimatedAmountText:
         boq.estimatedAmountConfirmed
           ? boq.estimatedAmountText
-          : effectiveCandidates[effectiveIdx]?.sourceText ?? boq.estimatedAmountText,
+          : percentageRateRawOverride ? undefined : (effectiveCandidates[effectiveIdx]?.sourceText ?? boq.estimatedAmountText),
     });
     // Pre-fill the amount input so the simplified single-field UI shows the suggested value.
     if (!boq.estimatedAmountConfirmed && !amountInput) {
@@ -198,9 +224,35 @@ export default function BOQSection({
     if (boq.estimatedAmountConfirmed) return;
     if (scheduleSum == null || scheduleSum <= 0) return;
     const currentCandidates = boq.financialCandidates ?? [];
-    if (currentCandidates.length === 0) return;
-
     const currentIdx = boq.suggestedCandidateIndex ?? 0;
+
+    // Percentage-rate: scheduleSum is the source of truth once valid — see
+    // the init effect's own comment for the "Schedule-B Amount showed
+    // Tender Value" bug this guards against. Runs independently of (and
+    // before) the candidate-matching branch below and its
+    // `betterIdx === currentIdx` early return, because when no candidate is
+    // actually the schedule figure, pickScheduleMatchingCandidateIndex has
+    // nothing better to switch to — betterIdx stays === currentIdx forever
+    // — and would otherwise never correct an out-of-tolerance value like a
+    // tender-notice figure that got prefilled before scheduleSum arrived.
+    if (boq.boqType === 'percentage_rate') {
+      if (boq.estimatedAmount === scheduleSum) return; // already correct
+      const currentCandidateValue = currentCandidates[currentIdx]?.valueNumber;
+      const rawOverride = currentCandidateValue == null
+        || preferExactScheduleSum(currentCandidateValue, scheduleSum) !== scheduleSum;
+      setBoq({
+        ...boq,
+        estimatedAmount: scheduleSum,
+        estimatedAmountPage: rawOverride ? undefined : currentCandidates[currentIdx]?.page,
+        estimatedAmountClause: rawOverride ? undefined : currentCandidates[currentIdx]?.clause,
+        estimatedAmountText: rawOverride ? undefined : currentCandidates[currentIdx]?.sourceText,
+        boqLastChangedAt: Date.now(),
+      });
+      setAmountInput(String(scheduleSum));
+      return;
+    }
+
+    if (currentCandidates.length === 0) return;
     const betterIdx = pickScheduleMatchingCandidateIndex(
       currentCandidates.map(c => c.valueNumber),
       scheduleSum,
@@ -223,7 +275,7 @@ export default function BOQSection({
     });
     setAmountInput(String(preciseAmount));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scheduleSum, boq.financialCandidates, boq.suggestedCandidateIndex, boq.estimatedAmountConfirmed]);
+  }, [scheduleSum, boq.financialCandidates, boq.suggestedCandidateIndex, boq.estimatedAmountConfirmed, boq.boqType, boq.estimatedAmount]);
 
   // ── Computed values ────────────────────────────────────────────────────────
   // Item-rate and lump-sum bids share the same grid-driven pipeline in

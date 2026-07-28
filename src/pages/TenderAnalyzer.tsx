@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import { useAuth } from "../auth/AuthProvider";
 import { useAnalyzerStore } from "../context/AnalyzerContext";
 import { Upload, X, Loader2, Sparkles, AlertCircle, FileText, CheckCircle2, ChevronRight, Activity, CalendarDays, File, MessageSquare, Send, Calculator, Building, Target, Download, Edit2, Trash2, Plus, Minus, ArrowLeft, Info, Save, Scan } from "lucide-react";
-import { collection, getDocs, query, addDoc, orderBy, serverTimestamp, doc, updateDoc, setDoc, Timestamp } from "firebase/firestore";
+import { collection, getDocs, query, addDoc, orderBy, serverTimestamp, doc, updateDoc, setDoc, Timestamp, onSnapshot, where, limit } from "firebase/firestore";
 import { ref as storageRef, uploadBytes, getDownloadURL } from "firebase/storage";
 import { db, storage } from "../lib/firebase";
 import Markdown from "react-markdown";
@@ -135,6 +135,32 @@ export default function TenderAnalyzer() {
   const [processingFile, setProcessingFile] = useState(false);
   const [uploadPercent, setUploadPercent] = useState(0);
   const [analyzeStage, setAnalyzeStage] = useState<'uploading' | 'analyzing' | ''>('');
+
+  // Tier-2 (large tender async job) tracking. null when no job is in
+  // flight; populated the moment /api/analyze-tender returns {tier:2,
+  // jobId} instead of a full result. The onSnapshot listener below is the
+  // source of truth for status; driveAnalysisJob() below just triggers the
+  // server-side work in a sequential loop (one chunk per call), mirroring
+  // the client-driven mechanism BOQ extraction already uses (trigger +
+  // listener react to Firestore writes, not to the trigger call's own
+  // response). 'chunks_done' (Step B) means every chunk reached a terminal
+  // state but Step C's merge hasn't run yet — a real, expected interim
+  // state until Step C ships, not a bug.
+  const [analysisJob, setAnalysisJob] = useState<{
+    jobId: string;
+    status: 'queued' | 'running' | 'chunks_done' | 'done' | 'failed';
+    reason?: string;
+    createdAtMs: number | null;
+    startedAtMs: number | null;
+    chunkCount: number;
+    chunksDone: number;
+    chunksFailed: number;
+  } | null>(null);
+  const [jobStale, setJobStale] = useState(false);
+  const [resumingJob, setResumingJob] = useState(false);
+  // If a job is 'running' and its startedAt is older than this, treat it as
+  // abandoned — mirrors BOQViewer's STALE_MS convention for the same reason.
+  const JOB_STALE_MS = 5 * 60_000;
 
   const [analyzedPayload, setAnalyzedPayload] = useState<any>(null);
   const [docExported, setDocExported] = useState(false);
@@ -544,6 +570,9 @@ export default function TenderAnalyzer() {
     setSavedDocDownloadingId(null);
     setSavedDocDownloadingType(null);
     setDocSaved(false);
+    setAnalysisJob(null);
+    setJobStale(false);
+    setResumingJob(false);
 
     try {
       const { doc: firestoreDoc, getDoc: fGetDoc } = await import("firebase/firestore");
@@ -643,6 +672,17 @@ export default function TenderAnalyzer() {
 
       if (!response.ok) {
         throw new Error(data.error || "Analysis failed");
+      }
+
+      if (data.tier === 2 && data.jobId) {
+        // Tier 2 (large tender, async job). Tier-1's response handling
+        // below is untouched/unreached for this branch.
+        setAnalysisJob({
+          jobId: data.jobId, status: 'queued', createdAtMs: Date.now(), startedAtMs: null,
+          chunkCount: data.chunkCount || 0, chunksDone: 0, chunksFailed: 0,
+        });
+        driveAnalysisJob(data.jobId);
+        return;
       }
 
       setAnalysisResult(data.analysis);
@@ -878,6 +918,162 @@ export default function TenderAnalyzer() {
       setUploadPercent(0);
     }
   };
+
+  // Drives a Tier-2 job's chunks sequentially — client-driven by design,
+  // matching the approved architecture: no fire-and-forget, the browser
+  // holds each chunk's request open for its full duration, and awaits it
+  // before requesting the next (no concurrency in this step). The SERVER
+  // decides which chunk is "next" on every call (see
+  // /api/process-analysis-job's claim logic) — this loop's only job is to
+  // keep calling until told there's nothing left to do. The onSnapshot
+  // listener below is the actual source of truth for UI state; this loop's
+  // own responses are only used to decide when to stop looping.
+  const driveAnalysisJob = async (jobId: string) => {
+    for (;;) {
+      try {
+        const res = await fetchWithAuth('/api/process-analysis-job', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ jobId }),
+        });
+        const resText = await res.text();
+        let resData: any = null;
+        try { resData = JSON.parse(resText); } catch { /* onSnapshot still reflects real status */ }
+        if (!res.ok) {
+          console.error('[TenderAnalyzer] process-analysis-job failed:', resData?.error);
+          return; // the affected chunk's/job's failure state is written server-side; stop looping
+        }
+        if (resData?.jobStatus === 'chunks_done' || resData?.jobStatus === 'done' || resData?.noMoreClaimable) {
+          return;
+        }
+        // Otherwise: one chunk was processed (or reclaimed) — loop for the next.
+      } catch (e) {
+        console.error('[TenderAnalyzer] process-analysis-job request failed:', e);
+        return; // user can Resume manually via the stale-UI path below
+      }
+    }
+  };
+
+  // Listens to analysis_jobs/{jobId} and drives all Tier-2 UI state — same
+  // shape as BOQViewer's boq_extraction listener (trigger a server action,
+  // react to its Firestore writes, never trust the trigger call's own
+  // response as the source of truth).
+  useEffect(() => {
+    if (!analysisJob?.jobId) return;
+    const jobRef = doc(db, 'analysis_jobs', analysisJob.jobId);
+    const unsub = onSnapshot(
+      jobRef,
+      (snap) => {
+        if (!snap.exists()) return;
+        const data = snap.data() as any;
+        const createdAtMs: number | null = data.createdAt?.toMillis?.() ?? null;
+        const updatedAtMs: number | null = data.updatedAt?.toMillis?.() ?? null;
+        setJobStale(false);
+        setAnalysisJob(prev => (prev ? {
+          ...prev,
+          status: data.status, reason: data.reason, createdAtMs,
+          // updatedAt (not startedAt) is the right staleness reference for
+          // a multi-chunk job — the server refreshes it on every chunk
+          // claim/completion, so it tracks live progress across the whole
+          // run instead of freezing at whenever the FIRST chunk started.
+          startedAtMs: updatedAtMs,
+          chunkCount: data.chunkCount ?? prev.chunkCount,
+          chunksDone: data.chunksDone ?? prev.chunksDone,
+          chunksFailed: data.chunksFailed ?? prev.chunksFailed,
+        } : prev));
+
+        if (data.status === 'done') {
+          setAnalysisResult(data.details);
+          setAnalysisRemarks(data.remarks || null);
+          if (data.projectId) {
+            setSavedProjectId(data.projectId);
+            setPendingProjectName(data.details?.tender_simplified?.tender_name || 'Untitled Tender');
+            setShowNameDialog(true);
+          }
+          // BOQ-extraction auto-kickoff (Tier-1 does this inline above) is
+          // deliberately NOT wired up for Tier-2 yet — flagged as a known
+          // gap, not an oversight. Manual re-extraction from ProjectDetails
+          // still works once the project is saved.
+        }
+        // 'chunks_done': every chunk reached a terminal state, but Step C's
+        // merge hasn't shipped yet — the UI below shows this explicitly
+        // rather than leaving the user staring at an indefinite spinner.
+      },
+      (err) => {
+        console.error('[TenderAnalyzer] job snapshot error', err);
+        setAnalysisJob(prev => (prev ? { ...prev, status: 'failed', reason: 'Could not load job status: ' + (err.message ?? '') } : prev));
+      },
+    );
+    return () => unsub();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [analysisJob?.jobId]);
+
+  // Stale-job guard: if status stays 'running' (past JOB_STALE_MS since the
+  // job doc's last update — refreshed on every chunk claim/completion) OR
+  // 'queued' (past JOB_STALE_MS from createdAt — covers the case where
+  // driveAnalysisJob's own request never reached the server at all, e.g. a
+  // dropped connection right after job creation, so nothing was ever
+  // claimed), surface a Resume action instead of spinning forever. Mirrors
+  // BOQViewer's identical timeout-guard effect; this is a client-side UX
+  // nicety only — the server's own CHUNK_STALE_MS-gated claim transaction
+  // is what actually guarantees a stuck chunk is safe to reclaim.
+  useEffect(() => {
+    if (!analysisJob || (analysisJob.status !== 'running' && analysisJob.status !== 'queued')) {
+      setJobStale(false);
+      return;
+    }
+    const referenceMs = analysisJob.status === 'running' ? analysisJob.startedAtMs : analysisJob.createdAtMs;
+    const elapsed = referenceMs ? Math.max(0, Date.now() - referenceMs) : 0;
+    const remaining = Math.max(1_000, JOB_STALE_MS - elapsed);
+    const t = setTimeout(() => setJobStale(true), remaining);
+    return () => clearTimeout(t);
+  }, [analysisJob?.status, analysisJob?.startedAtMs, analysisJob?.createdAtMs]);
+
+  const handleResumeAnalysisJob = () => {
+    if (!analysisJob?.jobId) return;
+    setResumingJob(true);
+    setJobStale(false);
+    driveAnalysisJob(analysisJob.jobId).finally(() => setResumingJob(false));
+  };
+
+  // Rediscovers an unfinished Tier-2 job on mount (e.g. the tab was closed
+  // or reloaded mid-run) so a killed tab never permanently orphans a job —
+  // the whole point of making this durable/server-resumable is defeated if
+  // there's no way back into it. Only picks up the caller's OWN most recent
+  // non-terminal job, and only when nothing is already active locally (a
+  // fresh handleAnalyze() call already seeds analysisJob itself, so this
+  // must not clobber that).
+  useEffect(() => {
+    if (!user?.uid || analysisJob || analysisResult) return;
+    (async () => {
+      try {
+        // Single-field filter only (uid ==), deliberately — combining it
+        // with a status filter/orderBy would need a Firestore composite
+        // index provisioned, which this feature avoids everywhere (see
+        // claimNextChunk's identical reasoning server-side). Non-terminal
+        // filtering and recency sort happen in application code instead;
+        // a user's job count is small enough for this to be cheap.
+        const snap = await getDocs(query(collection(db, 'analysis_jobs'), where('uid', '==', user.uid), limit(50)));
+        if (snap.empty) return;
+        const candidates = snap.docs
+          .map(d => ({ id: d.id, data: d.data() as any }))
+          .filter(c => ['queued', 'running', 'chunks_done'].includes(c.data.status))
+          .sort((a, b) => (b.data.createdAt?.toMillis?.() ?? 0) - (a.data.createdAt?.toMillis?.() ?? 0));
+        if (candidates.length === 0) return;
+        const { id, data } = candidates[0];
+        setAnalysisJob({
+          jobId: id, status: data.status, reason: data.reason,
+          createdAtMs: data.createdAt?.toMillis?.() ?? null,
+          startedAtMs: data.updatedAt?.toMillis?.() ?? null,
+          chunkCount: data.chunkCount ?? 0, chunksDone: data.chunksDone ?? 0, chunksFailed: data.chunksFailed ?? 0,
+        });
+        if (data.status !== 'chunks_done') driveAnalysisJob(id);
+      } catch (e) {
+        console.error('[TenderAnalyzer] Failed to check for an unfinished large-tender job:', e);
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.uid]);
 
 
   const loadSavedDocs = async (projectId: string) => {
@@ -1316,7 +1512,68 @@ export default function TenderAnalyzer() {
         </div>
       </div>
 
-      {!analysisResult && (
+      {!analysisResult && analysisJob && (
+        <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-8 text-center">
+          {analysisJob.status === 'failed' ? (
+            <>
+              <AlertCircle className="w-10 h-10 text-red-500 mx-auto mb-4" />
+              <p className="font-semibold text-slate-800 text-lg mb-1">Analysis failed</p>
+              <p className="text-sm text-slate-500 mb-6 max-w-md mx-auto">{analysisJob.reason || 'Unknown error.'}</p>
+              <button
+                onClick={handleResumeAnalysisJob}
+                disabled={resumingJob}
+                className="bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white px-5 py-2.5 rounded-lg font-semibold text-sm transition-colors inline-flex items-center gap-2"
+              >
+                {resumingJob ? <Loader2 className="w-4 h-4 animate-spin" /> : null} Retry
+              </button>
+            </>
+          ) : jobStale ? (
+            <>
+              <AlertCircle className="w-10 h-10 text-amber-500 mx-auto mb-4" />
+              <p className="font-semibold text-slate-800 text-lg mb-1">This is taking longer than expected</p>
+              <p className="text-sm text-slate-500 mb-6 max-w-md mx-auto">The analysis may have been interrupted (e.g. a lost connection). Nothing has been lost — click Resume to continue.</p>
+              <button
+                onClick={handleResumeAnalysisJob}
+                disabled={resumingJob}
+                className="bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white px-5 py-2.5 rounded-lg font-semibold text-sm transition-colors inline-flex items-center gap-2"
+              >
+                {resumingJob ? <Loader2 className="w-4 h-4 animate-spin" /> : null} Resume
+              </button>
+            </>
+          ) : analysisJob.status === 'chunks_done' ? (
+            <>
+              <CheckCircle2 className="w-10 h-10 text-emerald-500 mx-auto mb-4" />
+              <p className="font-semibold text-slate-800 text-lg mb-1">All sections processed</p>
+              <p className="text-sm text-slate-500 max-w-md mx-auto">
+                {analysisJob.chunksDone} of {analysisJob.chunkCount} section{analysisJob.chunkCount === 1 ? '' : 's'} analyzed
+                {analysisJob.chunksFailed > 0 ? ` (${analysisJob.chunksFailed} failed)` : ''}.
+                Combining these into one result isn't wired up yet — that's the next step.
+              </p>
+            </>
+          ) : (
+            <>
+              <Loader2 className="w-10 h-10 text-indigo-500 mx-auto mb-4 animate-spin" />
+              <p className="font-semibold text-slate-800 text-lg mb-1">Analyzing large tender…</p>
+              {analysisJob.chunkCount > 0 && (
+                <>
+                  <p className="text-sm font-medium text-slate-600 mb-2">
+                    Section {Math.min(analysisJob.chunksDone + analysisJob.chunksFailed + 1, analysisJob.chunkCount)} of {analysisJob.chunkCount}
+                  </p>
+                  <div className="w-full max-w-xs mx-auto h-1.5 rounded-full bg-slate-100 overflow-hidden mb-3">
+                    <div
+                      className="h-full rounded-full bg-indigo-500 transition-all"
+                      style={{ width: `${Math.round(((analysisJob.chunksDone + analysisJob.chunksFailed) / analysisJob.chunkCount) * 100)}%` }}
+                    />
+                  </div>
+                </>
+              )}
+              <p className="text-sm text-slate-500 max-w-md mx-auto">This document is large enough that analysis is running in the background, section by section. Keep this tab open — you'll see results here as soon as it's done.</p>
+            </>
+          )}
+        </div>
+      )}
+
+      {!analysisResult && !analysisJob && (
         <div className={`bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden transition-opacity ${analyzing || pageChecking ? 'opacity-60 pointer-events-none' : ''}`}>
           <div className="p-0 border-b border-slate-100 flex items-center bg-slate-50 overflow-x-auto">
             <button

@@ -1000,6 +1000,600 @@ function detectLowConfidence(parsed: any): LowConfidenceResult {
 }
 
 // ---------------------------------------------------------------------------
+// Shared analysis prompt + schema — used by BOTH the Tier-1 synchronous path
+// (/api/analyze-tender) and the Tier-2 async job path (/api/process-analysis-job).
+// Extracted verbatim (byte-identical content) from the original inline
+// Tier-1 call so the two tiers can never drift into producing different
+// output shapes — that drift is the single highest-risk failure mode for
+// this feature (downstream BOQ/Financial code depends on this exact shape).
+// ---------------------------------------------------------------------------
+
+// Above this estimated-token count, /api/analyze-tender routes new analyses
+// (storage_urls/url/text paths only, see the route for the full scope note)
+// to the async Tier-2 job path instead of running the Gemini call inline.
+const TIER2_TOKEN_THRESHOLD = 900_000;
+
+function buildAnalysisSystemInstruction(language?: string | null): string {
+  return `IMPORTANT: Keep your analysis extremely concise (under 800 words total) to ensure fast processing times and prevent timeouts. Use short bullet points and skip unnecessary pleasantries. \n\nYou are "Tender MasterAI", the premier strategic procurement intelligence engine for Indian entrepreneurs and enterprises. Your role is to decode dense bureaucratic tender documents (from GeM, nProcure, CPPP, and private entities), match them ruthlessly against an Indian businessman's profile, and provide a clear, risk-managed path to winning the bid. BE EXTREMELY IN-DEPTH AND DETAILED in your rationales, lists, and steps. Elaborate heavily.
+${
+  language && language !== "en"
+    ? `\nCRITICAL LANGUAGE REQUIREMENT: You MUST output all your analysis and content STRICTLY in ${language === "hi" ? "Hindi" : language === "gu" ? "Gujarati" : language}. Do not use English unless it is for technical terms that have no direct translation.`
+    : `\nCRITICAL LANGUAGE REQUIREMENT: You MUST output all your analysis and content STRICTLY in English. Do NOT output in Hindi, Gujarati, or any other regional language.`
+}
+
+You switch between three operational modes based on input.
+
+---
+MODE 1: CONTRACT PROFILE ANALYSIS & MATCHING
+- Trigger: Input contains a Tender Document and a User Business Profile JSON.
+- Task: Compare technical eligibility, turnover requirements, and location preferences. Calculate an objective compatibility score out of 100. Translate complex terms into professional plain English that a local businessman easily understands. Also extract EMD details into the emd_details field — the required deposit amount (use "Not specified" if the document does not state an EMD requirement), accepted payment modes, and whether MSME certificate holders are exempted.
+- Required Output Format: Valid JSON matching this layout:
+{
+  "compatibility": {
+    "score": 92,
+    "rationale": "Why this matches or where the gap lies (e.g., User meets the 3-year turnover clause but lacks a local office in the bidding state)."
+  },
+  "tender_simplified": {
+    "tender_name": "Official Title of the Tender",
+    "tender_number": "NIT / Tender reference number exactly as printed (e.g. 'UGVCL/PROC/2024-25/001'). Use null if not present.",
+    "authority_name": "Name of Govt body or private entity",
+    "tender_value": "Estimated total value, e.g. ₹5.00 CR",
+    "is_active": true,
+    "scope_of_work": "Plain English summary of exactly what needs to be delivered/built.",
+    "pros": ["Clear benefits, e.g., favorable payment terms, MSME exemptions available"],
+    "cons_and_risks": ["Hidden liabilities, e.g., heavy delay penalties in clause 14, strict bid security requirements"]
+  },
+  "timeline_and_milestones": {
+    "pre_bid_meeting": "YYYY-MM-DD or 'None scheduled'",
+    "clarification_deadline": "YYYY-MM-DD",
+    "submission_deadline": "YYYY-MM-DD",
+    "execution_duration": "Estimated months/years to complete work"
+  },
+  "required_documents_checklist": [
+    {
+      "document_name": "e.g., Class 3 Digital Signature Certificate (DSC)",
+      "status": "Mandatory",
+      "context": "Required for online submission via nProcure/GeM."
+    },
+    {
+      "document_name": "e.g., 3 Years Audited Balance Sheet by CA",
+      "status": "Mandatory",
+      "context": "To prove minimum average turnover requirement of ₹50 Lakhs."
+    }
+  ],
+  "required_annexures": [
+    {
+      "annexure_name": "Annexure I - Technical Bid",
+      "purpose": "To fill technical experience and company details",
+      "filling_complexity": "High"
+    }
+  ],
+  "application_roadmap": {
+    "portal_source": "GeM / nProcure / CPPP / Private Portal",
+    "next_immediate_steps": [
+      "Step 1: Pay EMD amount or submit MSME registration certificate for waiver.",
+      "Step 2: Upload technical bidding documents before the pre-bid queries close.",
+      "Step 3: Prepare price bid strictly in the designated BOQ (Bill of Quantities) format."
+    ],
+    "winning_strategy_tips": [
+      "Tactical procurement advice, e.g., highlight previous similar government works in your technical presentation to leverage past experience points."
+    ]
+  },
+  "financial_estimate": {
+    "material_costs": [{ "item": "Cement", "estimated_cost": "₹5,00,000", "rationale": "Based on BOQ quantity x standard rate" }],
+    "labour_costs": [{ "role": "Site Engineer", "estimated_cost": "₹1,50,000", "rationale": "For 3 months duration" }],
+    "total_estimated_cost": "₹6,50,000"
+  },
+  "bid_recommendation": {
+    "conservative": "₹9,80,000",
+    "recommended": "₹9,45,000",
+    "aggressive": "₹9,10,000",
+    "margin_range": "8% to 15%",
+    "risk_level": "Medium",
+    "rationale": "Based on historical bids and material cost inflation"
+  },
+  "emd_details": {
+    "amount": "₹50,000 (use 'Not specified' if the document does not state an EMD requirement)",
+    "mode": "DD / Bank Guarantee / Online / Exempted for MSME",
+    "msme_exemption": false
+  },
+  "boq_details": {
+    "boq_type": "percentage_rate | item_rate | lump_sum_epc | hybrid | unknown — extract from explicit tender clause (e.g. 'Bids shall be submitted as a percentage above/below the schedule of rates' → percentage_rate). Use 'unknown' if not stated.",
+    "boq_type_confidence": "high (explicit clause) | medium (inferred from structure) | low (unclear)",
+    "financial_values": [
+      {
+        "label": "[Schedule Total] Estimated Amount Put to Tender (Schedule-B)",
+        "value_raw": "₹1,25,00,000",
+        "value_number": 12500000,
+        "page": 3,
+        "clause": "Clause 3.1",
+        "source_text": "The estimated amount put to tender against the Schedule-B / BOQ is ₹1,25,00,000"
+      },
+      {
+        "label": "[Tender Notice Value] Approximate Overall Project Budget",
+        "value_raw": "₹6,50,00,000",
+        "value_number": 65000000,
+        "page": 1,
+        "clause": "NIT Preamble",
+        "source_text": "The overall estimated project cost is ₹6,50,00,000"
+      }
+    ],
+    "suggested_estimated_index": 0
+  }
+}
+
+CRITICAL — financial_values / suggested_estimated_index rules:
+A tender document commonly states TWO different kinds of monetary figures, and they must never be confused:
+  (a) SCHEDULE-DERIVED figures — the sum of the priced Schedule/BOQ itself: "Estimated Amount Put to Tender" against the Schedule-B, a BOQ/price schedule grand total, a quantity × rate summary total. This is the figure a bidder's percentage/rate actually applies against.
+  (b) TENDER-NOTICE figures — the overall contract/project value quoted in the NIT/tender notice or preamble: "estimated project cost", "approximate contract value", "overall budget", EMD-basis value. This is reference-only context — it is NOT the pricing basis, and for Annual Rate Contracts / rate-contract tenders it can be many times larger than the schedule total (a ~50x gap is normal, not an error).
+EVERY entry in "financial_values" MUST start its "label" with an explicit tag identifying which kind it is — "[Schedule Total]" or "[Tender Notice Value]" — before the descriptive text, exactly as shown in the two example entries above, so the tag is machine-parseable.
+"suggested_estimated_index" MUST point at a "[Schedule Total]"-tagged entry whenever at least one exists in the array, even if a "[Tender Notice Value]"-tagged entry is larger, more prominent, or appears earlier in the document. Only fall back to a "[Tender Notice Value]" entry (or omit financial_values / leave it empty) when the document genuinely contains no schedule-derived figure at all — never guess or default to the tender-notice figure just because it's the only one you found easily.`;
+}
+
+const ANALYSIS_RESPONSE_SCHEMA = {
+  type: "object",
+  properties: {
+    compatibility: {
+      type: "object",
+      properties: { score: { type: "number" }, rationale: { type: "string" } },
+      required: ["score", "rationale"],
+    },
+    tender_simplified: {
+      type: "object",
+      properties: {
+        tender_name: { type: "string" },
+        tender_number: { type: "string" },
+        authority_name: { type: "string" },
+        tender_value: { type: "string" },
+        is_active: { type: "boolean" },
+        scope_of_work: { type: "string" },
+        pros: { type: "array", items: { type: "string" } },
+        cons_and_risks: { type: "array", items: { type: "string" } },
+      },
+      required: ["scope_of_work", "pros", "cons_and_risks"],
+    },
+    timeline_and_milestones: {
+      type: "object",
+      properties: {
+        pre_bid_meeting: { type: "string" },
+        clarification_deadline: { type: "string" },
+        submission_deadline: { type: "string" },
+        execution_duration: { type: "string" },
+      },
+      required: [
+        "pre_bid_meeting",
+        "clarification_deadline",
+        "submission_deadline",
+        "execution_duration",
+      ],
+    },
+    required_documents_checklist: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          document_name: { type: "string" },
+          status: { type: "string" },
+          context: { type: "string" },
+        },
+        required: ["document_name", "status", "context"],
+      },
+    },
+    required_annexures: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          annexure_name: { type: "string" },
+          purpose: { type: "string" },
+          filling_complexity: { type: "string" },
+        },
+        required: ["annexure_name", "purpose", "filling_complexity"],
+      },
+    },
+    application_roadmap: {
+      type: "object",
+      properties: {
+        portal_source: { type: "string" },
+        next_immediate_steps: { type: "array", items: { type: "string" } },
+        detailed_procedure_steps: { type: "array", items: { type: "string" } },
+        winning_strategy_tips: { type: "array", items: { type: "string" } },
+      },
+      required: [
+        "portal_source",
+        "next_immediate_steps",
+        "detailed_procedure_steps",
+        "winning_strategy_tips",
+      ],
+    },
+    financial_estimate: {
+      type: "object",
+      properties: {
+        material_costs: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              item: { type: "string" },
+              estimated_cost: { type: "string" },
+              rationale: { type: "string" },
+            },
+            required: ["item", "estimated_cost", "rationale"],
+          },
+        },
+        labour_costs: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              role: { type: "string" },
+              estimated_cost: { type: "string" },
+              rationale: { type: "string" },
+            },
+            required: ["role", "estimated_cost", "rationale"],
+          },
+        },
+        total_estimated_cost: { type: "string" },
+      },
+      required: ["material_costs", "labour_costs", "total_estimated_cost"],
+    },
+    bid_recommendation: {
+      type: "object",
+      properties: {
+        estimated_value: { type: "string" },
+        conservative: { type: "string" },
+        safe_range: { type: "string" },
+        recommended: { type: "string" },
+        aggressive: { type: "string" },
+        margin_range: { type: "string" },
+        risk_level: { type: "string" },
+        rationale: { type: "string" },
+      },
+      required: [
+        "estimated_value",
+        "conservative",
+        "safe_range",
+        "recommended",
+        "aggressive",
+        "margin_range",
+        "risk_level",
+        "rationale",
+      ],
+    },
+    winning_probability: {
+      type: "object",
+      properties: {
+        score: { type: "number" },
+        recommended_action: { type: "string" },
+      },
+      required: ["score", "recommended_action"],
+    },
+    compliance_matrix: {
+      type: "array",
+      description: "List of key eligibility and technical requirements from the tender, each flagged as MET or NOT MET based on the bidder profile.",
+      items: {
+        type: "object",
+        properties: {
+          requirement: { type: "string" },
+          status: { type: "string", enum: ["MET", "NOT MET"] },
+          notes: { type: "string" },
+        },
+        required: ["requirement", "status", "notes"],
+      },
+    },
+    emd_details: {
+      type: "object",
+      properties: {
+        amount: { type: "string" },
+        mode: { type: "string" },
+        msme_exemption: { type: "boolean" },
+      },
+      required: ["amount", "mode", "msme_exemption"],
+    },
+    boq_details: {
+      type: "object",
+      properties: {
+        boq_type: { type: "string" },
+        boq_type_confidence: { type: "string" },
+        financial_values: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              label:       { type: "string" },
+              value_raw:   { type: "string" },
+              value_number:{ type: "number" },
+              page:        { type: "number" },
+              clause:      { type: "string" },
+              source_text: { type: "string" },
+            },
+            required: ["label", "value_raw", "value_number"],
+          },
+        },
+        suggested_estimated_index: { type: "number" },
+      },
+      required: ["boq_type", "boq_type_confidence", "financial_values"],
+    },
+  },
+  required: [
+    "compatibility",
+    "tender_simplified",
+    "timeline_and_milestones",
+    "required_documents_checklist",
+    "required_annexures",
+    "application_roadmap",
+    "financial_estimate",
+    "bid_recommendation",
+    "winning_probability",
+    "compliance_matrix",
+    "emd_details",
+    "boq_details",
+  ],
+};
+
+// ---------------------------------------------------------------------------
+// Tier-2 chunk planning (Step B) — splits a set of already-fetched files
+// into analysis chunks along LOGICAL SECTION boundaries wherever possible,
+// never mid-section unless genuinely unavoidable. Runs once, at job-creation
+// time, in /api/analyze-tender; the resulting plan is persisted so worker
+// calls never re-fetch/re-extract text and can resume from exactly where
+// they left off.
+// ---------------------------------------------------------------------------
+
+// Target token budget per chunk — keeps each chunk's own Gemini call well
+// inside its ~60-90s per-chunk time budget. A conservative starting
+// estimate (~1/6th of the whole-document Tier-2 threshold), not yet tuned
+// against real large-tender timing — revisit once Step B/C see real usage.
+const CHUNK_TOKEN_TARGET = 150_000;
+
+// Per-chunk retry ceiling — deliberately much lower than
+// generateContentWithRetry's default (8), so a single chunk's worst-case
+// retry backoff can't itself exceed the chunk's time budget. Does not
+// change generateContentWithRetry's own logic, only how many times a chunk
+// call is allowed to invoke it (Tier-1 and Step A's whole-job call both
+// keep the untouched default).
+const CHUNK_RETRY_CEILING = 2;
+
+// If a chunk is 'running' and its startedAt is older than this, treat it as
+// abandoned and safe to reclaim. Tighter than JOB_STALE_MS (whole-job scope,
+// defined near /api/process-analysis-job) since a single chunk's own budget
+// is much smaller than a whole job's.
+const CHUNK_STALE_MS = 3 * 60_000;
+
+// Heading heuristics for splitting ONE large text file into logical
+// sections when it alone exceeds CHUNK_TOKEN_TARGET. Tried in this order;
+// the first pattern that finds ANY matches in the text is used exclusively
+// (mixing patterns risks over-splitting on false positives from a weaker
+// pattern). This is a heuristic, not a guarantee — genuinely unstructured
+// text falls through to paragraph-boundary splitting, then a hard
+// character cut as an absolute last resort (the explicitly-allowed
+// "unavoidable" case).
+const CHUNK_HEADING_PATTERNS: RegExp[] = [
+  // "SECTION 3", "CHAPTER II:", "PART A -" style section markers.
+  /^(?:SECTION|CHAPTER|PART)\s+[IVXLC\d]+\b.{0,80}$/im,
+  // "3. ELIGIBILITY CRITERIA", "12. BILL OF QUANTITIES" — numbered headings.
+  /^\d{1,2}\.\s+[A-Z][A-Z0-9 ,.&()\/\-]{5,80}$/m,
+  // Bare ALL-CAPS heading lines, e.g. "TERMS AND CONDITIONS", "SCOPE OF WORK".
+  /^[A-Z][A-Z0-9 ,.&()\/\-]{8,80}$/m,
+];
+
+function findSectionBreakOffsets(text: string): number[] {
+  for (const pattern of CHUNK_HEADING_PATTERNS) {
+    const flags = pattern.flags.includes("g") ? pattern.flags : pattern.flags + "g";
+    const re = new RegExp(pattern.source, flags);
+    const offsets: number[] = [];
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(text)) !== null) {
+      offsets.push(m.index);
+      if (m.index === re.lastIndex) re.lastIndex++; // guard against zero-width matches
+    }
+    if (offsets.length > 0) return offsets;
+  }
+  return [];
+}
+
+/** Splits one large text into chunks no larger than targetChars, cutting
+ *  only at detected section-heading offsets when available; falls back to
+ *  paragraph boundaries, then a hard character cut, only when no heading
+ *  structure is found at all (the "unavoidable" case per spec). */
+function sliceTextIntoSections(text: string, targetChars: number): string[] {
+  if (text.length <= targetChars) return [text];
+
+  let breaks = findSectionBreakOffsets(text);
+  if (breaks.length === 0) {
+    breaks = [];
+    const paraRe = /\n\s*\n/g;
+    let m: RegExpExecArray | null;
+    while ((m = paraRe.exec(text)) !== null) breaks.push(m.index + m[0].length);
+  }
+  const cutPoints = Array.from(new Set<number>([0, ...breaks, text.length])).sort((a, b) => a - b);
+
+  const slices: string[] = [];
+  let sliceStart = 0;
+  let lastGoodCut = 0;
+  for (let i = 1; i < cutPoints.length; i++) {
+    const point = cutPoints[i];
+    if (point - sliceStart > targetChars) {
+      if (lastGoodCut > sliceStart) {
+        slices.push(text.slice(sliceStart, lastGoodCut));
+        sliceStart = lastGoodCut;
+      }
+      // else: a single section between cut points is itself bigger than
+      // targetChars — nothing to cut at yet; it becomes its own oversized
+      // slice below, hard-split as the last resort.
+    }
+    lastGoodCut = point;
+  }
+  if (sliceStart < text.length) slices.push(text.slice(sliceStart));
+
+  const result: string[] = [];
+  for (const slice of slices) {
+    if (slice.length <= targetChars * 1.5) { result.push(slice); continue; }
+    for (let off = 0; off < slice.length; off += targetChars) {
+      result.push(slice.slice(off, off + targetChars));
+    }
+  }
+  return result;
+}
+
+interface Tier2FileEntry {
+  sourceLabel: string;
+  kind: "text" | "pdf";
+  text?: string;         // kind === "text"
+  storageUrl?: string;   // kind === "pdf" — re-fetched at chunk-process time (never persisted, avoids Firestore doc-size limits on raw PDF bytes)
+  mimeType?: string;     // kind === "pdf"
+  estimatedTokens: number;
+}
+
+/** Fetches and normalizes Tier-2 source content into a flat list of
+ *  file-like entries — the SAME fetch logic Tier-1/Step A already use for
+ *  storage_urls/url/text, just run once up front so text is extracted
+ *  exactly once and reused for the whole chunk plan. */
+async function fetchTier2FileEntries(
+  tenderType: string,
+  tenderContent: any,
+): Promise<{ entries: Tier2FileEntry[]; notes: string[] }> {
+  const notes: string[] = [];
+  const entries: Tier2FileEntry[] = [];
+
+  if (tenderType === "storage_urls") {
+    const MAX_FILES = 10;
+    const allUrls: string[] = Array.isArray(tenderContent) ? tenderContent : [];
+    for (let i = 0; i < allUrls.length; i++) {
+      if (i >= MAX_FILES) {
+        notes.push(`file ${i + 1}: skipped — exceeded ${MAX_FILES}-file limit`);
+        continue;
+      }
+      const url = allUrls[i];
+      try {
+        const fetched = await safeFetch(url);
+        if (!fetched.ok) {
+          notes.push(`file ${i + 1}: skipped — fetch failed (HTTP ${fetched.status})`);
+          continue;
+        }
+        const contentType = fetched.headers.get("content-type") || "application/pdf";
+        const buffer = await fetched.arrayBuffer();
+        if (contentType.includes("text/plain")) {
+          const text = Buffer.from(buffer).toString("utf-8");
+          entries.push({ sourceLabel: `file ${i + 1}`, kind: "text", text, estimatedTokens: Math.round(text.length / 4) });
+        } else {
+          const bytes = buffer.byteLength;
+          entries.push({
+            sourceLabel: `file ${i + 1}`,
+            kind: "pdf",
+            storageUrl: url,
+            mimeType: contentType,
+            // No extracted text to estimate from — a conservative
+            // bytes-based proxy (Vision/image content is more
+            // token-expensive per byte than plain text, so this is
+            // deliberately generous rather than under-estimating).
+            estimatedTokens: Math.round(bytes / 3),
+          });
+        }
+      } catch (err) {
+        console.error("[fetchTier2FileEntries] Failed to fetch storage URL", url, err);
+        notes.push(`file ${i + 1}: skipped — network error`);
+      }
+    }
+  } else if (tenderType === "url") {
+    const fetchedRes = await safeFetch(tenderContent, {
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        Accept:
+          "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+      },
+    });
+    if (!fetchedRes.ok) throw new Error(`Failed to fetch URL: ${fetchedRes.statusText}`);
+    const htmlContent = await fetchedRes.text();
+    const cleanText = htmlContent
+      .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
+      .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "")
+      .replace(/<[^>]*>?/gm, " ");
+    entries.push({ sourceLabel: "fetched URL", kind: "text", text: cleanText, estimatedTokens: Math.round(cleanText.length / 4) });
+  } else {
+    const text = String(tenderContent);
+    entries.push({ sourceLabel: "pasted text", kind: "text", text, estimatedTokens: Math.round(text.length / 4) });
+  }
+
+  return { entries, notes };
+}
+
+interface Tier2ChunkPart {
+  sourceLabel: string;
+  kind: "text" | "pdf_ref";
+  text?: string;
+  storageUrl?: string;
+  mimeType?: string;
+}
+interface Tier2ChunkPlan {
+  parts: Tier2ChunkPart[];
+  estimatedTokens: number;
+  sourceLabel: string;
+}
+
+/** Level 1: groups whole files (or Level-2 text slices) into chunks up to
+ *  CHUNK_TOKEN_TARGET, never splitting a piece itself. Level 2: splits any
+ *  single oversized TEXT entry into section-based slices first (see
+ *  sliceTextIntoSections). A single oversized PDF (image-path, no
+ *  extracted text) becomes its own one-file chunk regardless — splitting a
+ *  raw PDF byte stream would need page-level manipulation, which is out of
+ *  scope here (that territory belongs to BOQ Extraction, which this
+ *  feature must not touch) — a known, flagged Step B limitation. */
+function planTier2Chunks(entries: Tier2FileEntry[]): Tier2ChunkPlan[] {
+  const targetChars = CHUNK_TOKEN_TARGET * 4;
+
+  const pieces: Tier2ChunkPart[] = [];
+  const pieceTokens: number[] = [];
+  for (const entry of entries) {
+    if (entry.kind === "pdf") {
+      pieces.push({ sourceLabel: entry.sourceLabel, kind: "pdf_ref", storageUrl: entry.storageUrl, mimeType: entry.mimeType });
+      pieceTokens.push(entry.estimatedTokens);
+      continue;
+    }
+    const text = entry.text!;
+    if (entry.estimatedTokens <= CHUNK_TOKEN_TARGET) {
+      pieces.push({ sourceLabel: entry.sourceLabel, kind: "text", text });
+      pieceTokens.push(entry.estimatedTokens);
+      continue;
+    }
+    const slices = sliceTextIntoSections(text, targetChars);
+    slices.forEach((slice, i) => {
+      pieces.push({
+        sourceLabel: slices.length > 1 ? `${entry.sourceLabel} (part ${i + 1}/${slices.length})` : entry.sourceLabel,
+        kind: "text",
+        text: slice,
+      });
+      pieceTokens.push(Math.round(slice.length / 4));
+    });
+  }
+
+  const chunks: Tier2ChunkPlan[] = [];
+  let currentParts: Tier2ChunkPart[] = [];
+  let currentTokens = 0;
+  const flush = () => {
+    if (currentParts.length === 0) return;
+    chunks.push({
+      parts: currentParts,
+      estimatedTokens: currentTokens,
+      sourceLabel: currentParts.map(p => p.sourceLabel).join(" + "),
+    });
+    currentParts = [];
+    currentTokens = 0;
+  };
+  for (let i = 0; i < pieces.length; i++) {
+    const tokens = pieceTokens[i];
+    if (currentParts.length > 0 && currentTokens + tokens > CHUNK_TOKEN_TARGET) flush();
+    currentParts.push(pieces[i]);
+    currentTokens += tokens;
+  }
+  flush();
+
+  return chunks;
+}
+
+// ---------------------------------------------------------------------------
 // Credit helpers
 // ---------------------------------------------------------------------------
 
@@ -1719,7 +2313,68 @@ app.post("/api/analyze-tender", verifyFirebaseToken, async (req: AuthenticatedRe
 
     // (c) Token estimate for text content (chars ÷ 4, 10 % headroom below 1 M limit)
     const estimatedTokens = Math.round(totalTextChars / 4);
-    if (estimatedTokens > 900_000) {
+    if (estimatedTokens > TIER2_TOKEN_THRESHOLD) {
+      // Tier 2 (large-tender async job) — Step A scope: only for NEW analyses
+      // on the storage_urls/url/text paths, whose request content is small
+      // enough (URL strings, or text already under the token cap above) to
+      // store directly in the analysis_jobs doc. Re-analysis and the
+      // inline-base64 pdf/pdfs/zip paths keep today's exact reject below —
+      // widening Tier 2 to those is a separate, later step, not this one.
+      const jobifiableType = tenderType === "storage_urls" || tenderType === "url" || tenderType === "text";
+      if (!isReanalysis && jobifiableType) {
+        // Fetch + extract once, here, at job-creation time — the resulting
+        // chunk plan is persisted so worker calls never re-fetch or
+        // re-extract, and can resume from exactly the chunk they left off
+        // at (Step B carry-forward: server-side chunk completion + resume).
+        const { entries, notes } = await fetchTier2FileEntries(tenderType, actualContent);
+        const chunkPlan = planTier2Chunks(entries);
+        if (chunkPlan.length === 0) {
+          return res.status(422).json({
+            error: "No readable content could be fetched for analysis. If this is a scanned PDF, please upload the original PDF file directly.",
+          });
+        }
+
+        const jobRef = db.collection("analysis_jobs").doc();
+        const batch = db.batch();
+        batch.set(jobRef, {
+          uid,
+          status: "queued",
+          tier: 2,
+          createdAt: Timestamp.now(),
+          updatedAt: Timestamp.now(),
+          estimatedTokens,
+          chunkCount: chunkPlan.length,
+          chunksDone: 0,
+          chunksFailed: 0,
+          chunkPlanNotes: notes,
+          request: {
+            tenderType,
+            tenderContent: actualContent, // kept for Step C's project-save payloadRef; unused by chunk processing itself
+            userProfile,
+            language: language ?? null,
+            extraContext: req.body.extraContext ?? null,
+            fileNames: Array.isArray(fileNames) && fileNames.length > 0 ? fileNames : null,
+            projectName: (typeof userProjectName === "string" && userProjectName.trim()) ? userProjectName.trim() : null,
+          },
+        });
+        chunkPlan.forEach((chunk, index) => {
+          const chunkRef = jobRef.collection("chunks").doc(String(index));
+          batch.set(chunkRef, {
+            index,
+            status: "pending",
+            sourceLabel: chunk.sourceLabel,
+            parts: chunk.parts,
+            estimatedTokens: chunk.estimatedTokens,
+            createdAt: Timestamp.now(),
+            startedAt: null,
+            updatedAt: Timestamp.now(),
+            result: null,
+            reason: null,
+          });
+        });
+        await batch.commit();
+        return res.json({ tier: 2, jobId: jobRef.id, chunkCount: chunkPlan.length });
+      }
       return res.status(413).json({
         error: `Document is too large for a single analysis (~${Math.round(estimatedTokens / 1000)}k estimated tokens). Please split it into key documents (main conditions, eligibility, BOQ) and analyse each separately.`,
       });
@@ -1732,327 +2387,13 @@ app.post("/api/analyze-tender", verifyFirebaseToken, async (req: AuthenticatedRe
       });
     }
 
-    const systemInstruction = `IMPORTANT: Keep your analysis extremely concise (under 800 words total) to ensure fast processing times and prevent timeouts. Use short bullet points and skip unnecessary pleasantries. \n\nYou are "Tender MasterAI", the premier strategic procurement intelligence engine for Indian entrepreneurs and enterprises. Your role is to decode dense bureaucratic tender documents (from GeM, nProcure, CPPP, and private entities), match them ruthlessly against an Indian businessman's profile, and provide a clear, risk-managed path to winning the bid. BE EXTREMELY IN-DEPTH AND DETAILED in your rationales, lists, and steps. Elaborate heavily.
-${
-  language && language !== "en"
-    ? `\nCRITICAL LANGUAGE REQUIREMENT: You MUST output all your analysis and content STRICTLY in ${language === "hi" ? "Hindi" : language === "gu" ? "Gujarati" : language}. Do not use English unless it is for technical terms that have no direct translation.`
-    : `\nCRITICAL LANGUAGE REQUIREMENT: You MUST output all your analysis and content STRICTLY in English. Do NOT output in Hindi, Gujarati, or any other regional language.`
-}
-
-You switch between three operational modes based on input.
-
----
-MODE 1: CONTRACT PROFILE ANALYSIS & MATCHING
-- Trigger: Input contains a Tender Document and a User Business Profile JSON.
-- Task: Compare technical eligibility, turnover requirements, and location preferences. Calculate an objective compatibility score out of 100. Translate complex terms into professional plain English that a local businessman easily understands. Also extract EMD details into the emd_details field — the required deposit amount (use "Not specified" if the document does not state an EMD requirement), accepted payment modes, and whether MSME certificate holders are exempted.
-- Required Output Format: Valid JSON matching this layout:
-{
-  "compatibility": {
-    "score": 92,
-    "rationale": "Why this matches or where the gap lies (e.g., User meets the 3-year turnover clause but lacks a local office in the bidding state)."
-  },
-  "tender_simplified": {
-    "tender_name": "Official Title of the Tender",
-    "tender_number": "NIT / Tender reference number exactly as printed (e.g. 'UGVCL/PROC/2024-25/001'). Use null if not present.",
-    "authority_name": "Name of Govt body or private entity",
-    "tender_value": "Estimated total value, e.g. ₹5.00 CR",
-    "is_active": true,
-    "scope_of_work": "Plain English summary of exactly what needs to be delivered/built.",
-    "pros": ["Clear benefits, e.g., favorable payment terms, MSME exemptions available"],
-    "cons_and_risks": ["Hidden liabilities, e.g., heavy delay penalties in clause 14, strict bid security requirements"]
-  },
-  "timeline_and_milestones": {
-    "pre_bid_meeting": "YYYY-MM-DD or 'None scheduled'",
-    "clarification_deadline": "YYYY-MM-DD",
-    "submission_deadline": "YYYY-MM-DD",
-    "execution_duration": "Estimated months/years to complete work"
-  },
-  "required_documents_checklist": [
-    {
-      "document_name": "e.g., Class 3 Digital Signature Certificate (DSC)",
-      "status": "Mandatory",
-      "context": "Required for online submission via nProcure/GeM."
-    },
-    {
-      "document_name": "e.g., 3 Years Audited Balance Sheet by CA",
-      "status": "Mandatory",
-      "context": "To prove minimum average turnover requirement of ₹50 Lakhs."
-    }
-  ],
-  "required_annexures": [
-    {
-      "annexure_name": "Annexure I - Technical Bid",
-      "purpose": "To fill technical experience and company details",
-      "filling_complexity": "High"
-    }
-  ],
-  "application_roadmap": {
-    "portal_source": "GeM / nProcure / CPPP / Private Portal",
-    "next_immediate_steps": [
-      "Step 1: Pay EMD amount or submit MSME registration certificate for waiver.",
-      "Step 2: Upload technical bidding documents before the pre-bid queries close.",
-      "Step 3: Prepare price bid strictly in the designated BOQ (Bill of Quantities) format."
-    ],
-    "winning_strategy_tips": [
-      "Tactical procurement advice, e.g., highlight previous similar government works in your technical presentation to leverage past experience points."
-    ]
-  },
-  "financial_estimate": {
-    "material_costs": [{ "item": "Cement", "estimated_cost": "₹5,00,000", "rationale": "Based on BOQ quantity x standard rate" }],
-    "labour_costs": [{ "role": "Site Engineer", "estimated_cost": "₹1,50,000", "rationale": "For 3 months duration" }],
-    "total_estimated_cost": "₹6,50,000"
-  },
-  "bid_recommendation": {
-    "conservative": "₹9,80,000",
-    "recommended": "₹9,45,000",
-    "aggressive": "₹9,10,000",
-    "margin_range": "8% to 15%",
-    "risk_level": "Medium",
-    "rationale": "Based on historical bids and material cost inflation"
-  },
-  "emd_details": {
-    "amount": "₹50,000 (use 'Not specified' if the document does not state an EMD requirement)",
-    "mode": "DD / Bank Guarantee / Online / Exempted for MSME",
-    "msme_exemption": false
-  },
-  "boq_details": {
-    "boq_type": "percentage_rate | item_rate | lump_sum_epc | hybrid | unknown — extract from explicit tender clause (e.g. 'Bids shall be submitted as a percentage above/below the schedule of rates' → percentage_rate). Use 'unknown' if not stated.",
-    "boq_type_confidence": "high (explicit clause) | medium (inferred from structure) | low (unclear)",
-    "financial_values": [
-      {
-        "label": "[Schedule Total] Estimated Amount Put to Tender (Schedule-B)",
-        "value_raw": "₹1,25,00,000",
-        "value_number": 12500000,
-        "page": 3,
-        "clause": "Clause 3.1",
-        "source_text": "The estimated amount put to tender against the Schedule-B / BOQ is ₹1,25,00,000"
-      },
-      {
-        "label": "[Tender Notice Value] Approximate Overall Project Budget",
-        "value_raw": "₹6,50,00,000",
-        "value_number": 65000000,
-        "page": 1,
-        "clause": "NIT Preamble",
-        "source_text": "The overall estimated project cost is ₹6,50,00,000"
-      }
-    ],
-    "suggested_estimated_index": 0
-  }
-}
-
-CRITICAL — financial_values / suggested_estimated_index rules:
-A tender document commonly states TWO different kinds of monetary figures, and they must never be confused:
-  (a) SCHEDULE-DERIVED figures — the sum of the priced Schedule/BOQ itself: "Estimated Amount Put to Tender" against the Schedule-B, a BOQ/price schedule grand total, a quantity × rate summary total. This is the figure a bidder's percentage/rate actually applies against.
-  (b) TENDER-NOTICE figures — the overall contract/project value quoted in the NIT/tender notice or preamble: "estimated project cost", "approximate contract value", "overall budget", EMD-basis value. This is reference-only context — it is NOT the pricing basis, and for Annual Rate Contracts / rate-contract tenders it can be many times larger than the schedule total (a ~50x gap is normal, not an error).
-EVERY entry in "financial_values" MUST start its "label" with an explicit tag identifying which kind it is — "[Schedule Total]" or "[Tender Notice Value]" — before the descriptive text, exactly as shown in the two example entries above, so the tag is machine-parseable.
-"suggested_estimated_index" MUST point at a "[Schedule Total]"-tagged entry whenever at least one exists in the array, even if a "[Tender Notice Value]"-tagged entry is larger, more prominent, or appears earlier in the document. Only fall back to a "[Tender Notice Value]" entry (or omit financial_values / leave it empty) when the document genuinely contains no schedule-derived figure at all — never guess or default to the tender-notice figure just because it's the only one you found easily.`;
-
     const response = await generateContentWithRetry(aiClient, {
       model: "gemini-3.5-flash",
       contents: docContents,
       config: {
-        systemInstruction,
+        systemInstruction: buildAnalysisSystemInstruction(language),
         responseMimeType: "application/json",
-        responseSchema: {
-          type: "object",
-          properties: {
-            compatibility: {
-              type: "object",
-              properties: { score: { type: "number" }, rationale: { type: "string" } },
-              required: ["score", "rationale"],
-            },
-            tender_simplified: {
-              type: "object",
-              properties: {
-                tender_name: { type: "string" },
-                tender_number: { type: "string" },
-                authority_name: { type: "string" },
-                tender_value: { type: "string" },
-                is_active: { type: "boolean" },
-                scope_of_work: { type: "string" },
-                pros: { type: "array", items: { type: "string" } },
-                cons_and_risks: { type: "array", items: { type: "string" } },
-              },
-              required: ["scope_of_work", "pros", "cons_and_risks"],
-            },
-            timeline_and_milestones: {
-              type: "object",
-              properties: {
-                pre_bid_meeting: { type: "string" },
-                clarification_deadline: { type: "string" },
-                submission_deadline: { type: "string" },
-                execution_duration: { type: "string" },
-              },
-              required: [
-                "pre_bid_meeting",
-                "clarification_deadline",
-                "submission_deadline",
-                "execution_duration",
-              ],
-            },
-            required_documents_checklist: {
-              type: "array",
-              items: {
-                type: "object",
-                properties: {
-                  document_name: { type: "string" },
-                  status: { type: "string" },
-                  context: { type: "string" },
-                },
-                required: ["document_name", "status", "context"],
-              },
-            },
-            required_annexures: {
-              type: "array",
-              items: {
-                type: "object",
-                properties: {
-                  annexure_name: { type: "string" },
-                  purpose: { type: "string" },
-                  filling_complexity: { type: "string" },
-                },
-                required: ["annexure_name", "purpose", "filling_complexity"],
-              },
-            },
-            application_roadmap: {
-              type: "object",
-              properties: {
-                portal_source: { type: "string" },
-                next_immediate_steps: { type: "array", items: { type: "string" } },
-                detailed_procedure_steps: { type: "array", items: { type: "string" } },
-                winning_strategy_tips: { type: "array", items: { type: "string" } },
-              },
-              required: [
-                "portal_source",
-                "next_immediate_steps",
-                "detailed_procedure_steps",
-                "winning_strategy_tips",
-              ],
-            },
-            financial_estimate: {
-              type: "object",
-              properties: {
-                material_costs: {
-                  type: "array",
-                  items: {
-                    type: "object",
-                    properties: {
-                      item: { type: "string" },
-                      estimated_cost: { type: "string" },
-                      rationale: { type: "string" },
-                    },
-                    required: ["item", "estimated_cost", "rationale"],
-                  },
-                },
-                labour_costs: {
-                  type: "array",
-                  items: {
-                    type: "object",
-                    properties: {
-                      role: { type: "string" },
-                      estimated_cost: { type: "string" },
-                      rationale: { type: "string" },
-                    },
-                    required: ["role", "estimated_cost", "rationale"],
-                  },
-                },
-                total_estimated_cost: { type: "string" },
-              },
-              required: ["material_costs", "labour_costs", "total_estimated_cost"],
-            },
-            bid_recommendation: {
-              type: "object",
-              properties: {
-                estimated_value: { type: "string" },
-                conservative: { type: "string" },
-                safe_range: { type: "string" },
-                recommended: { type: "string" },
-                aggressive: { type: "string" },
-                margin_range: { type: "string" },
-                risk_level: { type: "string" },
-                rationale: { type: "string" },
-              },
-              required: [
-                "estimated_value",
-                "conservative",
-                "safe_range",
-                "recommended",
-                "aggressive",
-                "margin_range",
-                "risk_level",
-                "rationale",
-              ],
-            },
-            winning_probability: {
-              type: "object",
-              properties: {
-                score: { type: "number" },
-                recommended_action: { type: "string" },
-              },
-              required: ["score", "recommended_action"],
-            },
-            compliance_matrix: {
-              type: "array",
-              description: "List of key eligibility and technical requirements from the tender, each flagged as MET or NOT MET based on the bidder profile.",
-              items: {
-                type: "object",
-                properties: {
-                  requirement: { type: "string" },
-                  status: { type: "string", enum: ["MET", "NOT MET"] },
-                  notes: { type: "string" },
-                },
-                required: ["requirement", "status", "notes"],
-              },
-            },
-            emd_details: {
-              type: "object",
-              properties: {
-                amount: { type: "string" },
-                mode: { type: "string" },
-                msme_exemption: { type: "boolean" },
-              },
-              required: ["amount", "mode", "msme_exemption"],
-            },
-            boq_details: {
-              type: "object",
-              properties: {
-                boq_type: { type: "string" },
-                boq_type_confidence: { type: "string" },
-                financial_values: {
-                  type: "array",
-                  items: {
-                    type: "object",
-                    properties: {
-                      label:       { type: "string" },
-                      value_raw:   { type: "string" },
-                      value_number:{ type: "number" },
-                      page:        { type: "number" },
-                      clause:      { type: "string" },
-                      source_text: { type: "string" },
-                    },
-                    required: ["label", "value_raw", "value_number"],
-                  },
-                },
-                suggested_estimated_index: { type: "number" },
-              },
-              required: ["boq_type", "boq_type_confidence", "financial_values"],
-            },
-          },
-          required: [
-            "compatibility",
-            "tender_simplified",
-            "timeline_and_milestones",
-            "required_documents_checklist",
-            "required_annexures",
-            "application_roadmap",
-            "financial_estimate",
-            "bid_recommendation",
-            "winning_probability",
-            "compliance_matrix",
-            "emd_details",
-            "boq_details",
-          ],
-        },
+        responseSchema: ANALYSIS_RESPONSE_SCHEMA,
       },
     });
 
@@ -2178,6 +2519,218 @@ EVERY entry in "financial_values" MUST start its "label" with an explicit tag id
       logUsageEvent({ uid, type: !!(req as any).body?.projectId ? 'reanalysis' : 'analysis', success: false, failureReason: err.message.slice(0, 300) });
     }
     res.status(400).json({ error: err.message });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Tier-2 (large tender) async job worker — Step B: processes ONE chunk per
+// call (sequential-with-resume, client-driven — see the approved
+// architecture for why: no fire-and-forget, no Vercel Cron, no new queue
+// infra). The SERVER decides which chunk is next each call and writes that
+// chunk's completion status itself, before responding — so a client that
+// disconnects mid-chunk never loses a completed chunk and never causes it
+// to be reprocessed; resume just means calling this endpoint again, and the
+// claim logic below picks up from exactly the right place. No merge yet
+// (Step C) — once every chunk reaches a terminal state (done or failed),
+// the job moves to 'chunks_done' and waits there.
+// ---------------------------------------------------------------------------
+// If a job is 'running' and its startedAt is older than this, treat it as
+// abandoned (crashed tab, network drop, etc.) — mirrors BOQViewer's
+// STALE_MS convention. Whole-job scope; CHUNK_STALE_MS (defined alongside
+// chunk planning above) is the tighter, actually-used threshold for
+// per-chunk resume in this step.
+const JOB_STALE_MS = 5 * 60_000;
+
+/** Atomically finds and claims the next processable chunk for a job:
+ *  'pending', or 'running' but stale (abandoned by a dead worker call).
+ *  Never claims a chunk that's genuinely live elsewhere, or already
+ *  done/failed. The candidate scan runs a plain ordered read (no `in`
+ *  filter combined with orderBy, which would require provisioning a new
+ *  Firestore composite index — avoided deliberately to keep this additive
+ *  and infra-risk-free); each candidate is then re-verified and claimed
+ *  inside its own transaction — the standard safe "find work, then
+ *  atomically claim it" pattern. Returns "all_terminal" once every chunk
+ *  is done/failed, or null when chunks remain but none are claimable right
+ *  now (something else is genuinely mid-chunk). */
+async function claimNextChunk(
+  db: FirebaseFirestore.Firestore,
+  jobId: string,
+): Promise<{ chunkRef: FirebaseFirestore.DocumentReference; data: any } | "all_terminal" | null> {
+  const chunksRef = db.collection("analysis_jobs").doc(jobId).collection("chunks");
+  const allSnap = await chunksRef.orderBy("index").get();
+  let sawNonTerminal = false;
+  for (const candidateDoc of allSnap.docs) {
+    const d = candidateDoc.data();
+    if (d.status === "done" || d.status === "failed") continue;
+    sawNonTerminal = true;
+    const chunkRef = candidateDoc.ref;
+    const claim = await db.runTransaction(async (tx) => {
+      const snap = await tx.get(chunkRef);
+      if (!snap.exists) return null;
+      const data = snap.data()!;
+      if (data.status === "done" || data.status === "failed") return null;
+      if (data.status === "running") {
+        const startedAtMs: number = data.startedAt?.toMillis?.() ?? 0;
+        if (Date.now() - startedAtMs < CHUNK_STALE_MS) return null; // still live elsewhere
+      }
+      tx.update(chunkRef, { status: "running", startedAt: Timestamp.now(), updatedAt: Timestamp.now() });
+      return { data };
+    });
+    if (claim) return { chunkRef, data: claim.data };
+  }
+  return sawNonTerminal ? null : "all_terminal";
+}
+
+/** Builds one chunk's docContents from its precomputed parts. Text parts
+ *  are used exactly as extracted at job-creation time (never re-extracted —
+ *  "reuse extracted text" per spec). PDF parts are re-fetched from their
+ *  storage URL (raw PDF bytes are never persisted in the chunk doc, to stay
+ *  well clear of Firestore's per-doc size limit) — a single, non-redundant
+ *  re-fetch per whole-file PDF chunk, not a repeat of any prior analysis. */
+async function buildChunkDocContents(
+  chunk: any,
+  userProfile: string,
+  extraContextStr: string,
+  chunkIndex: number,
+  chunkCount: number,
+): Promise<any[]> {
+  const scopeNote =
+    `--- USER PROFILE ---\n${userProfile}${extraContextStr}\n\n` +
+    `--- IMPORTANT: PARTIAL DOCUMENT EXCERPT ---\n` +
+    `You are analyzing chunk ${chunkIndex + 1} of ${chunkCount} from a large tender document, covering: ${chunk.sourceLabel}. ` +
+    `This is NOT the complete document — other chunks cover the rest. For ANY field in the required JSON output that you cannot ` +
+    `determine with confidence from THIS EXCERPT ALONE, return null (or an empty array for list fields) — do NOT guess, do NOT ` +
+    `fabricate a plausible-sounding value, and do NOT copy an example value from the schema. A later merge step combines every ` +
+    `chunk's results — a null here is correct and expected when this excerpt doesn't cover that topic.\n\n` +
+    `--- TENDER DOCUMENT EXCERPT (${chunk.sourceLabel}) ---\n`;
+
+  const docContents: any[] = [scopeNote];
+  for (const part of chunk.parts as any[]) {
+    if (part.kind === "text") {
+      docContents.push(`\n--- ${part.sourceLabel} ---\n${part.text}\n`);
+    } else {
+      const fetched = await safeFetch(part.storageUrl);
+      if (!fetched.ok) throw new Error(`Failed to re-fetch ${part.sourceLabel} (HTTP ${fetched.status})`);
+      const buffer = await fetched.arrayBuffer();
+      const base64 = Buffer.from(buffer).toString("base64");
+      docContents.push({ inlineData: { mimeType: part.mimeType || "application/pdf", data: base64 } });
+    }
+  }
+  return docContents;
+}
+
+app.post("/api/process-analysis-job", verifyFirebaseToken, async (req: AuthenticatedRequest, res) => {
+  const uid = req.user!.uid;
+  const { jobId } = req.body;
+  if (!jobId || typeof jobId !== "string") {
+    return res.status(400).json({ error: "jobId is required" });
+  }
+  const db = getFirestore();
+  const jobRef = db.collection("analysis_jobs").doc(jobId);
+
+  try {
+    const jobSnap = await jobRef.get();
+    if (!jobSnap.exists) return res.status(404).json({ error: "Job not found" });
+    const job = jobSnap.data()!;
+    if (job.uid !== uid) return res.status(403).json({ error: "Access denied" });
+
+    // Already past chunking (chunks_done awaiting Step C's merge, or a
+    // later 'done'/'failed' once Step C exists) — nothing left for this
+    // step to do.
+    if (job.status === "chunks_done" || job.status === "done") {
+      return res.json({ jobStatus: job.status, chunksDone: job.chunksDone, chunksFailed: job.chunksFailed, chunkCount: job.chunkCount });
+    }
+
+    const claimed = await claimNextChunk(db, jobId);
+    if (claimed === "all_terminal") {
+      await jobRef.update({ status: "chunks_done", updatedAt: Timestamp.now() });
+      return res.json({ jobStatus: "chunks_done", chunksDone: job.chunksDone, chunksFailed: job.chunksFailed, chunkCount: job.chunkCount });
+    }
+    if (!claimed) {
+      // Chunks remain but none claimable — something else is genuinely
+      // mid-chunk (sequential model: back off rather than fight over it;
+      // the onSnapshot listener still reflects live progress either way).
+      return res.json({ jobStatus: job.status === "queued" ? "running" : job.status, noMoreClaimable: true });
+    }
+
+    const { chunkRef, data: chunk } = claimed;
+    if (job.status === "queued") {
+      await jobRef.update({ status: "running", updatedAt: Timestamp.now() });
+    }
+
+    const { userProfile, language, extraContext } = job.request;
+    const extraContextStr = extraContext
+      ? `\n\n--- EXTRA CONTEXT / RE-ANALYSIS UPDATE ---\n${extraContext}\n`
+      : "";
+
+    try {
+      const aiClient = getAI();
+      const docContents = await buildChunkDocContents(chunk, userProfile, extraContextStr, chunk.index, job.chunkCount);
+
+      const response = await generateContentWithRetry(
+        aiClient,
+        {
+          model: "gemini-3.5-flash",
+          contents: docContents,
+          config: {
+            systemInstruction: buildAnalysisSystemInstruction(language),
+            responseMimeType: "application/json",
+            responseSchema: ANALYSIS_RESPONSE_SCHEMA,
+          },
+        },
+        CHUNK_RETRY_CEILING,
+      );
+
+      const parsedData = robustJsonParse(response.text);
+      // Server-side completion write (carry-forward requirement #1) — this
+      // happens regardless of whether the client that triggered it is
+      // still connected; resume's "what's next" query reads exactly this.
+      await chunkRef.update({ status: "done", result: parsedData, updatedAt: Timestamp.now() });
+
+      const counts = await jobRef.collection("chunks").get();
+      const chunksDone = counts.docs.filter(d => d.data().status === "done").length;
+      const chunksFailed = counts.docs.filter(d => d.data().status === "failed").length;
+      const allTerminal = chunksDone + chunksFailed >= job.chunkCount;
+      await jobRef.update({
+        chunksDone, chunksFailed,
+        status: allTerminal ? "chunks_done" : "running",
+        updatedAt: Timestamp.now(),
+      });
+
+      return res.json({
+        jobStatus: allTerminal ? "chunks_done" : "running",
+        chunkIndex: chunk.index, chunkStatus: "done",
+        chunksDone, chunksFailed, chunkCount: job.chunkCount,
+      });
+    } catch (chunkErr: any) {
+      // A chunk failing after its retry ceiling does NOT fail the job —
+      // mark just this chunk failed and let the others continue (per
+      // spec). Reported as an HTTP success so the client loop keeps going;
+      // the chunk's own 'failed' status is what Step D will surface to the
+      // user, not an HTTP-level error here.
+      const message = chunkErr?.message ? String(chunkErr.message).slice(0, 300) : "Unknown error";
+      console.error(`[process-analysis-job] Chunk ${chunk.index} failed:`, chunkErr);
+      await chunkRef.update({ status: "failed", reason: message, updatedAt: Timestamp.now() });
+
+      const counts = await jobRef.collection("chunks").get();
+      const chunksDone = counts.docs.filter(d => d.data().status === "done").length;
+      const chunksFailed = counts.docs.filter(d => d.data().status === "failed").length;
+      const allTerminal = chunksDone + chunksFailed >= job.chunkCount;
+      await jobRef.update({
+        chunksDone, chunksFailed,
+        status: allTerminal ? "chunks_done" : "running",
+        updatedAt: Timestamp.now(),
+      });
+
+      return res.json({
+        jobStatus: allTerminal ? "chunks_done" : "running",
+        chunkIndex: chunk.index, chunkStatus: "failed",
+        chunksDone, chunksFailed, chunkCount: job.chunkCount,
+      });
+    }
+  } catch (err: any) {
+    console.error("[process-analysis-job] Error:", err);
+    return res.status(400).json({ error: err?.message ?? "Unknown error" });
   }
 });
 

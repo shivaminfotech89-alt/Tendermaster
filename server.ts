@@ -15,6 +15,8 @@ import { promisify } from "util";
 // Bundled by esbuild (--bundle inlines local files; --packages=external only skips npm deps).
 import { PLANS, TRIAL_CREDITS, TRIAL_DOC_LIMIT, CREDIT_VALIDITY_MONTHS } from './src/lib/plans';
 import { probeAllPagesFromBuffer, isRetryable as isProbeRetryable } from './src/lib/modeb/probe-helpers';
+import { buildAnalysisSystemInstruction, ANALYSIS_RESPONSE_SCHEMA } from './src/lib/analysisPrompt';
+import { mergeChunkResults, validateAgainstAnalysisSchema, classifyChunkCriticality, type ChunkCriticality } from './src/lib/analysisChunkMerge';
 import { fmtINR } from './src/lib/boq/calculator';
 
 const lookupPromise = promisify(dns.lookup);
@@ -1013,323 +1015,10 @@ function detectLowConfidence(parsed: any): LowConfidenceResult {
 // to the async Tier-2 job path instead of running the Gemini call inline.
 const TIER2_TOKEN_THRESHOLD = 900_000;
 
-function buildAnalysisSystemInstruction(language?: string | null): string {
-  return `IMPORTANT: Keep your analysis extremely concise (under 800 words total) to ensure fast processing times and prevent timeouts. Use short bullet points and skip unnecessary pleasantries. \n\nYou are "Tender MasterAI", the premier strategic procurement intelligence engine for Indian entrepreneurs and enterprises. Your role is to decode dense bureaucratic tender documents (from GeM, nProcure, CPPP, and private entities), match them ruthlessly against an Indian businessman's profile, and provide a clear, risk-managed path to winning the bid. BE EXTREMELY IN-DEPTH AND DETAILED in your rationales, lists, and steps. Elaborate heavily.
-${
-  language && language !== "en"
-    ? `\nCRITICAL LANGUAGE REQUIREMENT: You MUST output all your analysis and content STRICTLY in ${language === "hi" ? "Hindi" : language === "gu" ? "Gujarati" : language}. Do not use English unless it is for technical terms that have no direct translation.`
-    : `\nCRITICAL LANGUAGE REQUIREMENT: You MUST output all your analysis and content STRICTLY in English. Do NOT output in Hindi, Gujarati, or any other regional language.`
-}
-
-You switch between three operational modes based on input.
-
----
-MODE 1: CONTRACT PROFILE ANALYSIS & MATCHING
-- Trigger: Input contains a Tender Document and a User Business Profile JSON.
-- Task: Compare technical eligibility, turnover requirements, and location preferences. Calculate an objective compatibility score out of 100. Translate complex terms into professional plain English that a local businessman easily understands. Also extract EMD details into the emd_details field — the required deposit amount (use "Not specified" if the document does not state an EMD requirement), accepted payment modes, and whether MSME certificate holders are exempted.
-- Required Output Format: Valid JSON matching this layout:
-{
-  "compatibility": {
-    "score": 92,
-    "rationale": "Why this matches or where the gap lies (e.g., User meets the 3-year turnover clause but lacks a local office in the bidding state)."
-  },
-  "tender_simplified": {
-    "tender_name": "Official Title of the Tender",
-    "tender_number": "NIT / Tender reference number exactly as printed (e.g. 'UGVCL/PROC/2024-25/001'). Use null if not present.",
-    "authority_name": "Name of Govt body or private entity",
-    "tender_value": "Estimated total value, e.g. ₹5.00 CR",
-    "is_active": true,
-    "scope_of_work": "Plain English summary of exactly what needs to be delivered/built.",
-    "pros": ["Clear benefits, e.g., favorable payment terms, MSME exemptions available"],
-    "cons_and_risks": ["Hidden liabilities, e.g., heavy delay penalties in clause 14, strict bid security requirements"]
-  },
-  "timeline_and_milestones": {
-    "pre_bid_meeting": "YYYY-MM-DD or 'None scheduled'",
-    "clarification_deadline": "YYYY-MM-DD",
-    "submission_deadline": "YYYY-MM-DD",
-    "execution_duration": "Estimated months/years to complete work"
-  },
-  "required_documents_checklist": [
-    {
-      "document_name": "e.g., Class 3 Digital Signature Certificate (DSC)",
-      "status": "Mandatory",
-      "context": "Required for online submission via nProcure/GeM."
-    },
-    {
-      "document_name": "e.g., 3 Years Audited Balance Sheet by CA",
-      "status": "Mandatory",
-      "context": "To prove minimum average turnover requirement of ₹50 Lakhs."
-    }
-  ],
-  "required_annexures": [
-    {
-      "annexure_name": "Annexure I - Technical Bid",
-      "purpose": "To fill technical experience and company details",
-      "filling_complexity": "High"
-    }
-  ],
-  "application_roadmap": {
-    "portal_source": "GeM / nProcure / CPPP / Private Portal",
-    "next_immediate_steps": [
-      "Step 1: Pay EMD amount or submit MSME registration certificate for waiver.",
-      "Step 2: Upload technical bidding documents before the pre-bid queries close.",
-      "Step 3: Prepare price bid strictly in the designated BOQ (Bill of Quantities) format."
-    ],
-    "winning_strategy_tips": [
-      "Tactical procurement advice, e.g., highlight previous similar government works in your technical presentation to leverage past experience points."
-    ]
-  },
-  "financial_estimate": {
-    "material_costs": [{ "item": "Cement", "estimated_cost": "₹5,00,000", "rationale": "Based on BOQ quantity x standard rate" }],
-    "labour_costs": [{ "role": "Site Engineer", "estimated_cost": "₹1,50,000", "rationale": "For 3 months duration" }],
-    "total_estimated_cost": "₹6,50,000"
-  },
-  "bid_recommendation": {
-    "conservative": "₹9,80,000",
-    "recommended": "₹9,45,000",
-    "aggressive": "₹9,10,000",
-    "margin_range": "8% to 15%",
-    "risk_level": "Medium",
-    "rationale": "Based on historical bids and material cost inflation"
-  },
-  "emd_details": {
-    "amount": "₹50,000 (use 'Not specified' if the document does not state an EMD requirement)",
-    "mode": "DD / Bank Guarantee / Online / Exempted for MSME",
-    "msme_exemption": false
-  },
-  "boq_details": {
-    "boq_type": "percentage_rate | item_rate | lump_sum_epc | hybrid | unknown — extract from explicit tender clause (e.g. 'Bids shall be submitted as a percentage above/below the schedule of rates' → percentage_rate). Use 'unknown' if not stated.",
-    "boq_type_confidence": "high (explicit clause) | medium (inferred from structure) | low (unclear)",
-    "financial_values": [
-      {
-        "label": "[Schedule Total] Estimated Amount Put to Tender (Schedule-B)",
-        "value_raw": "₹1,25,00,000",
-        "value_number": 12500000,
-        "page": 3,
-        "clause": "Clause 3.1",
-        "source_text": "The estimated amount put to tender against the Schedule-B / BOQ is ₹1,25,00,000"
-      },
-      {
-        "label": "[Tender Notice Value] Approximate Overall Project Budget",
-        "value_raw": "₹6,50,00,000",
-        "value_number": 65000000,
-        "page": 1,
-        "clause": "NIT Preamble",
-        "source_text": "The overall estimated project cost is ₹6,50,00,000"
-      }
-    ],
-    "suggested_estimated_index": 0
-  }
-}
-
-CRITICAL — financial_values / suggested_estimated_index rules:
-A tender document commonly states TWO different kinds of monetary figures, and they must never be confused:
-  (a) SCHEDULE-DERIVED figures — the sum of the priced Schedule/BOQ itself: "Estimated Amount Put to Tender" against the Schedule-B, a BOQ/price schedule grand total, a quantity × rate summary total. This is the figure a bidder's percentage/rate actually applies against.
-  (b) TENDER-NOTICE figures — the overall contract/project value quoted in the NIT/tender notice or preamble: "estimated project cost", "approximate contract value", "overall budget", EMD-basis value. This is reference-only context — it is NOT the pricing basis, and for Annual Rate Contracts / rate-contract tenders it can be many times larger than the schedule total (a ~50x gap is normal, not an error).
-EVERY entry in "financial_values" MUST start its "label" with an explicit tag identifying which kind it is — "[Schedule Total]" or "[Tender Notice Value]" — before the descriptive text, exactly as shown in the two example entries above, so the tag is machine-parseable.
-"suggested_estimated_index" MUST point at a "[Schedule Total]"-tagged entry whenever at least one exists in the array, even if a "[Tender Notice Value]"-tagged entry is larger, more prominent, or appears earlier in the document. Only fall back to a "[Tender Notice Value]" entry (or omit financial_values / leave it empty) when the document genuinely contains no schedule-derived figure at all — never guess or default to the tender-notice figure just because it's the only one you found easily.`;
-}
-
-const ANALYSIS_RESPONSE_SCHEMA = {
-  type: "object",
-  properties: {
-    compatibility: {
-      type: "object",
-      properties: { score: { type: "number" }, rationale: { type: "string" } },
-      required: ["score", "rationale"],
-    },
-    tender_simplified: {
-      type: "object",
-      properties: {
-        tender_name: { type: "string" },
-        tender_number: { type: "string" },
-        authority_name: { type: "string" },
-        tender_value: { type: "string" },
-        is_active: { type: "boolean" },
-        scope_of_work: { type: "string" },
-        pros: { type: "array", items: { type: "string" } },
-        cons_and_risks: { type: "array", items: { type: "string" } },
-      },
-      required: ["scope_of_work", "pros", "cons_and_risks"],
-    },
-    timeline_and_milestones: {
-      type: "object",
-      properties: {
-        pre_bid_meeting: { type: "string" },
-        clarification_deadline: { type: "string" },
-        submission_deadline: { type: "string" },
-        execution_duration: { type: "string" },
-      },
-      required: [
-        "pre_bid_meeting",
-        "clarification_deadline",
-        "submission_deadline",
-        "execution_duration",
-      ],
-    },
-    required_documents_checklist: {
-      type: "array",
-      items: {
-        type: "object",
-        properties: {
-          document_name: { type: "string" },
-          status: { type: "string" },
-          context: { type: "string" },
-        },
-        required: ["document_name", "status", "context"],
-      },
-    },
-    required_annexures: {
-      type: "array",
-      items: {
-        type: "object",
-        properties: {
-          annexure_name: { type: "string" },
-          purpose: { type: "string" },
-          filling_complexity: { type: "string" },
-        },
-        required: ["annexure_name", "purpose", "filling_complexity"],
-      },
-    },
-    application_roadmap: {
-      type: "object",
-      properties: {
-        portal_source: { type: "string" },
-        next_immediate_steps: { type: "array", items: { type: "string" } },
-        detailed_procedure_steps: { type: "array", items: { type: "string" } },
-        winning_strategy_tips: { type: "array", items: { type: "string" } },
-      },
-      required: [
-        "portal_source",
-        "next_immediate_steps",
-        "detailed_procedure_steps",
-        "winning_strategy_tips",
-      ],
-    },
-    financial_estimate: {
-      type: "object",
-      properties: {
-        material_costs: {
-          type: "array",
-          items: {
-            type: "object",
-            properties: {
-              item: { type: "string" },
-              estimated_cost: { type: "string" },
-              rationale: { type: "string" },
-            },
-            required: ["item", "estimated_cost", "rationale"],
-          },
-        },
-        labour_costs: {
-          type: "array",
-          items: {
-            type: "object",
-            properties: {
-              role: { type: "string" },
-              estimated_cost: { type: "string" },
-              rationale: { type: "string" },
-            },
-            required: ["role", "estimated_cost", "rationale"],
-          },
-        },
-        total_estimated_cost: { type: "string" },
-      },
-      required: ["material_costs", "labour_costs", "total_estimated_cost"],
-    },
-    bid_recommendation: {
-      type: "object",
-      properties: {
-        estimated_value: { type: "string" },
-        conservative: { type: "string" },
-        safe_range: { type: "string" },
-        recommended: { type: "string" },
-        aggressive: { type: "string" },
-        margin_range: { type: "string" },
-        risk_level: { type: "string" },
-        rationale: { type: "string" },
-      },
-      required: [
-        "estimated_value",
-        "conservative",
-        "safe_range",
-        "recommended",
-        "aggressive",
-        "margin_range",
-        "risk_level",
-        "rationale",
-      ],
-    },
-    winning_probability: {
-      type: "object",
-      properties: {
-        score: { type: "number" },
-        recommended_action: { type: "string" },
-      },
-      required: ["score", "recommended_action"],
-    },
-    compliance_matrix: {
-      type: "array",
-      description: "List of key eligibility and technical requirements from the tender, each flagged as MET or NOT MET based on the bidder profile.",
-      items: {
-        type: "object",
-        properties: {
-          requirement: { type: "string" },
-          status: { type: "string", enum: ["MET", "NOT MET"] },
-          notes: { type: "string" },
-        },
-        required: ["requirement", "status", "notes"],
-      },
-    },
-    emd_details: {
-      type: "object",
-      properties: {
-        amount: { type: "string" },
-        mode: { type: "string" },
-        msme_exemption: { type: "boolean" },
-      },
-      required: ["amount", "mode", "msme_exemption"],
-    },
-    boq_details: {
-      type: "object",
-      properties: {
-        boq_type: { type: "string" },
-        boq_type_confidence: { type: "string" },
-        financial_values: {
-          type: "array",
-          items: {
-            type: "object",
-            properties: {
-              label:       { type: "string" },
-              value_raw:   { type: "string" },
-              value_number:{ type: "number" },
-              page:        { type: "number" },
-              clause:      { type: "string" },
-              source_text: { type: "string" },
-            },
-            required: ["label", "value_raw", "value_number"],
-          },
-        },
-        suggested_estimated_index: { type: "number" },
-      },
-      required: ["boq_type", "boq_type_confidence", "financial_values"],
-    },
-  },
-  required: [
-    "compatibility",
-    "tender_simplified",
-    "timeline_and_milestones",
-    "required_documents_checklist",
-    "required_annexures",
-    "application_roadmap",
-    "financial_estimate",
-    "bid_recommendation",
-    "winning_probability",
-    "compliance_matrix",
-    "emd_details",
-    "boq_details",
-  ],
-};
+// Moved to src/lib/analysisPrompt.ts (byte-identical content) so the merge
+// module's schema-validation gate can import the exact same schema without
+// pulling in server.ts's own top-level side effects. buildAnalysisSystemInstruction
+// and ANALYSIS_RESPONSE_SCHEMA are imported from there — see the top of this file.
 
 // ---------------------------------------------------------------------------
 // Tier-2 chunk planning (Step B) — splits a set of already-fetched files
@@ -1448,10 +1137,13 @@ interface Tier2FileEntry {
 /** Fetches and normalizes Tier-2 source content into a flat list of
  *  file-like entries — the SAME fetch logic Tier-1/Step A already use for
  *  storage_urls/url/text, just run once up front so text is extracted
- *  exactly once and reused for the whole chunk plan. */
+ *  exactly once and reused for the whole chunk plan. `fileNames` (when
+ *  available, storage_urls only) gives each entry its real filename as a
+ *  criticality-classification signal instead of a positional "file N". */
 async function fetchTier2FileEntries(
   tenderType: string,
   tenderContent: any,
+  fileNames?: string[] | null,
 ): Promise<{ entries: Tier2FileEntry[]; notes: string[] }> {
   const notes: string[] = [];
   const entries: Tier2FileEntry[] = [];
@@ -1465,21 +1157,23 @@ async function fetchTier2FileEntries(
         continue;
       }
       const url = allUrls[i];
+      const rawName = Array.isArray(fileNames) ? fileNames[i] : null;
+      const label = typeof rawName === "string" && rawName.trim().length > 0 ? rawName : `file ${i + 1}`;
       try {
         const fetched = await safeFetch(url);
         if (!fetched.ok) {
-          notes.push(`file ${i + 1}: skipped — fetch failed (HTTP ${fetched.status})`);
+          notes.push(`${label}: skipped — fetch failed (HTTP ${fetched.status})`);
           continue;
         }
         const contentType = fetched.headers.get("content-type") || "application/pdf";
         const buffer = await fetched.arrayBuffer();
         if (contentType.includes("text/plain")) {
           const text = Buffer.from(buffer).toString("utf-8");
-          entries.push({ sourceLabel: `file ${i + 1}`, kind: "text", text, estimatedTokens: Math.round(text.length / 4) });
+          entries.push({ sourceLabel: label, kind: "text", text, estimatedTokens: Math.round(text.length / 4) });
         } else {
           const bytes = buffer.byteLength;
           entries.push({
-            sourceLabel: `file ${i + 1}`,
+            sourceLabel: label,
             kind: "pdf",
             storageUrl: url,
             mimeType: contentType,
@@ -1492,7 +1186,7 @@ async function fetchTier2FileEntries(
         }
       } catch (err) {
         console.error("[fetchTier2FileEntries] Failed to fetch storage URL", url, err);
-        notes.push(`file ${i + 1}: skipped — network error`);
+        notes.push(`${label}: skipped — network error`);
       }
     }
   } else if (tenderType === "url") {
@@ -1526,11 +1220,13 @@ interface Tier2ChunkPart {
   text?: string;
   storageUrl?: string;
   mimeType?: string;
+  criticality: ChunkCriticality;
 }
 interface Tier2ChunkPlan {
   parts: Tier2ChunkPart[];
   estimatedTokens: number;
   sourceLabel: string;
+  criticality: ChunkCriticality;
 }
 
 /** Level 1: groups whole files (or Level-2 text slices) into chunks up to
@@ -1540,7 +1236,15 @@ interface Tier2ChunkPlan {
  *  extracted text) becomes its own one-file chunk regardless — splitting a
  *  raw PDF byte stream would need page-level manipulation, which is out of
  *  scope here (that territory belongs to BOQ Extraction, which this
- *  feature must not touch) — a known, flagged Step B limitation. */
+ *  feature must not touch) — a known, flagged Step B limitation.
+ *
+ *  Each piece is classified for criticality BEFORE token-budget grouping
+ *  (image-path PDFs are unconditionally financial_critical; text pieces are
+ *  classified from their sourceLabel + own text, which includes any section
+ *  heading as its first line — see classifyChunkCriticality). Pieces of
+ *  different criticality are NEVER merged into the same chunk, so every
+ *  resulting chunk has one unambiguous criticality — required so a partial
+ *  failure's blast radius (block vs. flag-and-continue) is never ambiguous. */
 function planTier2Chunks(entries: Tier2FileEntry[]): Tier2ChunkPlan[] {
   const targetChars = CHUNK_TOKEN_TARGET * 4;
 
@@ -1548,23 +1252,23 @@ function planTier2Chunks(entries: Tier2FileEntry[]): Tier2ChunkPlan[] {
   const pieceTokens: number[] = [];
   for (const entry of entries) {
     if (entry.kind === "pdf") {
-      pieces.push({ sourceLabel: entry.sourceLabel, kind: "pdf_ref", storageUrl: entry.storageUrl, mimeType: entry.mimeType });
+      const criticality = classifyChunkCriticality({ isImagePath: true, sourceLabel: entry.sourceLabel });
+      pieces.push({ sourceLabel: entry.sourceLabel, kind: "pdf_ref", storageUrl: entry.storageUrl, mimeType: entry.mimeType, criticality });
       pieceTokens.push(entry.estimatedTokens);
       continue;
     }
     const text = entry.text!;
     if (entry.estimatedTokens <= CHUNK_TOKEN_TARGET) {
-      pieces.push({ sourceLabel: entry.sourceLabel, kind: "text", text });
+      const criticality = classifyChunkCriticality({ isImagePath: false, sourceLabel: entry.sourceLabel, text });
+      pieces.push({ sourceLabel: entry.sourceLabel, kind: "text", text, criticality });
       pieceTokens.push(entry.estimatedTokens);
       continue;
     }
     const slices = sliceTextIntoSections(text, targetChars);
     slices.forEach((slice, i) => {
-      pieces.push({
-        sourceLabel: slices.length > 1 ? `${entry.sourceLabel} (part ${i + 1}/${slices.length})` : entry.sourceLabel,
-        kind: "text",
-        text: slice,
-      });
+      const sourceLabel = slices.length > 1 ? `${entry.sourceLabel} (part ${i + 1}/${slices.length})` : entry.sourceLabel;
+      const criticality = classifyChunkCriticality({ isImagePath: false, sourceLabel, text: slice });
+      pieces.push({ sourceLabel, kind: "text", text: slice, criticality });
       pieceTokens.push(Math.round(slice.length / 4));
     });
   }
@@ -1578,13 +1282,15 @@ function planTier2Chunks(entries: Tier2FileEntry[]): Tier2ChunkPlan[] {
       parts: currentParts,
       estimatedTokens: currentTokens,
       sourceLabel: currentParts.map(p => p.sourceLabel).join(" + "),
+      criticality: currentParts[0].criticality,
     });
     currentParts = [];
     currentTokens = 0;
   };
   for (let i = 0; i < pieces.length; i++) {
     const tokens = pieceTokens[i];
-    if (currentParts.length > 0 && currentTokens + tokens > CHUNK_TOKEN_TARGET) flush();
+    const criticalityChanged = currentParts.length > 0 && currentParts[0].criticality !== pieces[i].criticality;
+    if (currentParts.length > 0 && (criticalityChanged || currentTokens + tokens > CHUNK_TOKEN_TARGET)) flush();
     currentParts.push(pieces[i]);
     currentTokens += tokens;
   }
@@ -2326,7 +2032,11 @@ app.post("/api/analyze-tender", verifyFirebaseToken, async (req: AuthenticatedRe
         // chunk plan is persisted so worker calls never re-fetch or
         // re-extract, and can resume from exactly the chunk they left off
         // at (Step B carry-forward: server-side chunk completion + resume).
-        const { entries, notes } = await fetchTier2FileEntries(tenderType, actualContent);
+        const { entries, notes } = await fetchTier2FileEntries(
+          tenderType,
+          actualContent,
+          Array.isArray(fileNames) && fileNames.length > 0 ? (fileNames as string[]) : null,
+        );
         const chunkPlan = planTier2Chunks(entries);
         if (chunkPlan.length === 0) {
           return res.status(422).json({
@@ -2365,6 +2075,8 @@ app.post("/api/analyze-tender", verifyFirebaseToken, async (req: AuthenticatedRe
             sourceLabel: chunk.sourceLabel,
             parts: chunk.parts,
             estimatedTokens: chunk.estimatedTokens,
+            criticality: chunk.criticality,
+            retryCount: 0,
             createdAt: Timestamp.now(),
             startedAt: null,
             updatedAt: Timestamp.now(),
@@ -2541,6 +2253,17 @@ app.post("/api/analyze-tender", verifyFirebaseToken, async (req: AuthenticatedRe
 // per-chunk resume in this step.
 const JOB_STALE_MS = 5 * 60_000;
 
+// Terminal escape hatch (Step C, approved): after this many failures on a
+// SINGLE critical chunk, the client stops offering plain auto-retry for
+// that chunk and instead surfaces Abandon (always available) and, only if
+// none of the currently-blocked chunks are financial_critical,
+// "proceed without this section". Counts every failure of that chunk
+// (including its first, non-user-initiated attempt), not just explicit
+// retry_chunk calls — simpler to reason about and already generous (3
+// total attempts) relative to the user's "e.g. 3 user-initiated resume
+// attempts" framing.
+const USER_CHUNK_RETRY_LIMIT = 3;
+
 /** Atomically finds and claims the next processable chunk for a job:
  *  'pending', or 'running' but stale (abandoned by a dead worker call).
  *  Never claims a chunk that's genuinely live elsewhere, or already
@@ -2619,11 +2342,186 @@ async function buildChunkDocContents(
   return docContents;
 }
 
+/** Runs the deterministic merge + schema-validation gate + single credit
+ *  deduction, using ONLY the given chunk docs' `result`s (status === 'done'
+ *  chunks) — any 'failed' chunk among `chunkDocs` is by construction either
+ *  non_critical (auto-skippable) or an eligibility_critical chunk the user
+ *  has explicitly chosen to proceed without (server-verified by the caller
+ *  before this runs); a financial_critical failure must NEVER reach this
+ *  function — callers are responsible for that guarantee. Mirrors Tier-1's
+ *  own credit-transaction + saved_tenders write byte-for-byte (same field
+ *  shape, same CREDITS_EXHAUSTED handling, same admin bypass) so Tier-2
+ *  projects are indistinguishable from Tier-1 ones to every downstream
+ *  consumer. Credit is deducted ONLY inside this transaction, i.e. only on
+ *  a validated, successfully-written result — never on merge failure,
+ *  validation failure, all-critical-blocked, or abandon. */
+async function finalizeJob(
+  db: FirebaseFirestore.Firestore,
+  jobRef: FirebaseFirestore.DocumentReference,
+  job: any,
+  chunkDocs: FirebaseFirestore.QueryDocumentSnapshot[],
+  req: AuthenticatedRequest,
+): Promise<any> {
+  const doneChunks = chunkDocs.filter(d => d.data().status === "done");
+  const skippedChunks = chunkDocs.filter(d => d.data().status === "failed");
+  const chunkResults = doneChunks.map(d => d.data().result);
+
+  let parsedData: any;
+  try {
+    parsedData = mergeChunkResults(chunkResults);
+  } catch (mergeErr: any) {
+    const reason = `Merge failed: ${String(mergeErr?.message || mergeErr).slice(0, 300)}`;
+    await jobRef.update({ status: "failed", reason, updatedAt: Timestamp.now() });
+    return { jobStatus: "failed", reason };
+  }
+
+  const schemaErrors = validateAgainstAnalysisSchema(parsedData);
+  if (schemaErrors.length > 0) {
+    const reason = `Merged result failed schema validation: ${schemaErrors.slice(0, 5).join("; ")}`;
+    await jobRef.update({ status: "failed", reason, updatedAt: Timestamp.now() });
+    return { jobStatus: "failed", reason };
+  }
+
+  const remarks: any = { notes: [] };
+  const { isLow, missing } = detectLowConfidence(parsedData);
+  if (isLow) {
+    remarks.notes.push(
+      `LOW CONFIDENCE — The following critical fields could not be determined: ${missing.join(", ")}. Please verify these details in the source tender document before bidding.`
+    );
+  }
+  for (const d of skippedChunks) {
+    const c = d.data();
+    const label = c.criticality === "non_critical" ? "non-critical" : "critical, user-approved skip";
+    remarks.notes.push(
+      `SECTION SKIPPED — "${c.sourceLabel}" (${label}) could not be analyzed after repeated attempts and was excluded from this result. Reason: ${c.reason || "processing failed"}.`
+    );
+  }
+
+  const uid: string = job.uid;
+  const { tenderType, tenderContent, fileNames, projectName } = job.request;
+  const payloadRef =
+    tenderType === "storage_urls" || tenderType === "url"
+      ? tenderContent
+      : tenderType === "text"
+        ? String(tenderContent).slice(0, 2000)
+        : "Document";
+
+  const userRef = db.collection("users").doc(uid);
+  const projectRef = db.collection("saved_tenders").doc();
+  const newProjectId = projectRef.id;
+
+  try {
+    await db.runTransaction(async (tx) => {
+      const userSnap = await tx.get(userRef);
+      const userData = userSnap.data() || {};
+      const creditsTotal: number = userData.creditsTotal ?? 0;
+      const creditsUsed: number = userData.creditsUsed ?? 0;
+      const creditsExpiry: Date | null = userData.creditsExpiry ? userData.creditsExpiry.toDate() : null;
+      const userRole: string = userData.role || "free";
+      const isAdmin = isAdminRole(userRole, req.user!.email);
+
+      if (!isAdmin) {
+        const now = new Date();
+        if (creditsUsed >= creditsTotal || !creditsExpiry || creditsExpiry <= now) {
+          throw new Error("CREDITS_EXHAUSTED");
+        }
+        tx.set(userRef, { creditsUsed: FieldValue.increment(1) }, { merge: true });
+      }
+
+      tx.set(projectRef, {
+        userId: uid,
+        projectName: (typeof projectName === "string" && projectName.trim()) ? projectName.trim() : (parsedData?.tender_simplified?.tender_name || "Untitled Tender"),
+        tenderId: Date.now().toString(),
+        details: parsedData,
+        payloadRef,
+        ...(Array.isArray(fileNames) && fileNames.length > 0 ? { payloadRefNames: fileNames } : {}),
+        remarks,
+        lowConfidence: isLow,
+        savedAt: Timestamp.now(),
+        analysisRuns: 1,
+      });
+    });
+  } catch (txErr: any) {
+    if (txErr.message === "CREDITS_EXHAUSTED") {
+      await jobRef.update({ status: "failed", reason: "CREDITS_EXHAUSTED", updatedAt: Timestamp.now() });
+      return { jobStatus: "failed", reason: "CREDITS_EXHAUSTED" };
+    }
+    console.error("[finalizeJob] Save transaction failed:", txErr);
+    const reason = `Save failed: ${String(txErr?.message || txErr).slice(0, 300)}`;
+    await jobRef.update({ status: "failed", reason, updatedAt: Timestamp.now() });
+    return { jobStatus: "failed", reason };
+  }
+
+  await jobRef.update({
+    status: "done",
+    projectId: newProjectId,
+    details: parsedData,
+    remarks,
+    lowConfidence: isLow,
+    updatedAt: Timestamp.now(),
+  });
+
+  logUsageEvent({ uid, type: "analysis", projectId: newProjectId, success: true, lowConfidence: isLow });
+
+  return { jobStatus: "done", projectId: newProjectId, details: parsedData, remarks, lowConfidence: isLow, chunkCount: job.chunkCount };
+}
+
+/** Runs once every chunk has reached a terminal state (done/failed).
+ *  Non-critical-only failures auto-finalize (matches the approved policy:
+ *  "non-critical-only failures produce flagged partial result + deduct").
+ *  Any financial_critical or eligibility_critical failure blocks the job
+ *  instead — surfacing exactly which chunks are stuck, whether the user
+ *  may explicitly proceed without them (never true if ANY blocked chunk is
+ *  financial_critical — that tier has no override, only abandon), and
+ *  which blocked chunks have hit the terminal-escape-hatch retry limit. */
+async function finalizeOrBlockJob(
+  db: FirebaseFirestore.Firestore,
+  jobRef: FirebaseFirestore.DocumentReference,
+  job: any,
+  req: AuthenticatedRequest,
+): Promise<any> {
+  const chunkSnap = await jobRef.collection("chunks").get();
+  const chunks = chunkSnap.docs;
+  const chunksDone = chunks.filter(d => d.data().status === "done").length;
+  const failedDocs = chunks.filter(d => d.data().status === "failed");
+  const chunksFailed = failedDocs.length;
+
+  const criticalFailed = failedDocs.filter(d => d.data().criticality !== "non_critical");
+  if (criticalFailed.length === 0) {
+    return finalizeJob(db, jobRef, job, chunks, req);
+  }
+
+  const blockedChunkIndexes = criticalFailed.map(d => d.data().index).sort((a, b) => a - b);
+  const canProceedWithoutBlocked = criticalFailed.every(d => d.data().criticality === "eligibility_critical");
+  const chunksAtRetryLimit = criticalFailed
+    .filter(d => (d.data().retryCount ?? 0) >= USER_CHUNK_RETRY_LIMIT)
+    .map(d => d.data().index)
+    .sort((a, b) => a - b);
+
+  await jobRef.update({
+    status: "blocked",
+    chunksDone, chunksFailed,
+    blockedChunkIndexes,
+    canProceedWithoutBlocked,
+    chunksAtRetryLimit,
+    updatedAt: Timestamp.now(),
+  });
+
+  return {
+    jobStatus: "blocked",
+    chunksDone, chunksFailed, chunkCount: job.chunkCount,
+    blockedChunkIndexes, canProceedWithoutBlocked, chunksAtRetryLimit,
+  };
+}
+
 app.post("/api/process-analysis-job", verifyFirebaseToken, async (req: AuthenticatedRequest, res) => {
   const uid = req.user!.uid;
-  const { jobId } = req.body;
+  const { jobId, action, chunkIndex } = req.body;
   if (!jobId || typeof jobId !== "string") {
     return res.status(400).json({ error: "jobId is required" });
+  }
+  if (action !== undefined && action !== "retry_chunk" && action !== "abandon" && action !== "proceed_without") {
+    return res.status(400).json({ error: "Invalid action" });
   }
   const db = getFirestore();
   const jobRef = db.collection("analysis_jobs").doc(jobId);
@@ -2634,17 +2532,78 @@ app.post("/api/process-analysis-job", verifyFirebaseToken, async (req: Authentic
     const job = jobSnap.data()!;
     if (job.uid !== uid) return res.status(403).json({ error: "Access denied" });
 
-    // Already past chunking (chunks_done awaiting Step C's merge, or a
-    // later 'done'/'failed' once Step C exists) — nothing left for this
-    // step to do.
-    if (job.status === "chunks_done" || job.status === "done") {
-      return res.json({ jobStatus: job.status, chunksDone: job.chunksDone, chunksFailed: job.chunksFailed, chunkCount: job.chunkCount });
+    // Already terminal — nothing left for this endpoint to do.
+    if (job.status === "done" || job.status === "abandoned") {
+      return res.json({ jobStatus: job.status, chunksDone: job.chunksDone, chunksFailed: job.chunksFailed, chunkCount: job.chunkCount, projectId: job.projectId ?? null });
+    }
+
+    // ── Terminal-escape-hatch actions — only meaningful while blocked ──────
+    if (action === "abandon") {
+      await jobRef.update({ status: "abandoned", updatedAt: Timestamp.now() });
+      return res.json({ jobStatus: "abandoned" });
+    }
+
+    if (action === "retry_chunk") {
+      if (job.status !== "blocked") return res.status(400).json({ error: "Job is not blocked — nothing to retry" });
+      if (typeof chunkIndex !== "number") return res.status(400).json({ error: "chunkIndex is required for retry_chunk" });
+      const chunkRef = jobRef.collection("chunks").doc(String(chunkIndex));
+      const chunkSnap = await chunkRef.get();
+      if (!chunkSnap.exists || chunkSnap.data()!.status !== "failed") {
+        return res.status(400).json({ error: "Chunk is not in a retryable state" });
+      }
+      // Reset to pending (keep retryCount — it tracks lifetime attempts,
+      // not just this resume) so the normal claim path below picks it up.
+      await chunkRef.update({ status: "pending", reason: null, updatedAt: Timestamp.now() });
+      await jobRef.update({
+        status: "running",
+        blockedChunkIndexes: FieldValue.delete(),
+        canProceedWithoutBlocked: FieldValue.delete(),
+        chunksAtRetryLimit: FieldValue.delete(),
+        updatedAt: Timestamp.now(),
+      });
+      return res.json({ jobStatus: "running", retriedChunkIndex: chunkIndex });
+    }
+
+    if (action === "proceed_without") {
+      if (job.status !== "blocked") return res.status(400).json({ error: "Job is not blocked" });
+      // Re-verify server-side — never trust the client's cached snapshot of
+      // canProceedWithoutBlocked for the actual finalize decision.
+      const chunkSnap = await jobRef.collection("chunks").get();
+      const stillFailed = chunkSnap.docs.filter(d => d.data().status === "failed");
+      const stillCriticalFailed = stillFailed.filter(d => d.data().criticality !== "non_critical");
+      const anyFinancialCritical = stillCriticalFailed.some(d => d.data().criticality === "financial_critical");
+      if (anyFinancialCritical) {
+        return res.status(400).json({ error: "Cannot proceed — a financial-critical section failed. Abandon is the only option." });
+      }
+      if (stillCriticalFailed.length === 0) {
+        // Nothing actually blocking anymore (e.g. a concurrent retry
+        // already succeeded) — just finalize normally.
+        const result = await finalizeOrBlockJob(db, jobRef, job, req);
+        return res.json(result);
+      }
+      const result = await finalizeJob(db, jobRef, job, chunkSnap.docs, req);
+      return res.json(result);
+    }
+
+    // ── Normal (no-action) flow ─────────────────────────────────────────────
+    if (job.status === "blocked") {
+      // Nothing to claim — blocked chunks are terminal 'failed' and won't
+      // be reclaimed. Surface the existing blocked-state fields as-is
+      // rather than re-deriving them (cheaper, and avoids any chance of
+      // flip-flopping status on a bare poll).
+      return res.json({
+        jobStatus: "blocked",
+        chunksDone: job.chunksDone, chunksFailed: job.chunksFailed, chunkCount: job.chunkCount,
+        blockedChunkIndexes: job.blockedChunkIndexes ?? [],
+        canProceedWithoutBlocked: job.canProceedWithoutBlocked ?? false,
+        chunksAtRetryLimit: job.chunksAtRetryLimit ?? [],
+      });
     }
 
     const claimed = await claimNextChunk(db, jobId);
     if (claimed === "all_terminal") {
-      await jobRef.update({ status: "chunks_done", updatedAt: Timestamp.now() });
-      return res.json({ jobStatus: "chunks_done", chunksDone: job.chunksDone, chunksFailed: job.chunksFailed, chunkCount: job.chunkCount });
+      const result = await finalizeOrBlockJob(db, jobRef, job, req);
+      return res.json(result);
     }
     if (!claimed) {
       // Chunks remain but none claimable — something else is genuinely
@@ -2691,39 +2650,46 @@ app.post("/api/process-analysis-job", verifyFirebaseToken, async (req: Authentic
       const chunksDone = counts.docs.filter(d => d.data().status === "done").length;
       const chunksFailed = counts.docs.filter(d => d.data().status === "failed").length;
       const allTerminal = chunksDone + chunksFailed >= job.chunkCount;
-      await jobRef.update({
-        chunksDone, chunksFailed,
-        status: allTerminal ? "chunks_done" : "running",
-        updatedAt: Timestamp.now(),
-      });
-
+      if (allTerminal) {
+        const result = await finalizeOrBlockJob(db, jobRef, { ...job, chunksDone, chunksFailed }, req);
+        return res.json({ ...result, chunkIndex: chunk.index, chunkStatus: "done" });
+      }
+      await jobRef.update({ chunksDone, chunksFailed, status: "running", updatedAt: Timestamp.now() });
       return res.json({
-        jobStatus: allTerminal ? "chunks_done" : "running",
+        jobStatus: "running",
         chunkIndex: chunk.index, chunkStatus: "done",
         chunksDone, chunksFailed, chunkCount: job.chunkCount,
       });
     } catch (chunkErr: any) {
       // A chunk failing after its retry ceiling does NOT fail the job —
-      // mark just this chunk failed and let the others continue (per
-      // spec). Reported as an HTTP success so the client loop keeps going;
-      // the chunk's own 'failed' status is what Step D will surface to the
-      // user, not an HTTP-level error here.
+      // mark just this chunk failed; whether that blocks the job or is
+      // auto-skipped depends on its criticality, decided below.
       const message = chunkErr?.message ? String(chunkErr.message).slice(0, 300) : "Unknown error";
       console.error(`[process-analysis-job] Chunk ${chunk.index} failed:`, chunkErr);
-      await chunkRef.update({ status: "failed", reason: message, updatedAt: Timestamp.now() });
+      await chunkRef.update({
+        status: "failed",
+        reason: message,
+        retryCount: FieldValue.increment(1),
+        updatedAt: Timestamp.now(),
+      });
 
       const counts = await jobRef.collection("chunks").get();
       const chunksDone = counts.docs.filter(d => d.data().status === "done").length;
       const chunksFailed = counts.docs.filter(d => d.data().status === "failed").length;
       const allTerminal = chunksDone + chunksFailed >= job.chunkCount;
-      await jobRef.update({
-        chunksDone, chunksFailed,
-        status: allTerminal ? "chunks_done" : "running",
-        updatedAt: Timestamp.now(),
-      });
-
+      if (allTerminal) {
+        // Only decide block-vs-finalize once EVERY chunk has reached a
+        // terminal state — deciding early (e.g. the instant one critical
+        // chunk fails) would leave other, still-'pending' chunks neither
+        // done nor failed; if the user later chose "proceed without" while
+        // those sat unprocessed, their content would silently vanish from
+        // the merge instead of being properly included or flagged skipped.
+        const result = await finalizeOrBlockJob(db, jobRef, { ...job, chunksDone, chunksFailed }, req);
+        return res.json({ ...result, chunkIndex: chunk.index, chunkStatus: "failed" });
+      }
+      await jobRef.update({ chunksDone, chunksFailed, status: "running", updatedAt: Timestamp.now() });
       return res.json({
-        jobStatus: allTerminal ? "chunks_done" : "running",
+        jobStatus: "running",
         chunkIndex: chunk.index, chunkStatus: "failed",
         chunksDone, chunksFailed, chunkCount: job.chunkCount,
       });

@@ -143,21 +143,28 @@ export default function TenderAnalyzer() {
   // server-side work in a sequential loop (one chunk per call), mirroring
   // the client-driven mechanism BOQ extraction already uses (trigger +
   // listener react to Firestore writes, not to the trigger call's own
-  // response). 'chunks_done' (Step B) means every chunk reached a terminal
-  // state but Step C's merge hasn't run yet — a real, expected interim
-  // state until Step C ships, not a bug.
+  // response). 'blocked' (Step C) means a financial_critical or
+  // eligibility_critical chunk failed and the job is paused pending the
+  // user's Retry / Abandon / Proceed-without choice — see
+  // blockedChunkIndexes/canProceedWithoutBlocked/chunksAtRetryLimit below.
+  // 'abandoned' is terminal, chosen explicitly by the user, nothing saved.
   const [analysisJob, setAnalysisJob] = useState<{
     jobId: string;
-    status: 'queued' | 'running' | 'chunks_done' | 'done' | 'failed';
+    status: 'queued' | 'running' | 'blocked' | 'done' | 'failed' | 'abandoned';
     reason?: string;
     createdAtMs: number | null;
     startedAtMs: number | null;
     chunkCount: number;
     chunksDone: number;
     chunksFailed: number;
+    blockedChunkIndexes: number[];
+    canProceedWithoutBlocked: boolean;
+    chunksAtRetryLimit: number[];
+    projectId?: string | null;
   } | null>(null);
   const [jobStale, setJobStale] = useState(false);
   const [resumingJob, setResumingJob] = useState(false);
+  const [blockedActionPending, setBlockedActionPending] = useState(false);
   // If a job is 'running' and its startedAt is older than this, treat it as
   // abandoned — mirrors BOQViewer's STALE_MS convention for the same reason.
   const JOB_STALE_MS = 5 * 60_000;
@@ -680,6 +687,7 @@ export default function TenderAnalyzer() {
         setAnalysisJob({
           jobId: data.jobId, status: 'queued', createdAtMs: Date.now(), startedAtMs: null,
           chunkCount: data.chunkCount || 0, chunksDone: 0, chunksFailed: 0,
+          blockedChunkIndexes: [], canProceedWithoutBlocked: false, chunksAtRetryLimit: [],
         });
         driveAnalysisJob(data.jobId);
         return;
@@ -943,7 +951,13 @@ export default function TenderAnalyzer() {
           console.error('[TenderAnalyzer] process-analysis-job failed:', resData?.error);
           return; // the affected chunk's/job's failure state is written server-side; stop looping
         }
-        if (resData?.jobStatus === 'chunks_done' || resData?.jobStatus === 'done' || resData?.noMoreClaimable) {
+        if (
+          resData?.jobStatus === 'blocked' ||
+          resData?.jobStatus === 'done' ||
+          resData?.jobStatus === 'failed' ||
+          resData?.jobStatus === 'abandoned' ||
+          resData?.noMoreClaimable
+        ) {
           return;
         }
         // Otherwise: one chunk was processed (or reclaimed) — loop for the next.
@@ -980,6 +994,10 @@ export default function TenderAnalyzer() {
           chunkCount: data.chunkCount ?? prev.chunkCount,
           chunksDone: data.chunksDone ?? prev.chunksDone,
           chunksFailed: data.chunksFailed ?? prev.chunksFailed,
+          blockedChunkIndexes: data.blockedChunkIndexes ?? [],
+          canProceedWithoutBlocked: data.canProceedWithoutBlocked ?? false,
+          chunksAtRetryLimit: data.chunksAtRetryLimit ?? [],
+          projectId: data.projectId ?? null,
         } : prev));
 
         if (data.status === 'done') {
@@ -995,9 +1013,9 @@ export default function TenderAnalyzer() {
           // gap, not an oversight. Manual re-extraction from ProjectDetails
           // still works once the project is saved.
         }
-        // 'chunks_done': every chunk reached a terminal state, but Step C's
-        // merge hasn't shipped yet — the UI below shows this explicitly
-        // rather than leaving the user staring at an indefinite spinner.
+        // 'blocked': a critical chunk failed — the UI below surfaces which
+        // section(s) are stuck and the Retry / Abandon / Proceed-without
+        // choice; nothing auto-advances from here without the user.
       },
       (err) => {
         console.error('[TenderAnalyzer] job snapshot error', err);
@@ -1036,6 +1054,58 @@ export default function TenderAnalyzer() {
     driveAnalysisJob(analysisJob.jobId).finally(() => setResumingJob(false));
   };
 
+  // Terminal-escape-hatch actions for a 'blocked' job (Step C). Each posts
+  // to the SAME endpoint with an `action`; the onSnapshot listener is still
+  // the source of truth for the resulting state, these just trigger it.
+  const handleRetryBlockedChunk = async (chunkIndex: number) => {
+    if (!analysisJob?.jobId) return;
+    setBlockedActionPending(true);
+    try {
+      const res = await fetchWithAuth('/api/process-analysis-job', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ jobId: analysisJob.jobId, action: 'retry_chunk', chunkIndex }),
+      });
+      if (res.ok) driveAnalysisJob(analysisJob.jobId);
+    } catch (e) {
+      console.error('[TenderAnalyzer] retry_chunk failed:', e);
+    } finally {
+      setBlockedActionPending(false);
+    }
+  };
+
+  const handleAbandonJob = async () => {
+    if (!analysisJob?.jobId) return;
+    setBlockedActionPending(true);
+    try {
+      await fetchWithAuth('/api/process-analysis-job', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ jobId: analysisJob.jobId, action: 'abandon' }),
+      });
+    } catch (e) {
+      console.error('[TenderAnalyzer] abandon failed:', e);
+    } finally {
+      setBlockedActionPending(false);
+    }
+  };
+
+  const handleProceedWithoutBlocked = async () => {
+    if (!analysisJob?.jobId) return;
+    setBlockedActionPending(true);
+    try {
+      await fetchWithAuth('/api/process-analysis-job', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ jobId: analysisJob.jobId, action: 'proceed_without' }),
+      });
+    } catch (e) {
+      console.error('[TenderAnalyzer] proceed_without failed:', e);
+    } finally {
+      setBlockedActionPending(false);
+    }
+  };
+
   // Rediscovers an unfinished Tier-2 job on mount (e.g. the tab was closed
   // or reloaded mid-run) so a killed tab never permanently orphans a job —
   // the whole point of making this durable/server-resumable is defeated if
@@ -1057,7 +1127,7 @@ export default function TenderAnalyzer() {
         if (snap.empty) return;
         const candidates = snap.docs
           .map(d => ({ id: d.id, data: d.data() as any }))
-          .filter(c => ['queued', 'running', 'chunks_done'].includes(c.data.status))
+          .filter(c => ['queued', 'running', 'blocked'].includes(c.data.status))
           .sort((a, b) => (b.data.createdAt?.toMillis?.() ?? 0) - (a.data.createdAt?.toMillis?.() ?? 0));
         if (candidates.length === 0) return;
         const { id, data } = candidates[0];
@@ -1066,8 +1136,10 @@ export default function TenderAnalyzer() {
           createdAtMs: data.createdAt?.toMillis?.() ?? null,
           startedAtMs: data.updatedAt?.toMillis?.() ?? null,
           chunkCount: data.chunkCount ?? 0, chunksDone: data.chunksDone ?? 0, chunksFailed: data.chunksFailed ?? 0,
+          blockedChunkIndexes: data.blockedChunkIndexes ?? [], canProceedWithoutBlocked: data.canProceedWithoutBlocked ?? false,
+          chunksAtRetryLimit: data.chunksAtRetryLimit ?? [],
         });
-        if (data.status !== 'chunks_done') driveAnalysisJob(id);
+        if (data.status !== 'blocked') driveAnalysisJob(id);
       } catch (e) {
         console.error('[TenderAnalyzer] Failed to check for an unfinished large-tender job:', e);
       }
@@ -1540,15 +1612,58 @@ export default function TenderAnalyzer() {
                 {resumingJob ? <Loader2 className="w-4 h-4 animate-spin" /> : null} Resume
               </button>
             </>
-          ) : analysisJob.status === 'chunks_done' ? (
+          ) : analysisJob.status === 'abandoned' ? (
             <>
-              <CheckCircle2 className="w-10 h-10 text-emerald-500 mx-auto mb-4" />
-              <p className="font-semibold text-slate-800 text-lg mb-1">All sections processed</p>
-              <p className="text-sm text-slate-500 max-w-md mx-auto">
-                {analysisJob.chunksDone} of {analysisJob.chunkCount} section{analysisJob.chunkCount === 1 ? '' : 's'} analyzed
-                {analysisJob.chunksFailed > 0 ? ` (${analysisJob.chunksFailed} failed)` : ''}.
-                Combining these into one result isn't wired up yet — that's the next step.
+              <AlertCircle className="w-10 h-10 text-slate-400 mx-auto mb-4" />
+              <p className="font-semibold text-slate-800 text-lg mb-1">Analysis abandoned</p>
+              <p className="text-sm text-slate-500 max-w-md mx-auto">Nothing was saved and no credit was charged. Start a new analysis whenever you're ready.</p>
+            </>
+          ) : analysisJob.status === 'blocked' ? (
+            <>
+              <AlertCircle className="w-10 h-10 text-amber-500 mx-auto mb-4" />
+              <p className="font-semibold text-slate-800 text-lg mb-1">
+                {analysisJob.blockedChunkIndexes.length === 1 ? 'A section' : 'Some sections'} couldn't be analyzed
               </p>
+              <p className="text-sm text-slate-500 mb-6 max-w-md mx-auto">
+                {analysisJob.chunksDone} of {analysisJob.chunkCount} section{analysisJob.chunkCount === 1 ? '' : 's'} analyzed so far.
+                {analysisJob.canProceedWithoutBlocked
+                  ? ' The stuck section is not financial data, so you may proceed without it if retrying keeps failing.'
+                  : ' This includes financial/BOQ data, so it cannot be skipped — retry or abandon.'}
+              </p>
+              <div className="flex flex-col items-center gap-3">
+                {analysisJob.blockedChunkIndexes.map(idx => {
+                  const atLimit = analysisJob.chunksAtRetryLimit.includes(idx);
+                  return (
+                    <button
+                      key={idx}
+                      onClick={() => handleRetryBlockedChunk(idx)}
+                      disabled={blockedActionPending}
+                      className="bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white px-5 py-2.5 rounded-lg font-semibold text-sm transition-colors inline-flex items-center gap-2"
+                    >
+                      {blockedActionPending ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+                      Retry section {idx + 1}{atLimit ? ' (repeatedly failing)' : ''}
+                    </button>
+                  );
+                })}
+                <div className="flex gap-3">
+                  <button
+                    onClick={handleAbandonJob}
+                    disabled={blockedActionPending}
+                    className="border border-slate-300 hover:bg-slate-50 disabled:opacity-50 text-slate-700 px-5 py-2.5 rounded-lg font-semibold text-sm transition-colors"
+                  >
+                    Abandon
+                  </button>
+                  {analysisJob.canProceedWithoutBlocked && (
+                    <button
+                      onClick={handleProceedWithoutBlocked}
+                      disabled={blockedActionPending}
+                      className="border border-amber-300 bg-amber-50 hover:bg-amber-100 disabled:opacity-50 text-amber-800 px-5 py-2.5 rounded-lg font-semibold text-sm transition-colors"
+                    >
+                      Proceed without this section
+                    </button>
+                  )}
+                </div>
+              </div>
             </>
           ) : (
             <>

@@ -1029,6 +1029,28 @@ function resolveFileLabel(fileNames: unknown, index: number): string {
 // to the async Tier-2 job path instead of running the Gemini call inline.
 const TIER2_TOKEN_THRESHOLD = 900_000;
 
+// Above this many files in one storage_urls submission, route to Tier-2
+// chunking instead of Tier-1's single call — a ROUTING trigger, not a skip
+// trigger (no file is ever dropped for count reasons; see the file-count
+// gate in /api/analyze-tender). This is the same number the old, removed
+// MAX_FILES skip used, kept only because there's no evidence it was ever
+// wrong for Tier-1 — not because it maps to any real Gemini per-request
+// file ceiling (none was found; the real constraints are the token
+// threshold above and the PDF-byte cap below, both already count-agnostic).
+const TIER1_SAFE_FILE_COUNT = 10;
+
+// Defense-in-depth backstop for Tier-2 job creation: one job doc + one doc
+// per chunk are written in a single db.batch(), and Firestore caps a batch
+// at 500 writes. Kept comfortably below that (not AT 500) so the job doc
+// itself never pushes an already-borderline plan over the edge. In
+// practice this is effectively unreachable — at ~150k tokens/chunk
+// (CHUNK_TOKEN_TARGET), 490 chunks is ~73.5M tokens, far beyond anything
+// the 100MB Tier-1 PDF-byte cap or realistic tender sizes would ever
+// produce; the more realistic (if still rare) way to approach it is many
+// small files whose criticality tiers keep alternating, which forces
+// smaller per-chunk grouping than the token budget alone would.
+const TIER2_MAX_CHUNKS = 490;
+
 // Moved to src/lib/analysisPrompt.ts (byte-identical content) so the merge
 // module's schema-validation gate can import the exact same schema without
 // pulling in server.ts's own top-level side effects. buildAnalysisSystemInstruction
@@ -1163,13 +1185,14 @@ async function fetchTier2FileEntries(
   const entries: Tier2FileEntry[] = [];
 
   if (tenderType === "storage_urls") {
-    const MAX_FILES = 10;
+    // No file-count cap here — Tier-2 chunking exists precisely to handle
+    // submissions Tier-1 can't take in one call, whether that's driven by
+    // token volume or file count (see TIER1_SAFE_FILE_COUNT at the call
+    // site). Every provided file gets fetched and chunked; the only limit
+    // left is TIER2_MAX_CHUNKS, enforced once in createTier2Job after
+    // planning, as a clear error rather than a silent per-file skip.
     const allUrls: string[] = Array.isArray(tenderContent) ? tenderContent : [];
     for (let i = 0; i < allUrls.length; i++) {
-      if (i >= MAX_FILES) {
-        notes.push(`file ${i + 1}: skipped — exceeded ${MAX_FILES}-file limit`);
-        continue;
-      }
       const url = allUrls[i];
       const label = resolveFileLabel(fileNames, i);
       try {
@@ -1310,6 +1333,96 @@ function planTier2Chunks(entries: Tier2FileEntry[]): Tier2ChunkPlan[] {
   flush();
 
   return chunks;
+}
+
+/** Creates a Tier-2 analysis_jobs doc + its chunks subcollection — the
+ *  SAME job-creation logic regardless of which trigger fired (file count
+ *  over TIER1_SAFE_FILE_COUNT, or estimated tokens over
+ *  TIER2_TOKEN_THRESHOLD). Shared so the two independent routing triggers
+ *  in /api/analyze-tender can never drift into creating differently-shaped
+ *  jobs. estimatedTokens is computed from the real chunk plan (sum of each
+ *  chunk's own estimate) rather than passed in, so it's accurate for BOTH
+ *  call sites, including the count-triggered one which fires before the
+ *  Tier-1 docContents token scan would otherwise compute it. */
+async function createTier2Job(
+  db: FirebaseFirestore.Firestore,
+  params: {
+    uid: string;
+    tenderType: string;
+    actualContent: any;
+    fileNames: string[] | null;
+    userProfile: string;
+    language: string | null;
+    extraContext: string | null;
+    userProjectName: string | null;
+  },
+): Promise<
+  | { ok: true; jobId: string; chunkCount: number }
+  | { ok: false; status: number; error: string }
+> {
+  const { uid, tenderType, actualContent, fileNames, userProfile, language, extraContext, userProjectName } = params;
+
+  const { entries, notes } = await fetchTier2FileEntries(tenderType, actualContent, fileNames);
+  const chunkPlan = planTier2Chunks(entries);
+  if (chunkPlan.length === 0) {
+    return {
+      ok: false, status: 422,
+      error: "No readable content could be fetched for analysis. If this is a scanned PDF, please upload the original PDF file directly.",
+    };
+  }
+  if (chunkPlan.length > TIER2_MAX_CHUNKS) {
+    // Defense-in-depth backstop, not a real-world path — see
+    // TIER2_MAX_CHUNKS's comment. A clear, actionable error either way,
+    // never a silent drop of any of these chunks/files.
+    return {
+      ok: false, status: 413,
+      error: `This tender is too large even for chunked analysis (${chunkPlan.length} sections). Please split it into smaller batches or contact support.`,
+    };
+  }
+  const estimatedTokens = chunkPlan.reduce((sum, c) => sum + c.estimatedTokens, 0);
+
+  const jobRef = db.collection("analysis_jobs").doc();
+  const batch = db.batch();
+  batch.set(jobRef, {
+    uid,
+    status: "queued",
+    tier: 2,
+    createdAt: Timestamp.now(),
+    updatedAt: Timestamp.now(),
+    estimatedTokens,
+    chunkCount: chunkPlan.length,
+    chunksDone: 0,
+    chunksFailed: 0,
+    chunkPlanNotes: notes,
+    request: {
+      tenderType,
+      tenderContent: actualContent,
+      userProfile,
+      language: language ?? null,
+      extraContext: extraContext ?? null,
+      fileNames: Array.isArray(fileNames) && fileNames.length > 0 ? fileNames : null,
+      projectName: (typeof userProjectName === "string" && userProjectName.trim()) ? userProjectName.trim() : null,
+    },
+  });
+  chunkPlan.forEach((chunk, index) => {
+    const chunkRef = jobRef.collection("chunks").doc(String(index));
+    batch.set(chunkRef, {
+      index,
+      status: "pending",
+      sourceLabel: chunk.sourceLabel,
+      parts: chunk.parts,
+      estimatedTokens: chunk.estimatedTokens,
+      criticality: chunk.criticality,
+      retryCount: 0,
+      createdAt: Timestamp.now(),
+      startedAt: null,
+      updatedAt: Timestamp.now(),
+      result: null,
+      reason: null,
+    });
+  });
+  await batch.commit();
+  return { ok: true, jobId: jobRef.id, chunkCount: chunkPlan.length };
 }
 
 // ---------------------------------------------------------------------------
@@ -1880,6 +1993,37 @@ app.post("/api/analyze-tender", verifyFirebaseToken, async (req: AuthenticatedRe
       ? `\n\n--- EXTRA CONTEXT / RE-ANALYSIS UPDATE ---\n${req.body.extraContext}\n`
       : "";
 
+    // ── File-count routing gate (checked BEFORE any fetching/docContents
+    // building) ─────────────────────────────────────────────────────────────
+    // Independent of and in addition to the token-based Tier-2 trigger
+    // below — a submission can route to Tier-2 for having too many files
+    // OR too many tokens; neither check can be bypassed by the other. Only
+    // storage_urls carries a knowable file count up front (URLs are cheap
+    // to count; other tenderTypes are single documents). No file is ever
+    // skipped for count reasons: over the safe count routes to Tier-2 for
+    // new analyses, or is rejected with a clear, actionable error for
+    // re-analysis (Tier-2 doesn't support re-analysis yet — a separate,
+    // deliberately out-of-scope feature, not silently dropped content).
+    if (tenderType === "storage_urls" && Array.isArray(actualContent) && actualContent.length > TIER1_SAFE_FILE_COUNT) {
+      if (isReanalysis) {
+        return res.status(413).json({
+          error: "Too many files to add in one re-analysis — please combine into fewer PDFs or contact support.",
+        });
+      }
+      const result = await createTier2Job(db, {
+        uid,
+        tenderType,
+        actualContent,
+        fileNames: Array.isArray(fileNames) && fileNames.length > 0 ? (fileNames as string[]) : null,
+        userProfile,
+        language: language ?? null,
+        extraContext: req.body.extraContext ?? null,
+        userProjectName,
+      });
+      if (result.ok === false) return res.status(result.status).json({ error: result.error });
+      return res.json({ tier: 2, jobId: result.jobId, chunkCount: result.chunkCount });
+    }
+
     if (
       tenderType === "pdfs" ||
       tenderType === "zip" ||
@@ -1914,8 +2058,12 @@ app.post("/api/analyze-tender", verifyFirebaseToken, async (req: AuthenticatedRe
         },
       ];
     } else if (tenderType === "storage_urls") {
-      // Phase 3: every URL goes through safeFetch before touching the network
-      const MAX_FILES = 10;
+      // Phase 3: every URL goes through safeFetch before touching the network.
+      // No file-count skip here — a submission with more than
+      // TIER1_SAFE_FILE_COUNT files never reaches this branch at all; it's
+      // routed to Tier-2 (or, for re-analysis, rejected with a clear error)
+      // by the file-count gate earlier in this handler. Every file that
+      // DOES reach this loop is analyzed — none dropped for count reasons.
       const allUrls: string[] = Array.isArray(actualContent) ? actualContent : [];
       const totalFilesProvided = allUrls.length;
       const filesSkipped: { index: number; fileName: string; reason: string }[] = [];
@@ -1928,10 +2076,6 @@ app.post("/api/analyze-tender", verifyFirebaseToken, async (req: AuthenticatedRe
 
       for (let i = 0; i < allUrls.length; i++) {
         const label = resolveFileLabel(fileNames, i);
-        if (i >= MAX_FILES) {
-          filesSkipped.push({ index: i, fileName: label, reason: "Exceeded 10-file limit — file not analyzed" });
-          continue;
-        }
         const url = allUrls[i];
         try {
           const fetched = await safeFetch(url);
@@ -2042,64 +2186,26 @@ app.post("/api/analyze-tender", verifyFirebaseToken, async (req: AuthenticatedRe
       // widening Tier 2 to those is a separate, later step, not this one.
       const jobifiableType = tenderType === "storage_urls" || tenderType === "url" || tenderType === "text";
       if (!isReanalysis && jobifiableType) {
-        // Fetch + extract once, here, at job-creation time — the resulting
-        // chunk plan is persisted so worker calls never re-fetch or
-        // re-extract, and can resume from exactly the chunk they left off
-        // at (Step B carry-forward: server-side chunk completion + resume).
-        const { entries, notes } = await fetchTier2FileEntries(
+        // This is the SECOND, independent Tier-2 trigger (token volume) —
+        // the file-count trigger above already handled storage_urls
+        // submissions over TIER1_SAFE_FILE_COUNT before we ever got here,
+        // so by this point any storage_urls request has <= that many
+        // files but may still have too many TOKENS (e.g. a few very large
+        // files, or url/text content with no file concept at all). Neither
+        // trigger can bypass the other. Uses the SAME job-creation helper
+        // as the count trigger so the two paths can never drift.
+        const result = await createTier2Job(db, {
+          uid,
           tenderType,
           actualContent,
-          Array.isArray(fileNames) && fileNames.length > 0 ? (fileNames as string[]) : null,
-        );
-        const chunkPlan = planTier2Chunks(entries);
-        if (chunkPlan.length === 0) {
-          return res.status(422).json({
-            error: "No readable content could be fetched for analysis. If this is a scanned PDF, please upload the original PDF file directly.",
-          });
-        }
-
-        const jobRef = db.collection("analysis_jobs").doc();
-        const batch = db.batch();
-        batch.set(jobRef, {
-          uid,
-          status: "queued",
-          tier: 2,
-          createdAt: Timestamp.now(),
-          updatedAt: Timestamp.now(),
-          estimatedTokens,
-          chunkCount: chunkPlan.length,
-          chunksDone: 0,
-          chunksFailed: 0,
-          chunkPlanNotes: notes,
-          request: {
-            tenderType,
-            tenderContent: actualContent, // kept for Step C's project-save payloadRef; unused by chunk processing itself
-            userProfile,
-            language: language ?? null,
-            extraContext: req.body.extraContext ?? null,
-            fileNames: Array.isArray(fileNames) && fileNames.length > 0 ? fileNames : null,
-            projectName: (typeof userProjectName === "string" && userProjectName.trim()) ? userProjectName.trim() : null,
-          },
+          fileNames: Array.isArray(fileNames) && fileNames.length > 0 ? (fileNames as string[]) : null,
+          userProfile,
+          language: language ?? null,
+          extraContext: req.body.extraContext ?? null,
+          userProjectName,
         });
-        chunkPlan.forEach((chunk, index) => {
-          const chunkRef = jobRef.collection("chunks").doc(String(index));
-          batch.set(chunkRef, {
-            index,
-            status: "pending",
-            sourceLabel: chunk.sourceLabel,
-            parts: chunk.parts,
-            estimatedTokens: chunk.estimatedTokens,
-            criticality: chunk.criticality,
-            retryCount: 0,
-            createdAt: Timestamp.now(),
-            startedAt: null,
-            updatedAt: Timestamp.now(),
-            result: null,
-            reason: null,
-          });
-        });
-        await batch.commit();
-        return res.json({ tier: 2, jobId: jobRef.id, chunkCount: chunkPlan.length });
+        if (result.ok === false) return res.status(result.status).json({ error: result.error });
+        return res.json({ tier: 2, jobId: result.jobId, chunkCount: result.chunkCount });
       }
       return res.status(413).json({
         error: `Document is too large for a single analysis (~${Math.round(estimatedTokens / 1000)}k estimated tokens). Please split it into key documents (main conditions, eligibility, BOQ) and analyse each separately.`,

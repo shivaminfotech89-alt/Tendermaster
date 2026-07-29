@@ -19,15 +19,13 @@ import ModeBReviewPanel from "../components/modeb/ModeBReviewPanel";
 import { isTemplated, fillTemplate, saveCandidateTemplate } from "../lib/docTemplates";
 import BOQSection from "../components/boq/BOQSection";
 import BOQViewer from "../components/boq/BOQViewer";
-import { extractBoqWithFallback } from "../services/boqExtractionOrchestrator";
+import { runBoqExtraction } from "../lib/boq/runBoqExtraction";
 import type { BOQData, BidSnapshotRow } from "../lib/boq/types";
 import { INITIAL_BOQ } from "../lib/boq/types";
 import { decideRevenueSync, inferRevenueSource, type RevenueSource } from "../lib/boq/revenueSync";
 import { netBidAmount } from "../lib/boq/calculator";
 import { extractAnalysisText, extractBidRecommendationEstimatedValue } from "../lib/boq/detectBoqType";
 import { buildRateContractHint, resolveRateContractRevenue } from "../lib/boq/detectRateContract";
-import { detectGstCess } from "../lib/boq/detectGstCess";
-import { detectBidValidity, detectCompletionPeriod } from "../lib/boq/detectTenderValidity";
 import { inferLegacyConfirmations } from "../lib/boq/confirmationMigration";
 
 function formatFileSize(bytes: number): string {
@@ -274,164 +272,80 @@ export default function ProjectDetails() {
       ? [payloadRef]
       : [];
 
-    const urls = rawPdfUrls.length > 0 ? rawPdfUrls : payloadUrls;
-    const usingRawUrls = rawPdfUrls.length > 0;
-
-    if (urls.length === 0) {
+    if (rawPdfUrls.length === 0 && payloadUrls.length === 0) {
       toast.error('No source documents found. Please re-upload this tender to extract the BOQ.');
       return;
     }
 
     const latestRef = doc(db, 'saved_tenders', projectId, 'boq_extraction', 'latest');
     await setDoc(latestRef, removeUndefined({ status: 'running', startedAt: serverTimestamp() }));
-    console.log('[BOQ] status set to running', { urlCount: urls.length, usingRawUrls });
+    console.log('[BOQ] status set to running', { rawPdfUrlCount: rawPdfUrls.length, payloadUrlCount: payloadUrls.length });
 
     try {
-      let fetchedCount = 0;
-      let textOnlyCount = 0;
-      let best: Awaited<ReturnType<typeof extractBoqWithFallback>> | null = null;
-      let lastDownloadError: string | null = null;
+      const result = await runBoqExtraction({
+        rawPdfUrls,
+        payloadUrls,
+        executionDurationHint: project?.details?.timeline_and_milestones?.execution_duration,
+      });
 
-      for (const url of urls) {
-        try {
-          console.log('[BOQ] downloading PDF', { url: url.slice(0, 80) });
-          // payloadRef/payloadRefRaw store Firebase Storage download URLs with ?token=
-          // Firebase serves these with Access-Control-Allow-Origin: * — no CORS config needed.
-          // Do NOT use getBytes(storageRef) — that sends authenticated XHR requiring gsutil CORS.
-          const resp = await fetch(url);
-          if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-          const buffer = await resp.arrayBuffer();
-          fetchedCount++;
-
-          // Verify the content is actually a PDF (magic bytes %PDF-).
-          // payloadRef for digital PDFs stores text/plain (cost-optimised for Gemini).
-          const magic = new Uint8Array(buffer, 0, 5);
-          const isPdf = magic[0] === 0x25 && magic[1] === 0x50 && magic[2] === 0x44 && magic[3] === 0x46;
-          if (!isPdf) {
-            textOnlyCount++;
-            console.log('[BOQ] skipping non-PDF content (text-extracted digital PDF stored in payloadRef)');
-            continue;
-          }
-
-          console.log('[BOQ] PDF downloaded', { bytes: buffer.byteLength });
-          console.log('[BOQ] parser start');
-          const result = await extractBoqWithFallback(buffer);
-          console.log('[BOQ] parser done', {
-            items: result.extraction.items.length,
-            score: result.verification.score,
-            engine: result.telemetry.engine,
-            durationMs: result.telemetry.parserDurationMs,
-          });
-
-          if (result.extraction.items.length > 0 &&
-              (!best || result.verification.score > best.verification.score)) {
-            best = result;
-          }
-        } catch (e: any) {
-          lastDownloadError = e?.message ?? String(e);
-          console.warn('[BOQ] PDF/extraction failed for URL:', lastDownloadError);
-        }
+      if (result.status === 'failed') {
+        await setDoc(latestRef, removeUndefined({ status: 'failed', reason: result.reason, updatedAt: serverTimestamp() }));
+        console.log('[BOQ] done — failed', { reason: result.reason, durationMs: Date.now() - t0 });
+        return;
       }
-
-      // All downloaded files were text (digital PDFs stored without raw backup).
-      // This happens for projects analysed before payloadRefRaw was introduced.
-      if (!best && fetchedCount > 0 && textOnlyCount === fetchedCount && !usingRawUrls) {
-        const reason = 'The original PDF is not available for re-extraction on this project. Re-analyse the tender to enable BOQ extraction.';
-        await setDoc(latestRef, removeUndefined({ status: 'failed', reason, updatedAt: serverTimestamp() }));
-        console.log('[BOQ] done — text-only content, no raw PDF available', { durationMs: Date.now() - t0 });
+      if (result.status === 'no_boq_found') {
+        await setDoc(latestRef, removeUndefined({ status: 'no_boq_found', updatedAt: serverTimestamp() }));
+        console.log('[BOQ] done — no BOQ', { durationMs: Date.now() - t0 });
         return;
       }
 
-      if (!best) {
-        if (fetchedCount === 0 && lastDownloadError) {
-          // All downloads failed — surface as an error, not 'no_boq_found'
-          await setDoc(latestRef, removeUndefined({
-            status: 'failed',
-            reason: `Couldn't download the tender PDF: ${lastDownloadError}`,
-            updatedAt: serverTimestamp(),
-          }));
-        } else {
-          await setDoc(latestRef, removeUndefined({ status: 'no_boq_found', updatedAt: serverTimestamp() }));
-        }
-        console.log('[BOQ] done — no BOQ', { fetchedCount, durationMs: Date.now() - t0 });
-        return;
-      }
-
-      const { extraction, verification, telemetry } = best;
-
-      // Never display a failed-verification result — score 0 means a critical check failed
-      // (e.g. reconciliation mismatch) and the extracted data is untrustworthy.
-      if (!verification.pass) {
-        const reason = `Could not reliably extract the BOQ from this document (verification score: ${verification.score}/100, failures: ${verification.criticalFailures.join(', ')}). Click Retry to try again.`;
-        await setDoc(latestRef, removeUndefined({ status: 'failed', reason, updatedAt: serverTimestamp() }));
-        console.log('[BOQ] done — verification failed, not showing result', {
-          verificationScore: verification.score,
-          criticalFailures: verification.criticalFailures,
-          durationMs: Date.now() - t0,
-        });
-        return;
-      }
-
-      const totalAmount = extraction.items.reduce((s, it) => s + (it.amount ?? 0), 0);
       await setDoc(latestRef, removeUndefined({
         status: 'done',
-        items: extraction.items,
-        itemCount: extraction.items.length,
-        totalAmount,
-        engine: telemetry.engine,
-        visionUsed: telemetry.engine === 'vision',
-        verificationScore: verification.score,
-        parserDurationMs: telemetry.parserDurationMs,
+        items: result.items,
+        itemCount: result.itemCount,
+        totalAmount: result.totalAmount,
+        engine: result.engine,
+        visionUsed: result.visionUsed,
+        verificationScore: result.verificationScore,
+        parserDurationMs: result.parserDurationMs,
         updatedAt: serverTimestamp(),
       }));
 
-      // GST/Cess + Bid Validity + Completion Period detection — runs once
-      // here on the already-computed, in-memory extraction text (never
-      // persisted itself, no extraction file touched; only this structured
-      // result merges into boq). Sticky manual override per field: once the
-      // bidder has reviewed/edited a field, re-extraction must never
-      // silently rewrite it again.
+      // Sticky manual override per field: once the bidder has reviewed/edited
+      // a field, re-extraction must never silently rewrite it again.
       //
       // Combined into ONE patch + ONE handleBoqChange call — three
       // sequential handleBoqChange({...boq, ...}) calls here used to each
       // spread the same stale `boq` snapshot (state doesn't update
       // synchronously within this function), so the last call silently
       // discarded whatever the first two had just detected. Never write a
-      // field on a miss either: a miss is confidence 30 + a "no signal"
-      // reason, and writing that would overwrite a real detection (or an
-      // already-good display) with noise — the gate has to happen before a
-      // field group is added to the patch, not after.
+      // field on a miss either: a miss means the shared extractor found no
+      // signal for that group, and writing nothing preserves whatever
+      // (real detection or already-good display) was there before — the
+      // gate has to happen before a field group is added to the patch, not
+      // after.
       const detectionPatch: Partial<BOQData> = {};
 
-      if (!boq.manualOverride?.gstIncluded) {
-        const gstCess = detectGstCess(extraction.rawText);
-        if (gstCess.gstIncluded !== 'unknown') {
-          detectionPatch.gstIncluded = gstCess.gstIncluded;
-          detectionPatch.cessPercent = gstCess.cessRate ?? boq.cessPercent;
-          detectionPatch.gstPercent = gstCess.gstRate ?? boq.gstPercent;
-          detectionPatch.gstCessConfidence = gstCess.confidence;
-          detectionPatch.gstCessDetectionReason = gstCess.reason;
-        }
+      if (!boq.manualOverride?.gstIncluded && result.detection.gstIncluded !== undefined) {
+        detectionPatch.gstIncluded = result.detection.gstIncluded;
+        detectionPatch.cessPercent = result.detection.cessPercent ?? boq.cessPercent;
+        detectionPatch.gstPercent = result.detection.gstPercent ?? boq.gstPercent;
+        detectionPatch.gstCessConfidence = result.detection.gstCessConfidence;
+        detectionPatch.gstCessDetectionReason = result.detection.gstCessDetectionReason;
       }
 
-      if (!boq.manualOverride?.bidValidity) {
-        const bidValidity = detectBidValidity(extraction.rawText);
-        if (bidValidity.days != null) {
-          detectionPatch.bidValidityDays = bidValidity.days;
-          detectionPatch.bidValidityLabel = bidValidity.label;
-          detectionPatch.bidValidityConfidence = bidValidity.confidence;
-          detectionPatch.bidValidityReason = bidValidity.reason;
-        }
+      if (!boq.manualOverride?.bidValidity && result.detection.bidValidityDays !== undefined) {
+        detectionPatch.bidValidityDays = result.detection.bidValidityDays;
+        detectionPatch.bidValidityLabel = result.detection.bidValidityLabel;
+        detectionPatch.bidValidityConfidence = result.detection.bidValidityConfidence;
+        detectionPatch.bidValidityReason = result.detection.bidValidityReason;
       }
 
-      if (!boq.manualOverride?.completionPeriod) {
-        const completionPeriod = detectCompletionPeriod(extraction.rawText, project?.details?.timeline_and_milestones?.execution_duration);
-        if (completionPeriod.days != null) {
-          detectionPatch.completionPeriodDays = completionPeriod.days;
-          detectionPatch.completionPeriodLabel = completionPeriod.label;
-          detectionPatch.completionPeriodConfidence = completionPeriod.confidence;
-          detectionPatch.completionPeriodReason = completionPeriod.reason;
-        }
+      if (!boq.manualOverride?.completionPeriod && result.detection.completionPeriodDays !== undefined) {
+        detectionPatch.completionPeriodDays = result.detection.completionPeriodDays;
+        detectionPatch.completionPeriodLabel = result.detection.completionPeriodLabel;
+        detectionPatch.completionPeriodConfidence = result.detection.completionPeriodConfidence;
+        detectionPatch.completionPeriodReason = result.detection.completionPeriodReason;
       }
 
       if (Object.keys(detectionPatch).length > 0) {
@@ -439,8 +353,8 @@ export default function ProjectDetails() {
       }
 
       console.log('[BOQ] done — extraction succeeded', {
-        items: extraction.items.length,
-        verificationScore: verification.score,
+        items: result.itemCount,
+        verificationScore: result.verificationScore,
         durationMs: Date.now() - t0,
       });
     } catch (err: any) {

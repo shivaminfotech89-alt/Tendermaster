@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import { useAuth } from "../auth/AuthProvider";
 import { useAnalyzerStore } from "../context/AnalyzerContext";
 import { Upload, X, Loader2, Sparkles, AlertCircle, FileText, CheckCircle2, ChevronRight, Activity, CalendarDays, File, MessageSquare, Send, Calculator, Building, Target, Download, Edit2, Trash2, Plus, Minus, ArrowLeft, Info, Save, Scan } from "lucide-react";
-import { collection, getDocs, query, addDoc, orderBy, serverTimestamp, doc, updateDoc, setDoc, Timestamp, onSnapshot, where, limit } from "firebase/firestore";
+import { collection, getDocs, getDoc, query, addDoc, orderBy, serverTimestamp, doc, updateDoc, setDoc, Timestamp, onSnapshot, where, limit } from "firebase/firestore";
 import { ref as storageRef, uploadBytes, getDownloadURL } from "firebase/storage";
 import { db, storage } from "../lib/firebase";
 import Markdown from "react-markdown";
@@ -25,6 +25,7 @@ import { INITIAL_BOQ } from "../lib/boq/types";
 import { detectBoqTypeFromText, extractBidRecommendationEstimatedValue } from "../lib/boq/detectBoqType";
 import { detectGstCess } from "../lib/boq/detectGstCess";
 import { detectBidValidity, detectCompletionPeriod } from "../lib/boq/detectTenderValidity";
+import { runBoqExtraction } from "../lib/boq/runBoqExtraction";
 import { removeUndefined } from "../lib/firestore";
 import { extractBoqWithFallback } from "../services/boqExtractionOrchestrator";
 
@@ -247,6 +248,12 @@ export default function TenderAnalyzer() {
   const boqPdfCandidatesRef = useRef<Array<{name: string; buffer: ArrayBuffer; score: number; pageCount: number}>>([]);
   // Raw PDF bytes for digital-PDF BOQ candidates; parallel to the file list (null = not a candidate or image PDF)
   const boqRawPdfBuffersRef = useRef<(ArrayBuffer | null)[]>([]);
+  // Guards the Tier-2 BOQ auto-extraction trigger (below) against firing
+  // more than once for the same completed job — the onSnapshot listener can
+  // re-deliver the same 'done' snapshot (e.g. React effect re-runs, or an
+  // unrelated later write to the job doc), and re-running extraction would
+  // waste work and could race with itself.
+  const boqAutoExtractTriggeredRef = useRef<Set<string>>(new Set());
   const [downloadingDocx, setDownloadingDocx] = useState(false);
   const [printWithoutLetterhead, setPrintWithoutLetterhead] = useState(false);
   const [savedDocs, setSavedDocs] = useState<SavedDoc[]>([]);
@@ -677,6 +684,12 @@ export default function TenderAnalyzer() {
           userProfile: JSON.stringify(profile),
           language: i18n.language,
           fileNames: nameSource,
+          // Sent regardless of which tier this turns out to be routed to —
+          // Tier-1 already attaches these itself after a synchronous
+          // response (see below); Tier-2 has no such response to hook into,
+          // so the server persists this onto the job doc at creation time
+          // instead, for finalizeJob to copy onto the saved project.
+          ...(rawPdfUploadedUrls.length > 0 ? { rawPdfUrls: rawPdfUploadedUrls } : {}),
         })
       });
 
@@ -993,6 +1006,134 @@ export default function TenderAnalyzer() {
     }
   };
 
+  // Core Tier-2 BOQ extraction body — the ref-free, Storage-URL-based path
+  // (runBoqExtraction, the same core the manual "Extract BOQ" button in
+  // ProjectDetails.tsx uses), since Tier-2 has no in-memory buffers the way
+  // Tier-1's inline flow above does: a job can finish minutes after upload,
+  // in a remounted component after a reload, with no upload session left to
+  // hold buffers in. Mirrors Tier-1's own inline GST/Cess/BidValidity/
+  // CompletionPeriod detection + persistence pattern (setBoq + a
+  // dot-notation updateDoc, since this component's boq state isn't
+  // otherwise synced to Firestore) so a Tier-2 project's BOQ auto-fill
+  // behaves identically to a Tier-1 one. Writes boq_extraction/latest
+  // itself and RE-THROWS on unexpected failure so a caller wired as
+  // BOQViewer's onManualExtract can surface it immediately — the
+  // auto-trigger wrapper below swallows it since nothing else needs it.
+  const runTier2BoqExtractionCore = async (projectId: string, executionDurationHint?: string | null) => {
+    const latestRef = doc(db, 'saved_tenders', projectId, 'boq_extraction', 'latest');
+    try {
+      const projectSnap = await getDoc(doc(db, 'saved_tenders', projectId));
+      if (!projectSnap.exists()) return;
+      const projectData = projectSnap.data() as any;
+
+      const rawPdfRef = projectData?.payloadRefRaw;
+      const rawPdfUrls: string[] = Array.isArray(rawPdfRef)
+        ? (rawPdfRef as string[]).filter((u: any) => typeof u === 'string' && u.startsWith('http'))
+        : typeof rawPdfRef === 'string' && rawPdfRef.startsWith('http')
+        ? [rawPdfRef]
+        : [];
+
+      const payloadRef = projectData?.payloadRef;
+      const payloadUrls: string[] = Array.isArray(payloadRef)
+        ? (payloadRef as string[]).filter((u: any) => typeof u === 'string' && u.startsWith('http'))
+        : typeof payloadRef === 'string' && payloadRef.startsWith('http')
+        ? [payloadRef]
+        : [];
+
+      if (rawPdfUrls.length === 0 && payloadUrls.length === 0) {
+        toast.error('No source documents found. Please re-upload this tender to extract the BOQ.');
+        return;
+      }
+
+      await setDoc(latestRef, removeUndefined({ status: 'running', startedAt: serverTimestamp() }));
+
+      const result = await runBoqExtraction({ rawPdfUrls, payloadUrls, executionDurationHint });
+
+      if (result.status === 'failed') {
+        await setDoc(latestRef, removeUndefined({ status: 'failed', reason: result.reason, updatedAt: serverTimestamp() }));
+        return;
+      }
+      if (result.status === 'no_boq_found') {
+        await setDoc(latestRef, removeUndefined({ status: 'no_boq_found', updatedAt: serverTimestamp() }));
+        return;
+      }
+
+      if (result.totalAmount > 0) setScheduleSum(result.totalAmount);
+      await setDoc(latestRef, removeUndefined({
+        status: 'done',
+        items: result.items,
+        itemCount: result.itemCount,
+        totalAmount: result.totalAmount,
+        engine: result.engine,
+        visionUsed: result.visionUsed,
+        verificationScore: result.verificationScore,
+        parserDurationMs: result.parserDurationMs,
+        updatedAt: serverTimestamp(),
+      }));
+
+      // boq is still INITIAL_BOQ for a fresh Tier-2 completion, before the
+      // user has ever reached BOQSection's UI on THIS project, so
+      // manualOverride cannot yet be set there — same reasoning as Tier-1's
+      // inline trigger above. For a later MANUAL re-extract on this same
+      // page, manualOverride could genuinely be set, so this gate still
+      // matters (not just a no-op) in that call path.
+      const detectionPatch: Partial<BOQData> = {};
+      if (!boq.manualOverride?.gstIncluded && result.detection.gstIncluded !== undefined) {
+        detectionPatch.gstIncluded = result.detection.gstIncluded;
+        detectionPatch.cessPercent = result.detection.cessPercent ?? boq.cessPercent;
+        detectionPatch.gstPercent = result.detection.gstPercent ?? boq.gstPercent;
+        detectionPatch.gstCessConfidence = result.detection.gstCessConfidence;
+        detectionPatch.gstCessDetectionReason = result.detection.gstCessDetectionReason;
+      }
+      if (!boq.manualOverride?.bidValidity && result.detection.bidValidityDays !== undefined) {
+        detectionPatch.bidValidityDays = result.detection.bidValidityDays;
+        detectionPatch.bidValidityLabel = result.detection.bidValidityLabel;
+        detectionPatch.bidValidityConfidence = result.detection.bidValidityConfidence;
+        detectionPatch.bidValidityReason = result.detection.bidValidityReason;
+      }
+      if (!boq.manualOverride?.completionPeriod && result.detection.completionPeriodDays !== undefined) {
+        detectionPatch.completionPeriodDays = result.detection.completionPeriodDays;
+        detectionPatch.completionPeriodLabel = result.detection.completionPeriodLabel;
+        detectionPatch.completionPeriodConfidence = result.detection.completionPeriodConfidence;
+        detectionPatch.completionPeriodReason = result.detection.completionPeriodReason;
+      }
+      if (Object.keys(detectionPatch).length > 0) {
+        setBoq(prev => ({ ...prev, ...detectionPatch }));
+        const firestorePatch: Record<string, unknown> = {};
+        Object.entries(detectionPatch).forEach(([k, v]) => { firestorePatch[`boq.${k}`] = v; });
+        updateDoc(doc(db, 'saved_tenders', projectId), removeUndefined(firestorePatch)).catch(console.error);
+      }
+    } catch (err: any) {
+      console.error('[BOQ] extraction error', err);
+      await setDoc(latestRef, removeUndefined({
+        status: 'failed',
+        reason: err?.message ?? 'BOQ extraction failed.',
+        updatedAt: serverTimestamp(),
+      })).catch(() => {});
+      throw err;
+    }
+  };
+
+  // Guarded auto-trigger, called once per completed Tier-2 job from the
+  // onSnapshot 'done' handler below — fire-and-forget; failures are already
+  // written to boq_extraction/latest by the core above, so BOQViewer's own
+  // listener picks them up and offers its manual-extract fallback.
+  const autoExtractTier2Boq = (projectId: string, executionDurationHint?: string | null) => {
+    if (boqAutoExtractTriggeredRef.current.has(projectId)) return;
+    boqAutoExtractTriggeredRef.current.add(projectId);
+    runTier2BoqExtractionCore(projectId, executionDurationHint).catch(() => {});
+  };
+
+  // Manual "Extract BOQ" / Retry button on the live Analyzer page (wired as
+  // BOQViewer's onManualExtract below) — same core, but never suppressed by
+  // the auto-trigger guard, and propagates failures so BOQViewer can show
+  // them immediately, matching ProjectDetails.tsx's handleManualBoqExtract
+  // contract exactly.
+  const handleManualBoqExtractInAnalyzer = async () => {
+    if (!savedProjectId) return;
+    await runTier2BoqExtractionCore(savedProjectId, analysisResult?.timeline_and_milestones?.execution_duration);
+  };
+
   // Listens to analysis_jobs/{jobId} and drives all Tier-2 UI state — same
   // shape as BOQViewer's boq_extraction listener (trigger a server action,
   // react to its Firestore writes, never trust the trigger call's own
@@ -1032,11 +1173,8 @@ export default function TenderAnalyzer() {
             setSavedProjectId(data.projectId);
             setPendingProjectName(data.details?.tender_simplified?.tender_name || 'Untitled Tender');
             setShowNameDialog(true);
+            autoExtractTier2Boq(data.projectId, data.details?.timeline_and_milestones?.execution_duration);
           }
-          // BOQ-extraction auto-kickoff (Tier-1 does this inline above) is
-          // deliberately NOT wired up for Tier-2 yet — flagged as a known
-          // gap, not an oversight. Manual re-extraction from ProjectDetails
-          // still works once the project is saved.
         }
         // 'blocked': a critical chunk failed — the UI below surfaces which
         // section(s) are stuck and the Retry / Abandon / Proceed-without
@@ -2920,6 +3058,7 @@ export default function TenderAnalyzer() {
                   <BOQViewer
                     projectId={savedProjectId}
                     onProceedToPricing={() => setActiveTab('calculator')}
+                    onManualExtract={handleManualBoqExtractInAnalyzer}
                     boqType={boq.boqType}
                     boq={boq}
                     onItemRateTotalsChange={handleItemRateTotalsChange}

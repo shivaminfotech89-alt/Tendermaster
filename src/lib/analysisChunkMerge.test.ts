@@ -118,6 +118,36 @@ describe('mergeChunkResults', () => {
     expect(merged.bid_recommendation).toEqual(chunkB().bid_recommendation);
   });
 
+  test('bid_recommendation: a partially-null picked object (real qualitative fields, null dollar figures) is backfilled to "" — never dropped, never fabricated', () => {
+    // Under the nullable chunk schema, the richest chunk can honestly say
+    // "I don't know the exact figures from this excerpt" (null) while still
+    // being confident about qualitative risk assessment — this is the
+    // scenario that broke the strict schema gate before this fix.
+    const partial = {
+      ...chunkB(),
+      bid_recommendation: {
+        estimated_value: null, conservative: null, safe_range: null, recommended: null,
+        aggressive: null, margin_range: '8% to 15%', risk_level: 'Medium',
+        rationale: 'Fixed-price clause raises risk; price conservatively.',
+      },
+    };
+    const merged = mergeChunkResults([chunkA(), partial, chunkC()]);
+    // Dollar figures backfilled to the same "" sentinel every other string
+    // field uses — never a fabricated number, never left as null/undefined
+    // (which would fail the strict schema's `required` check).
+    expect(merged.bid_recommendation.estimated_value).toBe('');
+    expect(merged.bid_recommendation.conservative).toBe('');
+    expect(merged.bid_recommendation.safe_range).toBe('');
+    expect(merged.bid_recommendation.recommended).toBe('');
+    expect(merged.bid_recommendation.aggressive).toBe('');
+    // Qualitative fields the chunk WAS confident about survive untouched.
+    expect(merged.bid_recommendation.margin_range).toBe('8% to 15%');
+    expect(merged.bid_recommendation.risk_level).toBe('Medium');
+    expect(merged.bid_recommendation.rationale).toBe('Fixed-price clause raises risk; price conservatively.');
+    // Must pass the strict schema gate — every required sub-field present.
+    expect(validateAgainstAnalysisSchema(merged)).toEqual([]);
+  });
+
   test('tender_simplified scalar fields: first non-null/non-empty, chunk order', () => {
     const merged = mergeChunkResults([chunkA(), chunkB(), chunkC()]);
     expect(merged.tender_simplified.tender_name).toBe(chunkA().tender_simplified.tender_name);

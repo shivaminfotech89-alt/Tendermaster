@@ -141,6 +141,33 @@ function pickScheduleIndex(financialValues: any[]): number {
   return idx >= 0 ? idx : 0;
 }
 
+interface BidRecommendation {
+  estimated_value: string; conservative: string; safe_range: string; recommended: string;
+  aggressive: string; margin_range: string; risk_level: string; rationale: string;
+}
+
+/** Backfills any null/missing sub-field of a bid_recommendation object
+ *  (whether it's the atomically-picked object, partially null, or entirely
+ *  absent) with the same "" empty-string sentinel every other string field
+ *  in this schema already uses for "no info" — one consistent construction
+ *  path for both "a chunk had a real-but-partial object" and "no chunk had
+ *  one at all". Never invents a number (no bid-band formula), never
+ *  reconciles across chunks — purely makes the atomic pick's own output
+ *  schema-safe against ANALYSIS_RESPONSE_SCHEMA's strict `required` list. */
+function sanitizeBidRecommendation(obj: any): BidRecommendation {
+  const s = (v: unknown): string => (isNonEmptyString(v) ? v : "");
+  return {
+    estimated_value: s(obj?.estimated_value),
+    conservative: s(obj?.conservative),
+    safe_range: s(obj?.safe_range),
+    recommended: s(obj?.recommended),
+    aggressive: s(obj?.aggressive),
+    margin_range: s(obj?.margin_range),
+    risk_level: s(obj?.risk_level),
+    rationale: s(obj?.rationale),
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Main merge function
 // ---------------------------------------------------------------------------
@@ -183,7 +210,14 @@ export function mergeChunkResults(chunkResults: unknown[]): any {
   // which could produce a self-contradictory bundle e.g. aggressive <
   // conservative) — taken from whichever chunk has the most
   // boq_details.financial_values entries (richest schedule-derived
-  // context), tie-broken by chunk order.
+  // context), tie-broken by chunk order. The nullable chunk schema lets a
+  // chunk return this object with SOME sub-fields null even when the
+  // object itself is real — e.g. confident qualitative risk_level/rationale
+  // but honestly unsure of exact dollar figures from a partial excerpt.
+  // sanitizeBidRecommendation backfills those individual nulls with the
+  // same "" sentinel every other string field here already uses for "no
+  // info" — it does NOT invent a number and does NOT change which chunk
+  // was picked, it just makes the atomic pick's own output schema-safe.
   let bestBidRecIdx = -1;
   let bestBidRecCount = -1;
   results.forEach((r, i) => {
@@ -193,12 +227,9 @@ export function mergeChunkResults(chunkResults: unknown[]): any {
       bestBidRecIdx = i;
     }
   });
-  const bid_recommendation = bestBidRecIdx >= 0
-    ? results[bestBidRecIdx].bid_recommendation
-    : (firstNonNull(results.map(r => r?.bid_recommendation)) ?? {
-        estimated_value: "", conservative: "", safe_range: "", recommended: "",
-        aggressive: "", margin_range: "", risk_level: "", rationale: "",
-      });
+  const bid_recommendation = sanitizeBidRecommendation(
+    bestBidRecIdx >= 0 ? results[bestBidRecIdx].bid_recommendation : firstNonNull(results.map(r => r?.bid_recommendation)),
+  );
 
   const tender_simplified = {
     tender_name: firstNonEmptyString(results.map(r => r?.tender_simplified?.tender_name)) ?? "",

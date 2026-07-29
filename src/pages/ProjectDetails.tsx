@@ -2212,21 +2212,21 @@ export default function ProjectDetails() {
                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
                         <div className="bg-white p-3 rounded border border-indigo-100">
                            <p className="text-[10px] uppercase font-bold text-indigo-400">Aggressive Bid</p>
-                           <p className="font-mono font-bold text-indigo-900">{project.details.bid_recommendation.aggressive}</p>
+                           <p className="font-mono font-bold text-indigo-900">{project.details.bid_recommendation.aggressive || '₹ -'}</p>
                         </div>
                         <div className="bg-white p-3 rounded border border-indigo-400 shadow-sm relative">
                            <span className="absolute -top-2.5 left-1/2 -translate-x-1/2 bg-indigo-600 text-white text-[9px] font-bold px-2 py-0.5 rounded-full uppercase">Recommended</span>
                            <p className="text-[10px] uppercase font-bold text-indigo-400">Sweet Spot</p>
-                           <p className="font-mono text-lg font-black text-indigo-700">{project.details.bid_recommendation.recommended}</p>
+                           <p className="font-mono text-lg font-black text-indigo-700">{project.details.bid_recommendation.recommended || '₹ -'}</p>
                         </div>
                         <div className="bg-white p-3 rounded border border-indigo-100">
                            <p className="text-[10px] uppercase font-bold text-indigo-400">Conservative Bid</p>
-                           <p className="font-mono font-bold text-indigo-900">{project.details.bid_recommendation.conservative}</p>
+                           <p className="font-mono font-bold text-indigo-900">{project.details.bid_recommendation.conservative || '₹ -'}</p>
                         </div>
                      </div>
                      <div className="flex gap-4 text-xs text-indigo-800 bg-white/50 p-2 rounded">
-                        <p><strong>Margin:</strong> {project.details.bid_recommendation.margin_range}</p>
-                        <p><strong>Risk:</strong> {project.details.bid_recommendation.risk_level}</p>
+                        <p><strong>Margin:</strong> {project.details.bid_recommendation.margin_range || '-'}</p>
+                        <p><strong>Risk:</strong> {project.details.bid_recommendation.risk_level || '-'}</p>
                      </div>
                      <p className="text-xs text-slate-500 mt-2 italic">Disclaimer: AI recommendations are guidance only. Final pricing decisions remain with the bidder.</p>
                   </div>

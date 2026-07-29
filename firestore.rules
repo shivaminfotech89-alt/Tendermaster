@@ -128,6 +128,17 @@ service cloud.firestore {
         && get(/databases/$(database)/documents/saved_tenders/$(savedId)).data.userId == request.auth.uid;
     }
 
+    // Language Fix 1 — cached translated report renders, one doc per
+    // language. Every write happens server-side via the Admin SDK
+    // (/api/render-language, cache invalidation on reanalysis), which
+    // bypasses these rules entirely — unlike boq_extraction (client-driven),
+    // the client never writes this collection directly, only reads its own.
+    match /saved_tenders/{savedId}/details_i18n/{lang} {
+      allow read: if isSignedIn()
+        && get(/databases/$(database)/documents/saved_tenders/$(savedId)).data.userId == request.auth.uid;
+      allow write: if false;
+    }
+
     match /saved_tenders/{savedId}/bid_snapshots/{snapshotId} {
       allow read: if isSignedIn() && (resource.data.createdBy == request.auth.uid || isAdmin());
       allow create: if isSignedIn()

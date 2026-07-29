@@ -44,6 +44,11 @@ function sanitizeDocOutput(raw: string): string {
 }
 const LARGE_FILE_BYTES = 20 * 1024 * 1024;
 
+// Language Fix 1 — same 3-language set/native-script convention as
+// Layout.tsx's LANG_NAMES, duplicated locally rather than shared since
+// it's a 3-entry constant and not worth a cross-file import for.
+const OVERVIEW_LANGUAGE_NAMES: Record<string, string> = { en: "English", hi: "हिंदी", gu: "ગુજરાતી" };
+
 function friendlyAnalysisError(raw: string): string {
   if (/exceeds the maximum number of tokens|1048576/i.test(raw))
     return "Your documents are too large to analyze together. Please analyze fewer or smaller documents at a time.";
@@ -135,6 +140,19 @@ export default function ProjectDetails() {
   const [project, setProject] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [businessProfile, setBusinessProfile] = useState<any>(null);
+
+  // Language Fix 1 — view-only report rendering. `renderedDetails` is the
+  // translated variant when the UI language differs from `project.details`'
+  // own language (project.detailsLanguage); null means "render base
+  // details directly", which is the default and the only state a legacy
+  // project (no detailsLanguage field) or an English-only session will
+  // ever be in. `project.details` itself is NEVER overwritten — every
+  // other tab/consumer (BOQ, Calculator, Chat, Document Generation) keeps
+  // reading it exactly as before. `displayDetails` (derived below) is the
+  // ONLY thing the Overview tab's own JSX should read for report content.
+  const [renderedDetails, setRenderedDetails] = useState<any>(null);
+  const [renderingLanguage, setRenderingLanguage] = useState(false);
+  const [renderLanguageError, setRenderLanguageError] = useState('');
   
   // Renaming State
   const [isEditingName, setIsEditingName] = useState(false);
@@ -427,6 +445,59 @@ export default function ProjectDetails() {
     };
     fetchProject();
   }, [projectId, user]);
+
+  // Language Fix 1 — renders the Overview report in the current UI
+  // language WITHOUT re-running analysis. Fires whenever the selected
+  // language or the loaded project's own analysis-language changes. When
+  // they already match (the default for every project until someone
+  // switches languages), this is a no-op: renderedDetails stays null and
+  // displayDetails falls straight through to project.details, identical to
+  // today. Never touches credits, the 5-run cap, or analysisRuns — this
+  // hits a dedicated, cache-checked endpoint, not /api/analyze-tender.
+  useEffect(() => {
+    if (!project || !projectId) return;
+    const baseLanguage: string = project.detailsLanguage ?? 'en';
+    if (i18n.language === baseLanguage) {
+      setRenderedDetails(null);
+      setRenderLanguageError('');
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      setRenderingLanguage(true);
+      setRenderLanguageError('');
+      try {
+        const res = await fetchWithAuth('/api/render-language', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ projectId, language: i18n.language }),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          // A rejected translation (data.fallback === true) also lands
+          // here — the server returns 502 in that case — so this always
+          // falls back to base details via the catch below, which is the
+          // correct, safe behavior either way (network failure or a
+          // translation the merge/validation gate refused to trust).
+          throw new Error(data.error || 'Failed to generate translated report');
+        }
+        if (cancelled) return;
+        setRenderedDetails(data.details);
+      } catch (e: any) {
+        if (cancelled) return;
+        setRenderLanguageError(e?.message || 'Failed to generate translated report');
+        setRenderedDetails(null); // fall back to base details
+      } finally {
+        if (!cancelled) setRenderingLanguage(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [i18n.language, project?.detailsLanguage, projectId]);
+
+  // The ONLY thing the Overview tab's own report JSX should read for
+  // report content — project.details itself is never mutated, so every
+  // other tab/consumer keeps reading the base, original-language analysis.
+  const displayDetails = renderedDetails ?? project?.details;
 
   useEffect(() => {
     if (!projectId || !user) return;
@@ -2333,39 +2404,50 @@ export default function ProjectDetails() {
 {/* Smart Timeline & Action Center */}
         {activeTab === 'overview' && (
           <div className="space-y-8">
+            {renderingLanguage && (
+              <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-4 flex items-center gap-3 text-sm text-indigo-800">
+                <Loader2 className="w-4 h-4 animate-spin shrink-0" />
+                Generating {OVERVIEW_LANGUAGE_NAMES[i18n.language] ?? i18n.language} Report…
+              </div>
+            )}
+            {!renderingLanguage && renderLanguageError && (
+              <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 text-sm text-amber-800">
+                {renderLanguageError}
+              </div>
+            )}
             {/* Match Score + AI Strategic Assessment */}
-            {project?.details?.compatibility && (
+            {displayDetails?.compatibility && (
               <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden flex flex-col md:flex-row">
                 <div className={`p-8 md:w-1/3 flex flex-col items-center justify-center border-b md:border-b-0 md:border-r ${
-                  (project.details.compatibility.score ?? 0) >= 80
+                  (displayDetails.compatibility.score ?? 0) >= 80
                     ? 'text-emerald-600 bg-emerald-50 border-emerald-200'
-                    : (project.details.compatibility.score ?? 0) >= 50
+                    : (displayDetails.compatibility.score ?? 0) >= 50
                       ? 'text-amber-600 bg-amber-50 border-amber-200'
                       : 'text-red-600 bg-red-50 border-red-200'
                 }`}>
                   <div className="text-center">
                     <span className="text-sm font-bold uppercase tracking-widest opacity-80 mb-2 block">Match Score</span>
-                    <span className="text-7xl font-black">{project.details.compatibility.score}</span>
+                    <span className="text-7xl font-black">{displayDetails.compatibility.score}</span>
                     <span className="text-2xl font-bold opacity-50">/100</span>
                   </div>
                 </div>
                 <div className="p-8 md:w-2/3 flex flex-col justify-center">
                   <h3 className="text-lg font-bold text-slate-900 mb-2">AI Strategic Assessment</h3>
                   <p className="text-slate-600 leading-relaxed text-sm md:text-base">
-                    {project.details.compatibility.rationale}
+                    {displayDetails.compatibility.rationale}
                   </p>
                 </div>
               </div>
             )}
             {/* Green Flags & Red Flags */}
-            {project?.details?.tender_simplified && (project.details.tender_simplified.pros?.length > 0 || project.details.tender_simplified.cons_and_risks?.length > 0) && (
+            {displayDetails?.tender_simplified && (displayDetails.tender_simplified.pros?.length > 0 || displayDetails.tender_simplified.cons_and_risks?.length > 0) && (
               <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6">
                 <div className="grid grid-cols-1 gap-4">
-                  {project.details.tender_simplified.pros?.length > 0 && (
+                  {displayDetails.tender_simplified.pros?.length > 0 && (
                   <div className="bg-emerald-50 rounded-lg p-4 border border-emerald-100">
                     <h4 className="text-xs font-bold text-emerald-800 uppercase tracking-widest mb-3">Green Flags</h4>
                     <ul className="space-y-2">
-                      {project.details.tender_simplified.pros.map((p: string, i: number) => (
+                      {displayDetails.tender_simplified.pros.map((p: string, i: number) => (
                         <li key={i} className="flex gap-2 text-sm text-emerald-900">
                           <CheckCircle className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
                           {p}
@@ -2374,11 +2456,11 @@ export default function ProjectDetails() {
                     </ul>
                   </div>
                   )}
-                  {project.details.tender_simplified.cons_and_risks?.length > 0 && (
+                  {displayDetails.tender_simplified.cons_and_risks?.length > 0 && (
                   <div className="bg-red-50 rounded-lg p-4 border border-red-100">
                     <h4 className="text-xs font-bold text-red-800 uppercase tracking-widest mb-3">Red Flags & Risks</h4>
                     <ul className="space-y-2">
-                      {project.details.tender_simplified.cons_and_risks.map((p: string, i: number) => (
+                      {displayDetails.tender_simplified.cons_and_risks.map((p: string, i: number) => (
                         <li key={i} className="flex gap-2 text-sm text-red-900">
                           <AlertCircle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
                           {p}
@@ -2403,9 +2485,9 @@ export default function ProjectDetails() {
                    <div className="flex flex-row items-start min-w-max gap-4 pb-4 pt-2 px-2">
                      {[
                        { label: "Tender Published", date: "Past", done: true },
-                       { label: "Pre-bid Meeting", date: project.details?.timeline_and_milestones?.pre_bid_meeting || "TBD", done: false },
-                       { label: "Clarification Deadline", date: project.details?.timeline_and_milestones?.clarification_deadline || "TBD", done: false },
-                       { label: "Bid Submission", date: project.details?.timeline_and_milestones?.submission_deadline || "TBD", done: false, critical: true }
+                       { label: "Pre-bid Meeting", date: displayDetails?.timeline_and_milestones?.pre_bid_meeting || "TBD", done: false },
+                       { label: "Clarification Deadline", date: displayDetails?.timeline_and_milestones?.clarification_deadline || "TBD", done: false },
+                       { label: "Bid Submission", date: displayDetails?.timeline_and_milestones?.submission_deadline || "TBD", done: false, critical: true }
                      ].map((item, idx, arr) => {
                         const firstNotDoneIdx = arr.findIndex(i => !i.done);
                         const isActive = idx === firstNotDoneIdx;
@@ -2439,8 +2521,8 @@ export default function ProjectDetails() {
                            <span>Submission Readiness</span>
                            <span>
                              {(() => {
-                               const docsCount = project.details?.required_documents_checklist?.length || 1;
-                               const uploadedCount = project.details?.required_documents_checklist?.filter((d: any) => uploadedFiles.some(f => (f.name || "").toLowerCase().includes((d.document_name || "").toLowerCase()) || (f.type || "").toLowerCase().includes((d.document_name || "").toLowerCase())) || checkedItems.includes(d.document_name)).length || 0;
+                               const docsCount = displayDetails?.required_documents_checklist?.length || 1;
+                               const uploadedCount = displayDetails?.required_documents_checklist?.filter((d: any) => uploadedFiles.some(f => (f.name || "").toLowerCase().includes((d.document_name || "").toLowerCase()) || (f.type || "").toLowerCase().includes((d.document_name || "").toLowerCase())) || checkedItems.includes(d.document_name)).length || 0;
                                const bidReady = revenue > 0 ? 1 : 0;
                                const totalSteps = docsCount + 2; // +1 analysis, +1 bid amount
                                const completedSteps = uploadedCount + 1 + bidReady;
@@ -2450,8 +2532,8 @@ export default function ProjectDetails() {
                         </div>
                         <div className="w-full bg-slate-100 rounded-full h-2">
                            <div className="bg-emerald-500 h-2 rounded-full transition-all duration-500" style={{ width: `${(() => {
-                               const docsCount = project.details?.required_documents_checklist?.length || 1;
-                               const uploadedCount = project.details?.required_documents_checklist?.filter((d: any) => uploadedFiles.some(f => (f.name || "").toLowerCase().includes((d.document_name || "").toLowerCase()) || (f.type || "").toLowerCase().includes((d.document_name || "").toLowerCase())) || checkedItems.includes(d.document_name)).length || 0;
+                               const docsCount = displayDetails?.required_documents_checklist?.length || 1;
+                               const uploadedCount = displayDetails?.required_documents_checklist?.filter((d: any) => uploadedFiles.some(f => (f.name || "").toLowerCase().includes((d.document_name || "").toLowerCase()) || (f.type || "").toLowerCase().includes((d.document_name || "").toLowerCase())) || checkedItems.includes(d.document_name)).length || 0;
                                const bidReady = revenue > 0 ? 1 : 0;
                                const totalSteps = docsCount + 2; // +1 analysis, +1 bid amount
                                const completedSteps = uploadedCount + 1 + bidReady;
@@ -2468,7 +2550,7 @@ export default function ProjectDetails() {
                          </div>
                        </li>
 
-                       {project.details?.required_documents_checklist?.map((docItem: any, idx: number) => {
+                       {displayDetails?.required_documents_checklist?.map((docItem: any, idx: number) => {
                           // Check if uploaded
                           const isUploaded = uploadedFiles.some((f: any) => (f.name || "").toLowerCase().includes((docItem.document_name || "").toLowerCase()) || (f.type || "").toLowerCase().includes((docItem.document_name || "").toLowerCase()));
                           const isManuallyChecked = checkedItems.includes(docItem.document_name);
@@ -2501,11 +2583,11 @@ export default function ProjectDetails() {
                      </ul>
 
                      {/* Required Annexures List */}
-                     {project.details?.required_annexures && project.details.required_annexures.length > 0 && (
+                     {displayDetails?.required_annexures && displayDetails.required_annexures.length > 0 && (
                        <div className="mt-6 border-t border-slate-100 pt-4">
                          <h4 className="font-semibold text-slate-800 text-sm mb-3">Tender Required Annexures</h4>
                          <ul className="space-y-3">
-                           {project.details.required_annexures.map((annex: any, idx: number) => (
+                           {displayDetails.required_annexures.map((annex: any, idx: number) => (
                              <li key={idx} className="flex flex-col gap-1">
                                <div className="flex justify-between items-start">
                                  <p className="text-sm font-medium text-slate-700">{annex.annexure_name}</p>
@@ -2535,7 +2617,7 @@ export default function ProjectDetails() {
             </div>
 
             {/* Compliance Matrix */}
-            {project?.details?.compliance_matrix && project.details.compliance_matrix.length > 0 && (
+            {displayDetails?.compliance_matrix && displayDetails.compliance_matrix.length > 0 && (
               <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
                 <div className="p-5 border-b border-slate-100">
                   <h3 className="font-semibold text-slate-800 flex items-center gap-2">
@@ -2544,7 +2626,7 @@ export default function ProjectDetails() {
                   <p className="text-xs text-slate-500 mt-1">Key eligibility and technical requirements checked against your profile.</p>
                 </div>
                 <div className="divide-y divide-slate-100">
-                  {project.details.compliance_matrix.map((item: any, i: number) => (
+                  {displayDetails.compliance_matrix.map((item: any, i: number) => (
                     <div key={i} className="flex items-start gap-4 px-5 py-4">
                       <span className={`shrink-0 mt-0.5 px-2.5 py-0.5 rounded-full text-xs font-bold uppercase tracking-wider ${
                         item.status === 'MET'
@@ -2564,7 +2646,7 @@ export default function ProjectDetails() {
             )}
 
             {/* Strategy and Procedures */}
-            {project.details?.application_roadmap && (
+            {displayDetails?.application_roadmap && (
               <div className="flex flex-col gap-8 mt-8">
                 <div className="bg-slate-900 rounded-xl border border-slate-800 shadow-sm p-6 text-white h-full">
                   <h3 className="text-lg font-bold mb-4 flex items-center gap-2">
@@ -2572,7 +2654,7 @@ export default function ProjectDetails() {
                      Execution Strategy
                   </h3>
                   <div className="space-y-3">
-                    {project.details.application_roadmap.winning_strategy_tips?.map((tip: string, i: number) => (
+                    {displayDetails.application_roadmap.winning_strategy_tips?.map((tip: string, i: number) => (
                       <div key={i} className="flex gap-3 text-sm text-slate-300">
                          <ChevronRight className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
                          <span>{tip}</span>
@@ -2587,13 +2669,13 @@ export default function ProjectDetails() {
                       Application Procedure & Road Map
                    </h3>
                    <div className="text-sm font-semibold text-indigo-700 bg-indigo-100 px-3 py-1.5 rounded inline-block mb-4">
-                     Portal: {project.details.application_roadmap.portal_source}
+                     Portal: {displayDetails.application_roadmap.portal_source}
                    </div>
                    
                    <div className="space-y-4">
-                     {project.details.application_roadmap.detailed_procedure_steps && project.details.application_roadmap.detailed_procedure_steps.length > 0 ? (
+                     {displayDetails.application_roadmap.detailed_procedure_steps && displayDetails.application_roadmap.detailed_procedure_steps.length > 0 ? (
                        <div className="space-y-3">
-                         {project.details.application_roadmap.detailed_procedure_steps.map((step: string, i: number) => (
+                         {displayDetails.application_roadmap.detailed_procedure_steps.map((step: string, i: number) => (
                            <div key={i} className="flex gap-3 items-start">
                              <div className="flex items-center justify-center w-6 h-6 rounded-full bg-indigo-600 text-white text-xs font-bold shrink-0 mt-0.5">{i + 1}</div>
                              <p className="text-sm text-slate-700 leading-relaxed font-medium">{step}</p>
@@ -2602,7 +2684,7 @@ export default function ProjectDetails() {
                        </div>
                      ) : (
                        <ul className="space-y-2">
-                         {project.details.application_roadmap.next_immediate_steps?.map((step: string, i: number) => (
+                         {displayDetails.application_roadmap.next_immediate_steps?.map((step: string, i: number) => (
                            <li key={i} className="flex gap-3 text-sm text-slate-700">
                              <ChevronRight className="w-4 h-4 text-indigo-400 shrink-0 mt-0.5" />
                              <span>{step}</span>

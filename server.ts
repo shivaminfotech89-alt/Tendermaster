@@ -17,6 +17,7 @@ import { PLANS, TRIAL_CREDITS, TRIAL_DOC_LIMIT, CREDIT_VALIDITY_MONTHS } from '.
 import { probeAllPagesFromBuffer, isRetryable as isProbeRetryable } from './src/lib/modeb/probe-helpers';
 import { buildAnalysisSystemInstruction, ANALYSIS_RESPONSE_SCHEMA, ANALYSIS_RESPONSE_SCHEMA_CHUNK } from './src/lib/analysisPrompt';
 import { mergeChunkResults, validateAgainstAnalysisSchema, hasNoMeaningfulContent, classifyChunkCriticality, type ChunkCriticality } from './src/lib/analysisChunkMerge';
+import { extractProseFields, mergeTranslatedProse, PROSE_TRANSLATION_SCHEMA, buildTranslationSystemInstruction } from './src/lib/analysisTranslation';
 import { fmtINR } from './src/lib/boq/calculator';
 
 const lookupPromise = promisify(dns.lookup);
@@ -1013,6 +1014,24 @@ function detectLowConfidence(parsed: any): LowConfidenceResult {
 function resolveFileLabel(fileNames: unknown, index: number): string {
   const rawName = Array.isArray(fileNames) ? fileNames[index] : null;
   return typeof rawName === "string" && rawName.trim().length > 0 ? rawName : `File ${index + 1}`;
+}
+
+/** Language Fix 1: deletes every cached translated report
+ *  (saved_tenders/{projectId}/details_i18n/*) — called whenever `details`
+ *  is genuinely replaced by a real reanalysis, since a cached translation
+ *  of the OLD analysis must never be served once the underlying analysis
+ *  has changed. Best-effort; callers log but don't fail the reanalysis
+ *  itself if this errors. */
+async function invalidateLanguageCache(db: FirebaseFirestore.Firestore, projectId: string): Promise<void> {
+  try {
+    const cacheSnap = await db.collection("saved_tenders").doc(projectId).collection("details_i18n").get();
+    if (cacheSnap.empty) return;
+    const batch = db.batch();
+    cacheSnap.docs.forEach(d => batch.delete(d.ref));
+    await batch.commit();
+  } catch (err) {
+    console.error(`[invalidateLanguageCache] Failed for project ${projectId}:`, err);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -2301,6 +2320,11 @@ app.post("/api/analyze-tender", verifyFirebaseToken, async (req: AuthenticatedRe
       try {
         await db.collection("saved_tenders").doc(existingProjectId).update({
           details: parsedData,
+          // Language Fix 1: a real reanalysis replaces `details` wholesale,
+          // so its language must be re-recorded too (it may differ from
+          // the previous run's language — see the language-select fields
+          // on every /api/analyze-tender caller).
+          detailsLanguage: language ?? "en",
           remarks,                                        // last-run snapshot, kept for backward compat
           remarksHistory: [...baseHistory, newRun],       // cumulative across all runs
           // Accumulate file names from re-analysis uploads (add-document path)
@@ -2311,6 +2335,12 @@ app.post("/api/analyze-tender", verifyFirebaseToken, async (req: AuthenticatedRe
           lastReanalyzedAt: Timestamp.now(),
           analysisRuns: FieldValue.increment(1),
         });
+        // The underlying analysis just changed — any cached translated
+        // reports (details_i18n/*) now describe a stale analysis and must
+        // never be served again. Best-effort: a failure here shouldn't
+        // fail the reanalysis itself, but IS logged since a stale cache
+        // hit would silently show outdated content.
+        await invalidateLanguageCache(db, existingProjectId);
       } catch (saveErr) {
         console.error("[analyze-tender] Failed to save re-analysis:", saveErr);
       }
@@ -2353,6 +2383,13 @@ app.post("/api/analyze-tender", verifyFirebaseToken, async (req: AuthenticatedRe
           projectName: (typeof userProjectName === "string" && userProjectName.trim()) ? userProjectName.trim() : (parsedData?.tender_simplified?.tender_name || "Untitled Tender"),
           tenderId: Date.now().toString(),
           details: parsedData,
+          // Language Fix 1: records which language `details`' prose is
+          // actually in, so the client can tell "does the selected UI
+          // language already match?" without a translation round-trip.
+          // Legacy projects (analyzed before this field existed) fall back
+          // to 'en' on read, never here — see the `?? "en"` at every read
+          // site instead of backfilling old docs.
+          detailsLanguage: language ?? "en",
           payloadRef,
           ...(Array.isArray(fileNames) && fileNames.length > 0 ? { payloadRefNames: fileNames } : {}),
           remarks,
@@ -2380,6 +2417,91 @@ app.post("/api/analyze-tender", verifyFirebaseToken, async (req: AuthenticatedRe
       logUsageEvent({ uid, type: !!(req as any).body?.projectId ? 'reanalysis' : 'analysis', success: false, failureReason: err.message.slice(0, 300) });
     }
     res.status(400).json({ error: err.message });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Language Fix 1 — renders a stored analysis in a different language
+// WITHOUT re-running the analysis pipeline: never touches credits, the
+// 5-run reanalysis cap, or analysisRuns. Translates ONLY the prose fields
+// (see src/lib/analysisTranslation.ts) via a small, cheap Gemini call on a
+// narrow extracted slice, deterministically merges the result back onto a
+// full copy of the stored `details`, and caches it — every enum, tag,
+// number, date, and the whole boq_details subtree (including the
+// [Schedule Total] tag the Financial Engine's pricing-basis selection
+// depends on) is guaranteed byte-identical to the base analysis, never
+// sent to the model. View-only: nothing downstream (BOQ extraction,
+// Financial Engine, Document Generation, Chat) ever reads a
+// details_i18n/* doc — only this endpoint's own response does, and only
+// for display.
+// ---------------------------------------------------------------------------
+app.post("/api/render-language", verifyFirebaseToken, async (req: AuthenticatedRequest, res) => {
+  const uid = req.user!.uid;
+  const { projectId, language } = req.body;
+  if (!projectId || typeof projectId !== "string" || !language || typeof language !== "string") {
+    return res.status(400).json({ error: "projectId and language are required" });
+  }
+  try {
+    const db = getFirestore();
+    const projectRef = db.collection("saved_tenders").doc(projectId);
+    const projectSnap = await projectRef.get();
+    if (!projectSnap.exists) return res.status(404).json({ error: "Project not found" });
+    const projectData = projectSnap.data()!;
+    if (projectData.userId !== uid) return res.status(403).json({ error: "Access denied" });
+
+    const baseLanguage: string = projectData.detailsLanguage ?? "en";
+    if (language === baseLanguage) {
+      // Already in the requested language — no translation needed. The
+      // client is expected to render `details` directly without calling
+      // this endpoint at all in this case; handled here too so a stray
+      // call is still correct, just a no-op read.
+      return res.json({ details: projectData.details, language: baseLanguage, cached: false });
+    }
+    if (!projectData.details) {
+      return res.status(422).json({ error: "This project has no analysis to render yet." });
+    }
+
+    const cacheRef = projectRef.collection("details_i18n").doc(language);
+    const cacheSnap = await cacheRef.get();
+    if (cacheSnap.exists) {
+      return res.json({ details: cacheSnap.data()!.details, language, cached: true });
+    }
+
+    const prosePayload = extractProseFields(projectData.details);
+    const aiClient = getAI();
+    const response = await generateContentWithRetry(
+      aiClient,
+      {
+        model: "gemini-3.5-flash",
+        contents: [JSON.stringify(prosePayload)],
+        config: {
+          systemInstruction: buildTranslationSystemInstruction(language),
+          responseMimeType: "application/json",
+          responseSchema: PROSE_TRANSLATION_SCHEMA,
+        },
+      },
+      3, // modest ceiling — a small translation-only call, not a full analysis
+    );
+
+    const translatedProse = robustJsonParse(response.text);
+    const { details: mergedDetails, errors } = mergeTranslatedProse(projectData.details, translatedProse);
+
+    if (errors.length > 0) {
+      console.warn(`[render-language] Rejected translation for project ${projectId}, language ${language}:`, errors.slice(0, 5));
+      return res.status(502).json({
+        error: "Could not generate a reliable translation. Showing the original analysis instead.",
+        details: projectData.details,
+        language: baseLanguage,
+        fallback: true,
+      });
+    }
+
+    await cacheRef.set({ details: mergedDetails, language, createdAt: Timestamp.now() });
+
+    return res.json({ details: mergedDetails, language, cached: false });
+  } catch (err: any) {
+    console.error("[render-language] Error:", err);
+    return res.status(400).json({ error: err?.message ?? "Failed to generate translated report" });
   }
 });
 
@@ -2569,7 +2691,7 @@ async function finalizeJob(
   }
 
   const uid: string = job.uid;
-  const { tenderType, tenderContent, fileNames, rawPdfUrls, projectName } = job.request;
+  const { tenderType, tenderContent, fileNames, rawPdfUrls, projectName, language } = job.request;
   const payloadRef =
     tenderType === "storage_urls" || tenderType === "url"
       ? tenderContent
@@ -2604,6 +2726,8 @@ async function finalizeJob(
         projectName: (typeof projectName === "string" && projectName.trim()) ? projectName.trim() : (parsedData?.tender_simplified?.tender_name || "Untitled Tender"),
         tenderId: Date.now().toString(),
         details: parsedData,
+        // Language Fix 1 — see the identical field on Tier-1's save above.
+        detailsLanguage: language ?? "en",
         payloadRef,
         ...(Array.isArray(fileNames) && fileNames.length > 0 ? { payloadRefNames: fileNames } : {}),
         // Mirrors Tier-1's payloadRefRaw (raw PDF Storage URLs for

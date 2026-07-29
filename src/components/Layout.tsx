@@ -33,7 +33,10 @@ export default function Layout() {
   const changeLanguage = (lng: string) => {
     i18n.changeLanguage(lng);
     const name = LANG_NAMES[lng] ?? lng;
-    toast(`Language changed to ${name}. Existing tender analyses need to be re-analyzed to appear in ${name}.`, {
+    // Viewing an existing project's report in this language is automatic
+    // now (Language Fix 1) — no reanalysis needed, just a brief one-time
+    // render per project the first time you view it in a given language.
+    toast(`Language changed to ${name}. Open a saved tender's Overview tab to view its report in ${name}.`, {
       icon: "🌐",
       duration: 5000,
     });

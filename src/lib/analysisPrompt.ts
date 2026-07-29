@@ -327,3 +327,42 @@ export const ANALYSIS_RESPONSE_SCHEMA = {
     "boq_details",
   ],
 };
+
+// ---------------------------------------------------------------------------
+// Chunk-call schema variant (Tier-2 only) — every node marked `nullable`.
+//
+// The chunk prompt (buildChunkDocContents, server.ts) explicitly instructs
+// Gemini: "For ANY field you cannot determine from THIS EXCERPT ALONE,
+// return null... a null here is correct and expected." But
+// ANALYSIS_RESPONSE_SCHEMA marks nearly everything `required` and never
+// declares `nullable`, so Gemini's structured output — which cannot violate
+// its own schema — was never actually able to comply with that instruction.
+// It had to invent a type-conforming placeholder instead (most likely `0`
+// for a required number, `""` for a required string), which the merge
+// cannot distinguish from a genuinely-computed value. For a MIN-of-scores
+// field like compatibility.score, that meant an out-of-scope chunk's forced
+// `0` placeholder would win the merge almost every time — corrupting the
+// result even though every individual chunk call "succeeded".
+//
+// This variant is used ONLY for Tier-2 chunk calls (see
+// /api/process-analysis-job in server.ts). Tier-1's single whole-document
+// call keeps using ANALYSIS_RESPONSE_SCHEMA unchanged — it has no
+// "out of scope" fields to begin with. validateAgainstAnalysisSchema also
+// keeps validating against the strict ANALYSIS_RESPONSE_SCHEMA, since it
+// checks the MERGED result, which mergeChunkResults always produces as a
+// fully-shaped object regardless of how many source chunks were null.
+function deepNullable(schema: any): any {
+  if (!schema || typeof schema !== "object") return schema;
+  const clone: any = { ...schema, nullable: true };
+  if (clone.properties) {
+    clone.properties = Object.fromEntries(
+      Object.entries(clone.properties).map(([key, sub]) => [key, deepNullable(sub)]),
+    );
+  }
+  if (clone.items) {
+    clone.items = deepNullable(clone.items);
+  }
+  return clone;
+}
+
+export const ANALYSIS_RESPONSE_SCHEMA_CHUNK = deepNullable(ANALYSIS_RESPONSE_SCHEMA);

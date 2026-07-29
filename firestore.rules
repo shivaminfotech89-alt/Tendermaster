@@ -140,5 +140,22 @@ service cloud.firestore {
            ]);
       allow update, delete: if false;
     }
+
+    // Tier-2 large-tender async jobs. Unlike boq_extraction (client-driven —
+    // the browser itself writes progress via setDoc), every write here
+    // happens server-side through the Admin SDK (/api/analyze-tender job
+    // creation, /api/process-analysis-job chunk claims/updates), which
+    // bypasses these rules entirely. The client only ever READS: the
+    // onSnapshot job-status listener and the on-mount job-rediscovery
+    // query (both scoped to the job doc's own `uid` field, TenderAnalyzer.tsx).
+    // No client code reads or writes the chunks subcollection directly.
+    match /analysis_jobs/{jobId} {
+      allow read: if isSignedIn() && resource.data.uid == request.auth.uid;
+      allow write: if false;
+    }
+
+    match /analysis_jobs/{jobId}/chunks/{chunkId} {
+      allow read, write: if false;
+    }
   }
 }

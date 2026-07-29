@@ -287,6 +287,33 @@ export function mergeChunkResults(chunkResults: unknown[]): any {
 }
 
 // ---------------------------------------------------------------------------
+// Content-sanity backstop — validateAgainstAnalysisSchema (below) checks
+// SHAPE only: every field has a schema-correct type/default, which a
+// completely empty merge (mergeChunkResults([]), or every chunk result
+// being empty/placeholder-only) passes cleanly — it's a valid, useless
+// object. This catches specifically that case, so it can be rejected
+// (status:'failed', no save, no credit) instead of silently succeeding as
+// an empty "done" result.
+//
+// Requires FIVE independent signals to ALL be simultaneously empty/zero
+// before flagging — never a single field alone — so a legitimately sparse
+// real tender (e.g. missing annexures, or no BOQ line items extracted)
+// is never a false positive: a real tender document virtually always has
+// at least a tender name or scope-of-work string, so needing every one of
+// these five to be empty at once is a strong "there is nothing here"
+// signal, not a "this tender happens to be short" one.
+// ---------------------------------------------------------------------------
+
+export function hasNoMeaningfulContent(details: any): boolean {
+  const noTenderName = !isNonEmptyString(details?.tender_simplified?.tender_name);
+  const noScope = !isNonEmptyString(details?.tender_simplified?.scope_of_work);
+  const zeroScore = typeof details?.compatibility?.score !== "number" || details.compatibility.score === 0;
+  const noDocsChecklist = !Array.isArray(details?.required_documents_checklist) || details.required_documents_checklist.length === 0;
+  const noFinancialValues = !Array.isArray(details?.boq_details?.financial_values) || details.boq_details.financial_values.length === 0;
+  return noTenderName && noScope && zeroScore && noDocsChecklist && noFinancialValues;
+}
+
+// ---------------------------------------------------------------------------
 // Schema-validation gate — walks ANALYSIS_RESPONSE_SCHEMA's own
 // type/properties/required/items structure (the SAME schema object Gemini
 // is contractually required to satisfy for both tiers) and checks the

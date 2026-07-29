@@ -15,8 +15,8 @@ import { promisify } from "util";
 // Bundled by esbuild (--bundle inlines local files; --packages=external only skips npm deps).
 import { PLANS, TRIAL_CREDITS, TRIAL_DOC_LIMIT, CREDIT_VALIDITY_MONTHS } from './src/lib/plans';
 import { probeAllPagesFromBuffer, isRetryable as isProbeRetryable } from './src/lib/modeb/probe-helpers';
-import { buildAnalysisSystemInstruction, ANALYSIS_RESPONSE_SCHEMA } from './src/lib/analysisPrompt';
-import { mergeChunkResults, validateAgainstAnalysisSchema, classifyChunkCriticality, type ChunkCriticality } from './src/lib/analysisChunkMerge';
+import { buildAnalysisSystemInstruction, ANALYSIS_RESPONSE_SCHEMA, ANALYSIS_RESPONSE_SCHEMA_CHUNK } from './src/lib/analysisPrompt';
+import { mergeChunkResults, validateAgainstAnalysisSchema, hasNoMeaningfulContent, classifyChunkCriticality, type ChunkCriticality } from './src/lib/analysisChunkMerge';
 import { fmtINR } from './src/lib/boq/calculator';
 
 const lookupPromise = promisify(dns.lookup);
@@ -1170,19 +1170,32 @@ interface Tier2FileEntry {
   estimatedTokens: number;
 }
 
+interface Tier2FileSkipped {
+  index: number;
+  fileName: string;
+  reason: string;
+}
+
 /** Fetches and normalizes Tier-2 source content into a flat list of
  *  file-like entries — the SAME fetch logic Tier-1/Step A already use for
  *  storage_urls/url/text, just run once up front so text is extracted
  *  exactly once and reused for the whole chunk plan. `fileNames` (when
  *  available, storage_urls only) gives each entry its real filename as a
- *  criticality-classification signal instead of a positional "file N". */
+ *  criticality-classification signal instead of a positional "file N".
+ *  Also returns the SAME file-level accounting Tier-1 already surfaces on
+ *  its Analysis Notes panel (totalFilesProvided/filesAnalyzed/filesSkipped)
+ *  — Tier-2's chunk-based pipeline has no other point where this is known
+ *  at a per-FILE granularity (chunks can span multiple files), so it's
+ *  computed once here and threaded through the job doc to finalizeJob. */
 async function fetchTier2FileEntries(
   tenderType: string,
   tenderContent: any,
   fileNames?: string[] | null,
-): Promise<{ entries: Tier2FileEntry[]; notes: string[] }> {
+): Promise<{ entries: Tier2FileEntry[]; notes: string[]; totalFilesProvided: number; filesAnalyzed: number; filesSkipped: Tier2FileSkipped[] }> {
   const notes: string[] = [];
   const entries: Tier2FileEntry[] = [];
+  const filesSkipped: Tier2FileSkipped[] = [];
+  let totalFilesProvided = 1;
 
   if (tenderType === "storage_urls") {
     // No file-count cap here — Tier-2 chunking exists precisely to handle
@@ -1192,13 +1205,16 @@ async function fetchTier2FileEntries(
     // left is TIER2_MAX_CHUNKS, enforced once in createTier2Job after
     // planning, as a clear error rather than a silent per-file skip.
     const allUrls: string[] = Array.isArray(tenderContent) ? tenderContent : [];
+    totalFilesProvided = allUrls.length;
     for (let i = 0; i < allUrls.length; i++) {
       const url = allUrls[i];
       const label = resolveFileLabel(fileNames, i);
       try {
         const fetched = await safeFetch(url);
         if (!fetched.ok) {
+          const reason = `Fetch failed (HTTP ${fetched.status})`;
           notes.push(`${label}: skipped — fetch failed (HTTP ${fetched.status})`);
+          filesSkipped.push({ index: i, fileName: label, reason });
           continue;
         }
         const contentType = fetched.headers.get("content-type") || "application/pdf";
@@ -1223,6 +1239,7 @@ async function fetchTier2FileEntries(
       } catch (err) {
         console.error("[fetchTier2FileEntries] Failed to fetch storage URL", url, err);
         notes.push(`${label}: skipped — network error`);
+        filesSkipped.push({ index: i, fileName: label, reason: "Network error fetching file" });
       }
     }
   } else if (tenderType === "url") {
@@ -1247,7 +1264,7 @@ async function fetchTier2FileEntries(
     entries.push({ sourceLabel: "pasted text", kind: "text", text, estimatedTokens: Math.round(text.length / 4) });
   }
 
-  return { entries, notes };
+  return { entries, notes, totalFilesProvided, filesAnalyzed: entries.length, filesSkipped };
 }
 
 interface Tier2ChunkPart {
@@ -1362,7 +1379,7 @@ async function createTier2Job(
 > {
   const { uid, tenderType, actualContent, fileNames, userProfile, language, extraContext, userProjectName } = params;
 
-  const { entries, notes } = await fetchTier2FileEntries(tenderType, actualContent, fileNames);
+  const { entries, notes, totalFilesProvided, filesAnalyzed, filesSkipped } = await fetchTier2FileEntries(tenderType, actualContent, fileNames);
   const chunkPlan = planTier2Chunks(entries);
   if (chunkPlan.length === 0) {
     return {
@@ -1394,6 +1411,9 @@ async function createTier2Job(
     chunksDone: 0,
     chunksFailed: 0,
     chunkPlanNotes: notes,
+    totalFilesProvided,
+    filesAnalyzed,
+    filesSkipped,
     request: {
       tenderType,
       tenderContent: actualContent,
@@ -2486,23 +2506,45 @@ async function finalizeJob(
   const skippedChunks = chunkDocs.filter(d => d.data().status === "failed");
   const chunkResults = doneChunks.map(d => d.data().result);
 
+  // Computed once up front so every terminal write below — success or
+  // failure — reflects the TRUE final counts at finalize time, not
+  // whatever the second-to-last per-chunk update happened to persist.
+  const finalChunksDone = doneChunks.length;
+  const finalChunksFailed = skippedChunks.length;
+
   let parsedData: any;
   try {
     parsedData = mergeChunkResults(chunkResults);
   } catch (mergeErr: any) {
     const reason = `Merge failed: ${String(mergeErr?.message || mergeErr).slice(0, 300)}`;
-    await jobRef.update({ status: "failed", reason, updatedAt: Timestamp.now() });
+    await jobRef.update({ status: "failed", reason, chunksDone: finalChunksDone, chunksFailed: finalChunksFailed, updatedAt: Timestamp.now() });
     return { jobStatus: "failed", reason };
   }
 
   const schemaErrors = validateAgainstAnalysisSchema(parsedData);
   if (schemaErrors.length > 0) {
     const reason = `Merged result failed schema validation: ${schemaErrors.slice(0, 5).join("; ")}`;
-    await jobRef.update({ status: "failed", reason, updatedAt: Timestamp.now() });
+    await jobRef.update({ status: "failed", reason, chunksDone: finalChunksDone, chunksFailed: finalChunksFailed, updatedAt: Timestamp.now() });
     return { jobStatus: "failed", reason };
   }
 
-  const remarks: any = { notes: [] };
+  // Content-sanity backstop: validateAgainstAnalysisSchema above checks
+  // SHAPE only — a fully-empty merge (every chunk empty/placeholder-only)
+  // passes it cleanly, since every field still has a schema-correct
+  // default. This is what actually protects the credit deduction below
+  // from firing on a useless result.
+  if (hasNoMeaningfulContent(parsedData)) {
+    const reason = "Merged result contains no meaningful analysis content (empty tender name, scope, score, and key data) — likely a chunk-processing failure. No credit was charged.";
+    await jobRef.update({ status: "failed", reason, chunksDone: finalChunksDone, chunksFailed: finalChunksFailed, updatedAt: Timestamp.now() });
+    return { jobStatus: "failed", reason };
+  }
+
+  const remarks: any = {
+    notes: [],
+    ...(typeof job.totalFilesProvided === "number" ? { totalFilesProvided: job.totalFilesProvided } : {}),
+    ...(typeof job.filesAnalyzed === "number" ? { filesAnalyzed: job.filesAnalyzed } : {}),
+    ...(Array.isArray(job.filesSkipped) ? { filesSkipped: job.filesSkipped } : {}),
+  };
   const { isLow, missing } = detectLowConfidence(parsedData);
   if (isLow) {
     remarks.notes.push(
@@ -2563,27 +2605,38 @@ async function finalizeJob(
     });
   } catch (txErr: any) {
     if (txErr.message === "CREDITS_EXHAUSTED") {
-      await jobRef.update({ status: "failed", reason: "CREDITS_EXHAUSTED", updatedAt: Timestamp.now() });
+      await jobRef.update({ status: "failed", reason: "CREDITS_EXHAUSTED", chunksDone: finalChunksDone, chunksFailed: finalChunksFailed, updatedAt: Timestamp.now() });
       return { jobStatus: "failed", reason: "CREDITS_EXHAUSTED" };
     }
     console.error("[finalizeJob] Save transaction failed:", txErr);
     const reason = `Save failed: ${String(txErr?.message || txErr).slice(0, 300)}`;
-    await jobRef.update({ status: "failed", reason, updatedAt: Timestamp.now() });
+    await jobRef.update({ status: "failed", reason, chunksDone: finalChunksDone, chunksFailed: finalChunksFailed, updatedAt: Timestamp.now() });
     return { jobStatus: "failed", reason };
   }
 
+  // Persists the TRUE final terminal counts (computed once, above) — the
+  // per-chunk inline handlers only write chunksDone/chunksFailed on their
+  // "not yet all-terminal" branch; the chunk that actually completes the
+  // job never gets its own count persisted otherwise, leaving the job doc
+  // frozen one chunk behind forever even though finalize itself always
+  // operates on the fresh, correct chunkDocs passed in above.
   await jobRef.update({
     status: "done",
     projectId: newProjectId,
     details: parsedData,
     remarks,
     lowConfidence: isLow,
+    chunksDone: finalChunksDone,
+    chunksFailed: finalChunksFailed,
     updatedAt: Timestamp.now(),
   });
 
   logUsageEvent({ uid, type: "analysis", projectId: newProjectId, success: true, lowConfidence: isLow });
 
-  return { jobStatus: "done", projectId: newProjectId, details: parsedData, remarks, lowConfidence: isLow, chunkCount: job.chunkCount };
+  return {
+    jobStatus: "done", projectId: newProjectId, details: parsedData, remarks, lowConfidence: isLow,
+    chunkCount: job.chunkCount, chunksDone: finalChunksDone, chunksFailed: finalChunksFailed,
+  };
 }
 
 /** Runs once every chunk has reached a terminal state (done/failed).
@@ -2754,7 +2807,7 @@ app.post("/api/process-analysis-job", verifyFirebaseToken, async (req: Authentic
           config: {
             systemInstruction: buildAnalysisSystemInstruction(language),
             responseMimeType: "application/json",
-            responseSchema: ANALYSIS_RESPONSE_SCHEMA,
+            responseSchema: ANALYSIS_RESPONSE_SCHEMA_CHUNK,
           },
         },
         CHUNK_RETRY_CEILING,

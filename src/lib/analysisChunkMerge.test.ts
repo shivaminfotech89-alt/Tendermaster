@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'vitest';
-import { mergeChunkResults, validateAgainstAnalysisSchema, classifyChunkCriticality } from './analysisChunkMerge';
+import { mergeChunkResults, validateAgainstAnalysisSchema, classifyChunkCriticality, hasNoMeaningfulContent } from './analysisChunkMerge';
 
 // Three mock chunk results loosely modelled on a real multi-chunk tender:
 // chunk 0 = NIT/eligibility section, chunk 1 = BOQ/schedule section,
@@ -33,7 +33,11 @@ function chunkA() {
       detailed_procedure_steps: [],
       winning_strategy_tips: [],
     },
-    financial_estimate: { material_costs: [], labour_costs: [], total_estimated_cost: '' },
+    // total_estimated_cost is out of scope for this eligibility-focused chunk —
+    // written as a real `null` (not ''), reflecting what the nullable chunk
+    // schema (ANALYSIS_RESPONSE_SCHEMA_CHUNK) actually allows Gemini to return
+    // now that it isn't forced to invent a type-conforming placeholder.
+    financial_estimate: { material_costs: [], labour_costs: [], total_estimated_cost: null },
     bid_recommendation: null,
     winning_probability: { score: 70, recommended_action: 'Bid — strong eligibility fit.' },
     compliance_matrix: [{ requirement: 'Turnover >= 3Cr', status: 'MET', notes: '3yr avg 6.8Cr' }],
@@ -257,5 +261,32 @@ describe('classifyChunkCriticality', () => {
     // a section that happens to reference "Annexure" while still carrying
     // real eligibility content.
     expect(classifyChunkCriticality({ isImagePath: false, sourceLabel: 'file 3', text: 'See Annexure II for ELIGIBILITY documentation.' })).toBe('eligibility_critical');
+  });
+});
+
+describe('hasNoMeaningfulContent', () => {
+  test('an empty merge (mergeChunkResults([]), or every chunk empty/placeholder-only) is flagged', () => {
+    const merged = mergeChunkResults([]);
+    expect(hasNoMeaningfulContent(merged)).toBe(true);
+  });
+
+  test('a real merged result (real name, scope, score, docs, financial_values) is NOT flagged', () => {
+    const merged = mergeChunkResults([chunkA(), chunkB(), chunkC()]);
+    expect(hasNoMeaningfulContent(merged)).toBe(false);
+  });
+
+  test('a legitimately sparse tender (only a real name + scope, everything else empty) is NOT falsely flagged', () => {
+    const base = mergeChunkResults([]);
+    const sparse = {
+      ...base,
+      tender_simplified: { ...base.tender_simplified, tender_name: 'Minimal Tender', scope_of_work: 'Supply of stationery items' },
+    };
+    expect(hasNoMeaningfulContent(sparse)).toBe(false);
+  });
+
+  test('a single real signal (e.g. a non-zero score alone) is enough to avoid the false-positive flag', () => {
+    const base = mergeChunkResults([]);
+    const sparse = { ...base, compatibility: { score: 40, rationale: 'Partial match' } };
+    expect(hasNoMeaningfulContent(sparse)).toBe(false);
   });
 });

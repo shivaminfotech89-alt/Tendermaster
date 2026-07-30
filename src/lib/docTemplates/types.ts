@@ -43,6 +43,7 @@ export interface FullTenderAnalysis {
   timeline_and_milestones?: {
     submission_deadline?: string;
     pre_bid_meeting?: string;
+    clarification_deadline?: string;
     execution_duration?: string;
   };
   emd_details?: {

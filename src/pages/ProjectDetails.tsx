@@ -68,6 +68,16 @@ function fmtDate(ts: any): string {
   return d.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
 }
 
+// Firestore Timestamp | Date | number | null -> epoch ms, or null. Used only
+// for the document-staleness comparison below (display-only signal).
+function tsToMillis(ts: any): number | null {
+  if (ts == null) return null;
+  if (typeof ts.toMillis === 'function') return ts.toMillis();
+  if (typeof ts.toDate === 'function') return ts.toDate().getTime();
+  const d = new Date(ts);
+  return isNaN(d.getTime()) ? null : d.getTime();
+}
+
 const LETTER_SENTINEL = '%%LETTER_DRAFT%%';
 
 type PaymentType =
@@ -213,7 +223,17 @@ export default function ProjectDetails() {
   const [generatedDocIsHtml, setGeneratedDocIsHtml] = useState(false);
   const [generatedFromTemplate, setGeneratedFromTemplate] = useState(false);
   const [boq, setBoqState] = useState<BOQData>({ ...INITIAL_BOQ });
-  const [boqChangedSinceDocGen, setBoqChangedSinceDocGen] = useState(false);
+  // Document-staleness snapshot — what boq.boqLastChangedAt / project's
+  // lastReanalyzedAt were at the moment documents were last generated in
+  // this session. null until a first generate happens. Compared against the
+  // CURRENT values (derived below as `documentsStale`) to show a non-
+  // blocking "regenerate" hint — general enough to cover both a bid change
+  // (boqLastChangedAt, bumped by essentially every BOQSection edit) and a
+  // re-analysis (lastReanalyzedAt, bumped by every reanalysis path), so a
+  // future re-analysis-driven staleness fix can reuse this same signal
+  // without any changes here.
+  const [docsGeneratedWithBoqAt, setDocsGeneratedWithBoqAt] = useState<number | null>(null);
+  const [docsGeneratedWithDetailsAt, setDocsGeneratedWithDetailsAt] = useState<number | null>(null);
   // Weak advisory signal from BOQViewer's items (BOQSection doesn't have
   // items itself) — one of three inputs to the Rate Contract hint.
   const [nominalQuantitiesSignal, setNominalQuantitiesSignal] = useState(false);
@@ -636,12 +656,27 @@ export default function ProjectDetails() {
 
   const handleBoqChange = (updated: BOQData) => {
     setBoqState(updated);
-    if (generatedDoc) setBoqChangedSinceDocGen(true);
     if (!projectId) return;
     if (boqSaveTimerRef.current) clearTimeout(boqSaveTimerRef.current);
     boqSaveTimerRef.current = setTimeout(() => {
       updateDoc(doc(db, 'saved_tenders', projectId), { boq: removeUndefined(updated) }).catch(console.error);
     }, 1000);
+  };
+
+  // Cancels the pending debounced boq autosave (if any) and writes the
+  // current live boq state to Firestore immediately. Document generation
+  // itself always reads the live `boq` state directly (already the
+  // freshest value — more current than Firestore, which lags by up to the
+  // debounce window) — this flush only exists so saved_tenders.boq doesn't
+  // keep lagging behind what generation just used, e.g. for the staleness
+  // comparison below or a concurrent tab/session reading the same project.
+  const flushBoqSave = () => {
+    if (!projectId) return;
+    if (boqSaveTimerRef.current) {
+      clearTimeout(boqSaveTimerRef.current);
+      boqSaveTimerRef.current = null;
+    }
+    updateDoc(doc(db, 'saved_tenders', projectId), { boq: removeUndefined(boq) }).catch(console.error);
   };
 
   // Pushed up from BOQViewer's item-rate pricing grid whenever its aggregate
@@ -1189,39 +1224,56 @@ export default function ProjectDetails() {
     setIsEditingDoc(false);
     setGeneratedFromTemplate(false);
 
+    // Force-flush any pending debounced boq autosave immediately. Not
+    // required for correctness of THIS generation — printSummary below
+    // already reads the live boq state directly, which is always at least
+    // as fresh as Firestore (Firestore can lag by up to the debounce
+    // window). This just keeps saved_tenders.boq from lagging behind what
+    // was just used, for consistency with anything else reading it.
+    flushBoqSave();
+
     // Only enrich generated documents once the bid has actually been
     // finalized at least once (boq.finalisedAt, already written by
-    // handleFinalize — unchanged here) — sourced from the LIVE boq, not the
-    // immutable bid_snapshots entry, so a regenerated document matches what
-    // the user currently sees on screen (boqChangedSinceDocGen already
-    // covers awareness of drift since the last generation). Every field is
-    // additionally gated on its own live confirm flag, so a field the user
-    // is mid-editing (unconfirmed) is omitted rather than shown stale.
+    // handleFinalize — unchanged here) — sourced from the LIVE boq via
+    // computeBidPrintSummary (the same read-only math BOQSection's own
+    // Financial Summary and the PDF export's Financial & BOQ Summary use),
+    // not the immutable bid_snapshots entry, so a regenerated document is
+    // guaranteed to match the figures the Bid Engine tab currently shows.
+    // Every field is additionally gated on its own live confirm flag, so a
+    // field the user is mid-editing (unconfirmed) is omitted rather than
+    // shown stale.
     const finalizedBid = boq.finalisedAt != null ? {
       projectName,
       tenderName: project.details?.tender_simplified?.tender_name,
       tenderValue: project.details?.tender_simplified?.tender_value,
-      pricingMethod: boq.boqType === 'item_rate' ? 'Item Rate' : boq.boqType === 'lump_sum_epc' ? 'Lump Sum / Package' : 'Percentage Rate',
+      pricingMethod: printSummary.isGridMode ? printSummary.modeLabel : 'Percentage Rate',
       scheduleBAmount: boq.estimatedAmountConfirmed ? boq.estimatedAmount ?? undefined : undefined,
-      bidPercent: boq.percentage ?? undefined,
-      aboveBelow: boq.aboveBelow,
-      quotedAmount: boq.quotedAmount ?? undefined,
-      quotedAmountWords: boq.quotedAmountWords ?? undefined,
-      // Mirrors BOQSection.tsx's own `gstConfirmed` exactly — the flag
-      // Finalize itself gates on (handleFinalize's guard and
-      // renderFinalizeButton's disabledReason chain both use this same
-      // two-part condition), so any bid that passed Finalize is guaranteed
-      // to populate this whenever GST treatment was actually resolved.
-      gstIncluded: (boq.gstIncluded && boq.gstIncluded !== 'unknown' && boq.manualOverride?.gstIncluded) ? boq.gstIncluded : undefined,
-      cessPercent: boq.cessAmount ? boq.cessPercent : undefined,
-      cessAmount: boq.cessAmount ?? undefined,
-      gstPercent: boq.gstIncluded === 'separate' ? boq.gstPercent : undefined,
-      gstAmount: boq.gstIncluded === 'separate' ? boq.gstAmount ?? undefined : undefined,
-      finalTotal: boq.roundedTotal ?? boq.totalWithGst ?? undefined,
+      bidPercent: printSummary.derivedPercentage ?? undefined,
+      aboveBelow: printSummary.derivedAboveBelow,
+      quotedAmount: printSummary.quotedAmount ?? undefined,
+      quotedAmountWords: printSummary.words ?? undefined,
+      // gstIncluded/cess/GST are only populated once printSummary.cessGst
+      // has actually resolved (i.e. gstIncluded isn't 'unknown') — exactly
+      // mirrors what the Bid Engine tab's own Financial Summary card and
+      // the PDF export's Financial & BOQ Summary already show live.
+      gstIncluded: printSummary.cessGst ? printSummary.gstIncluded : undefined,
+      cessPercent: (printSummary.cessGst?.cessAmount ?? 0) > 0 ? printSummary.cessGst?.cessPercent : undefined,
+      cessAmount: (printSummary.cessGst?.cessAmount ?? 0) > 0 ? printSummary.cessGst?.cessAmount : undefined,
+      gstPercent: printSummary.gstIncluded === 'separate' ? printSummary.cessGst?.gstPercent : undefined,
+      gstAmount: printSummary.gstIncluded === 'separate' ? printSummary.cessGst?.gstAmount : undefined,
+      finalTotal: printSummary.cessGst?.roundedTotal ?? printSummary.cessGst?.totalWithGst ?? undefined,
       completionPeriodLabel: boq.completionPeriodConfirmed ? (boq.completionPeriodLabel ?? (boq.completionPeriodDays != null ? `${boq.completionPeriodDays} Days` : undefined)) : undefined,
       bidValidityLabel: boq.bidValidityConfirmed ? (boq.bidValidityLabel ?? (boq.bidValidityDays != null ? `${boq.bidValidityDays} Days` : undefined)) : undefined,
-      expectedRevenue: boq.expectedRevenueConfirmed ? boq.expectedRevenueConfirmedValue ?? undefined : undefined,
+      expectedRevenue: printSummary.expectedRevenue.revenue ?? undefined,
     } : undefined;
+
+    // Snapshots the source-data fingerprints this generation used, so
+    // `documentsStale` (derived above) can detect a later bid change or
+    // re-analysis. Called from every success branch below.
+    const markDocsGenerated = () => {
+      setDocsGeneratedWithBoqAt(boq.boqLastChangedAt ?? 0);
+      setDocsGeneratedWithDetailsAt(tsToMillis(project.lastReanalyzedAt) ?? 0);
+    };
 
     // ── Template path: instant generation, no API call ────────────────────────
     if (!exactFormMode && isTemplated(docType, project.details?.tender_simplified?.authority_name)) {
@@ -1230,7 +1282,7 @@ export default function ProjectDetails() {
         setGeneratedDoc(md);
         setGeneratedDocIsHtml(false);
         setGeneratedFromTemplate(true);
-        setBoqChangedSinceDocGen(false);
+        markDocsGenerated();
         setGeneratingDoc(false);
         return;
       }
@@ -1282,7 +1334,7 @@ export default function ProjectDetails() {
         setGeneratedDocIsHtml(false);
         setGeneratedDoc(sanitizeDocOutput(data.document));
       }
-      setBoqChangedSinceDocGen(false);
+      markDocsGenerated();
       // Save as candidate template for admin review (fire-and-forget)
       if (!exactFormMode) {
         saveCandidateTemplate(
@@ -1618,6 +1670,17 @@ export default function ProjectDetails() {
   const scheduleBLoading = (boqExtractionStatus === 'loading' || boqExtractionStatus === 'running')
     && boq.estimatedAmount == null;
 
+  // Display-only: true once a document has been generated in this session
+  // AND either the bid (boq.boqLastChangedAt) or the source analysis
+  // (project.lastReanalyzedAt) has changed since. Never blocks viewing or
+  // downloading existing documents — clears the moment the user generates
+  // again (both snapshots are reset to the current values on every
+  // successful generate, see generateDocument below).
+  const documentsStale = !!generatedDoc && (
+    (docsGeneratedWithBoqAt != null && (boq.boqLastChangedAt ?? 0) > docsGeneratedWithBoqAt) ||
+    (docsGeneratedWithDetailsAt != null && (tsToMillis(project?.lastReanalyzedAt) ?? 0) > docsGeneratedWithDetailsAt)
+  );
+
   // Native browser print-to-PDF (replaces the former html2canvas/html2pdf
   // pipeline, which crashed on Tailwind v4's oklch() colors). Forces the
   // Overview tab active so its narrative content is in the DOM — the
@@ -1920,10 +1983,10 @@ export default function ProjectDetails() {
            {activeTab === 'docs' && (
              <div className="space-y-8">
 
-           {boqChangedSinceDocGen && boq.quotedAmount != null && (
+           {documentsStale && (
              <div className="flex items-center gap-2 bg-amber-50 border border-amber-200 rounded-lg px-4 py-2.5 text-sm text-amber-800">
                <AlertCircle className="w-4 h-4 text-amber-500 shrink-0" />
-               BOQ has been updated since this document was generated. Regenerate to include the latest bid figures.
+               Bid updated — regenerate to reflect the latest figures.
              </div>
            )}
 

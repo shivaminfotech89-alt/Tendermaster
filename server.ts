@@ -3330,6 +3330,60 @@ app.post(
         }
       }
 
+      // Explicit, labeled extraction of tender metadata — the same "pull
+      // named fields out of the big JSON blob into a prominent block"
+      // pattern as finalizedBidContext above, applied to fields that are
+      // already present in tenderDetails but easy for the model to miss
+      // buried in the full JSON dump further down. Unlike finalizedBid,
+      // this is never gated on boq.finalisedAt — tender metadata is known
+      // as soon as analysis exists, independent of bid status.
+      let tenderMetadataContext = "";
+      {
+        const ts = tenderDetails?.tender_simplified;
+        const tl = tenderDetails?.timeline_and_milestones;
+        const emd = tenderDetails?.emd_details;
+        const portal = tenderDetails?.application_roadmap?.portal_source;
+        const lines: string[] = [];
+        if (ts?.tender_number) lines.push(`Tender Number: ${ts.tender_number}`);
+        if (ts?.tender_name) lines.push(`Tender Name: ${ts.tender_name}`);
+        if (ts?.authority_name) lines.push(`Authority Name: ${ts.authority_name}`);
+        if (ts?.tender_value) lines.push(`Tender Value: ${ts.tender_value}`);
+        if (tl?.pre_bid_meeting) lines.push(`Pre-Bid Meeting Date: ${tl.pre_bid_meeting}`);
+        if (tl?.clarification_deadline) lines.push(`Clarification Deadline: ${tl.clarification_deadline}`);
+        if (tl?.submission_deadline) lines.push(`Submission Deadline: ${tl.submission_deadline}`);
+        if (tl?.execution_duration) lines.push(`Execution Duration: ${tl.execution_duration}`);
+        if (emd?.amount) lines.push(`EMD Amount: ${emd.amount}`);
+        if (emd?.mode) lines.push(`EMD Mode: ${emd.mode}`);
+        if (emd?.msme_exemption != null) lines.push(`EMD MSME Exemption: ${emd.msme_exemption ? 'Yes' : 'No'}`);
+        if (portal) lines.push(`Submission Portal: ${portal}`);
+        if (lines.length > 0) {
+          tenderMetadataContext = `\n--- TENDER METADATA ---\nUse these EXACT values verbatim for tender number, tender name, authority name, dates, and EMD — do not paraphrase or reformat them.\n${lines.join('\n')}\nIf a tender-metadata field is needed but not listed above, output __________ (12 underscores) — never guess.`;
+        }
+      }
+
+      // Same pattern for the highest-value business-profile fields — the
+      // full userProfile JSON is still provided below as a fallback for
+      // every other field (statutory numbers, bank details, turnover,
+      // etc.); this block just makes the most commonly-needed ones
+      // impossible for the model to miss.
+      let businessProfileContext = "";
+      if (userProfile) {
+        const p = userProfile;
+        const lines: string[] = [];
+        if (p.companyName) lines.push(`Company Name: ${p.companyName}`);
+        if (p.companyType) lines.push(`Company Type: ${p.companyType}`);
+        if (p.registeredOfficeAddress) lines.push(`Registered Office Address: ${p.registeredOfficeAddress}`);
+        if (p.gstNumber) lines.push(`GST Number: ${p.gstNumber}`);
+        if (p.panNumber) lines.push(`PAN Number: ${p.panNumber}`);
+        if (p.authorizedSignatoryName) lines.push(`Authorized Signatory: ${p.authorizedSignatoryName}`);
+        if (p.authorizedSignatoryDesignation) lines.push(`Signatory Designation: ${p.authorizedSignatoryDesignation}`);
+        if (p.phone) lines.push(`Phone: ${p.phone}`);
+        if (p.email) lines.push(`Email: ${p.email}`);
+        if (lines.length > 0) {
+          businessProfileContext = `\n--- KEY BUSINESS PROFILE FIELDS ---\nUse these EXACT values verbatim. (Full business profile JSON is also provided below for any other field, e.g. bank details, other statutory numbers, turnover.)\n${lines.join('\n')}`;
+        }
+      }
+
       let extraContext = "";
       if (extraInstructions) {
         extraContext = `\n--- USER SPECIFIC INSTRUCTIONS FOR THIS DOCUMENT ---\n${extraInstructions}\nPlease strictly incorporate the user's instructions above when filling out this document.`;
@@ -3372,7 +3426,7 @@ CASE B — Tender does NOT specify a format for this document:
           ? `\nCRITICAL LANGUAGE REQUIREMENT: You MUST draft the document STRICTLY in ${language === "hi" ? "Hindi" : language === "gu" ? "Gujarati" : language}, unless the user asks otherwise.`
           : `\nCRITICAL LANGUAGE REQUIREMENT: You MUST draft the document STRICTLY in English, unless the user asks otherwise.`
       }
-${financialContext}${finalizedBidContext}${extraContext}
+${financialContext}${finalizedBidContext}${tenderMetadataContext}${businessProfileContext}${extraContext}
 
 --- BUSINESS PROFILE ---
 ${userProfile ? JSON.stringify(userProfile) : "Not provided."}
@@ -3434,7 +3488,7 @@ STRICT RULES — follow every one without exception:
 ${userProfile ? JSON.stringify(userProfile) : "Not provided."}
 
 --- TENDER DETAILS ---
-${JSON.stringify(tenderDetails)}${financialContext}${finalizedBidContext}${extraContext}`;
+${JSON.stringify(tenderDetails)}${financialContext}${finalizedBidContext}${tenderMetadataContext}${businessProfileContext}${extraContext}`;
 
         // Resolve base64 + mimeType from URL (Storage-first path) or direct upload (fallback)
         let resolvedBase64 = exactFormBase64 as string;

@@ -1690,12 +1690,15 @@ export default function ProjectDetails() {
         </div>
       </div>
 
-      {/* Quick Executive Summary */}
-      {project.details?.tender_simplified?.scope_of_work && (
+      {/* Quick Executive Summary — sits above the tab bar, so it's outside
+          the activeTab==='overview' block the rest of the report scopes
+          its displayDetails usage to. Migrated separately for that reason;
+          same displayDetails source as every other prose element below. */}
+      {displayDetails?.tender_simplified?.scope_of_work && (
         <div className="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-xl p-6 border border-blue-100 shadow-sm">
           <h2 className="text-xl font-bold text-blue-900 mb-2">TL;DR / Quick Summary</h2>
           <p className="text-blue-800 leading-relaxed font-medium">
-             {project.details.tender_simplified.scope_of_work}
+             {displayDetails.tender_simplified.scope_of_work}
           </p>
         </div>
       )}

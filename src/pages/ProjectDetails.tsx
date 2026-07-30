@@ -4,7 +4,7 @@ import { doc, getDoc, updateDoc, deleteDoc, addDoc, collection, query, where, ge
 import { ref as storageRef, uploadBytes, getDownloadURL } from "firebase/storage";
 import { db, storage } from "../lib/firebase";
 import { removeUndefined } from "../lib/firestore";
-import { ArrowLeft, AlertCircle, Calculator, Building, Activity, Upload, FileText, Download, Loader2, Save, Plus, Target, CheckCircle, CheckCircle2, ListTodo, Calendar, MessageSquare, Send, X, Trash2, RefreshCw, Edit2, Check, ChevronRight, Info, IndianRupee, Wallet, Receipt, CreditCard, RotateCcw, BadgeCheck, Clock, Copy, ArrowUpRight, Scan } from "lucide-react";
+import { ArrowLeft, AlertCircle, Calculator, Building, Activity, Upload, FileText, Download, Loader2, Save, Plus, Target, CheckCircle, CheckCircle2, ListTodo, Calendar, MessageSquare, Send, X, Trash2, RefreshCw, Edit2, Check, ChevronRight, Info, IndianRupee, Wallet, Receipt, CreditCard, RotateCcw, BadgeCheck, Clock, Copy, ArrowUpRight, Scan, Printer } from "lucide-react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import JSZip from "jszip";
@@ -23,10 +23,11 @@ import { runBoqExtraction } from "../lib/boq/runBoqExtraction";
 import type { BOQData, BidSnapshotRow } from "../lib/boq/types";
 import { INITIAL_BOQ } from "../lib/boq/types";
 import { decideRevenueSync, inferRevenueSource, type RevenueSource } from "../lib/boq/revenueSync";
-import { netBidAmount } from "../lib/boq/calculator";
+import { netBidAmount, fmtINR } from "../lib/boq/calculator";
 import { extractAnalysisText, extractBidRecommendationEstimatedValue } from "../lib/boq/detectBoqType";
 import { buildRateContractHint, resolveRateContractRevenue } from "../lib/boq/detectRateContract";
 import { inferLegacyConfirmations } from "../lib/boq/confirmationMigration";
+import { computeBidPrintSummary } from "../lib/boq/printSummary";
 
 function formatFileSize(bytes: number): string {
   if (bytes >= 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
@@ -1575,39 +1576,20 @@ export default function ProjectDetails() {
     boq.isRateContract, boq.expectedContractValue, rateContractHintForPanel.signals.length, revenue,
   );
 
-  const [isExportingPDF, setIsExportingPDF] = useState(false);
+  // Read-only mirror of BOQSection's own Financial Summary math (same
+  // BOQData, same pure functions) — see printSummary.ts. Used only by the
+  // print-only Financial & BOQ Summary block below, so the printed report
+  // always shows a figure whether or not the Bid Engine tab was ever opened.
+  const printSummary = computeBidPrintSummary(boq, project?.details, totalExpense);
 
-  const handleDownloadPDF = async () => {
-    try {
-      setIsExportingPDF(true);
-      if (!(window as any).html2pdf) {
-        await new Promise((resolve, reject) => {
-          const script = document.createElement('script');
-          script.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js';
-          script.onload = resolve;
-          script.onerror = reject;
-          document.head.appendChild(script);
-        });
-      }
-      
-      const element = document.getElementById('report-container');
-      
-      const opt = {
-        margin:       [0.3, 0.3, 0.8, 0.3],
-        filename:     `${projectName.replace(/[^a-z0-9]/gi, '_').toLowerCase()}_report.pdf`,
-        image:        { type: 'jpeg' as const, quality: 0.98 },
-        html2canvas:  { scale: 2, useCORS: true, windowWidth: 1024 },
-        jsPDF:        { unit: 'in', format: 'a4', orientation: 'portrait' as const }
-      };
-      
-      await (window as any).html2pdf().set(opt).from(element).save();
-    } catch (e) {
-      console.error(e);
-      alert("Failed to generate PDF. Falling back to print.");
-      window.print();
-    } finally {
-      setIsExportingPDF(false);
-    }
+  // Native browser print-to-PDF (replaces the former html2canvas/html2pdf
+  // pipeline, which crashed on Tailwind v4's oklch() colors). Forces the
+  // Overview tab active so its narrative content is in the DOM — the
+  // print-only header and Financial & BOQ Summary blocks are rendered
+  // unconditionally (outside any activeTab gate) so they print regardless.
+  const handleDownloadPDF = () => {
+    setActiveTab('overview');
+    requestAnimationFrame(() => requestAnimationFrame(() => window.print()));
   };
 
   const toggleCheckItem = async (itemName: string) => {
@@ -1682,11 +1664,24 @@ export default function ProjectDetails() {
              <button onClick={() => setShowDeleteModal(true)} className="font-semibold px-4 py-2 rounded-lg text-sm border flex items-center gap-2 transition-colors shrink-0 print:hidden bg-red-50 hover:bg-red-100 text-red-700 border-red-200">
                <Trash2 className="w-4 h-4" /> Remove Project
              </button>
-             <button onClick={handleDownloadPDF} disabled={isExportingPDF} className="bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold px-4 py-2 rounded-lg text-sm border border-slate-200 flex items-center gap-2 transition-colors shrink-0 print:hidden disabled:opacity-50">
-               {isExportingPDF ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />} 
-               {isExportingPDF ? "Generating PDF..." : "Export PDF Report"}
+             <button onClick={handleDownloadPDF} className="bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold px-4 py-2 rounded-lg text-sm border border-slate-200 flex items-center gap-2 transition-colors shrink-0 print:hidden">
+               <Printer className="w-4 h-4" />
+               Print / Save as PDF
              </button>
            </div>
+        </div>
+      </div>
+
+      {/* Print-only report header — hidden on screen, sits above the tab bar
+          so it's outside any activeTab gate and always in the DOM. */}
+      <div className="hidden print:block mb-6 pb-4 border-b-2 border-slate-800">
+        <h1 className="text-2xl font-bold text-slate-900">{projectName}</h1>
+        <div className="flex flex-wrap gap-x-4 gap-y-0.5 mt-1 text-sm text-slate-600">
+          {projectId && <span>Project ID: {projectId}</span>}
+          <span>Generated: {new Date().toLocaleDateString('en-IN')}</span>
+          {displayDetails?.compatibility?.score != null && (
+            <span>Match Score: {displayDetails.compatibility.score}/100</span>
+          )}
         </div>
       </div>
 
@@ -1695,7 +1690,7 @@ export default function ProjectDetails() {
           its displayDetails usage to. Migrated separately for that reason;
           same displayDetails source as every other prose element below. */}
       {displayDetails?.tender_simplified?.scope_of_work && (
-        <div className="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-xl p-6 border border-blue-100 shadow-sm">
+        <div className="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-xl p-6 border border-blue-100 shadow-sm print:break-inside-avoid">
           <h2 className="text-xl font-bold text-blue-900 mb-2">TL;DR / Quick Summary</h2>
           <p className="text-blue-800 leading-relaxed font-medium">
              {displayDetails.tender_simplified.scope_of_work}
@@ -1703,8 +1698,63 @@ export default function ProjectDetails() {
         </div>
       )}
 
+      {/* Print-only Financial & BOQ Summary — always rendered regardless of
+          activeTab (unlike the Bid Engine tab, which only exists in the DOM
+          while active), reading the exact same boq/revenue/materials/labour
+          state the Bid Engine tab itself reads, plus computeBidPrintSummary
+          (a read-only mirror of BOQSection's own math) — so the printed
+          figures can never disagree with what the tab shows on screen. */}
+      <div className="hidden print:block bg-white rounded-xl border border-slate-300 print:break-inside-avoid">
+        <div className="bg-slate-900 px-5 py-3">
+          <h3 className="text-sm font-bold text-white uppercase tracking-widest">Financial & BOQ Summary</h3>
+        </div>
+        <div className="divide-y divide-slate-200">
+          {!boq.estimatedAmountConfirmed || printSummary.quotedAmount == null ? (
+            <div className="px-5 py-3 text-sm text-slate-500">Bid not yet calculated for this project.</div>
+          ) : (
+            [
+              ['Pricing Method', printSummary.isGridMode ? printSummary.modeLabel : 'Percentage Rate'],
+              ['Tender Value', tenderValue != null ? `${fmtINR(tenderValue)} (reference only)` : '—'],
+              ...(boq.boqType === 'item_rate'
+                ? [
+                    ['Department BOQ Total', fmtINR(boq.estimatedAmount!)],
+                    ['Quoted BOQ Total', fmtINR(printSummary.quotedAmount)],
+                  ]
+                : boq.boqType === 'lump_sum_epc'
+                ? [['Quoted Lump Sum', fmtINR(printSummary.quotedAmount)]]
+                : [
+                    ['Schedule-B Amount', fmtINR(boq.estimatedAmount!)],
+                    ['Bid %', `${printSummary.derivedAboveBelow === 'above' ? 'Above' : 'Below'} ${boq.percentage}%`],
+                    ['Quoted Schedule Amount', fmtINR(printSummary.quotedAmount)],
+                  ]),
+              ...(printSummary.cessGst ? [
+                ...(boq.cessPercent ? [['Welfare Cess', `${boq.cessPercent}% = ${fmtINR(printSummary.cessGst.cessAmount)}`]] : []),
+                ['GST', printSummary.gstIncluded === 'yes' ? 'Included in quoted rates'
+                  : printSummary.gstIncluded === 'no' ? 'Not applicable'
+                  : `${boq.gstPercent ?? 0}% = ${fmtINR(printSummary.cessGst.gstAmount)}`],
+                ['Final Total (incl. GST)', fmtINR(printSummary.cessGst.roundedTotal)],
+              ] : []),
+              ['Amount in Words', printSummary.words ?? '—'],
+              ['Expected Revenue', printSummary.expectedRevenue.revenue != null
+                ? fmtINR(printSummary.expectedRevenue.revenue)
+                : (printSummary.expectedRevenue.reason ?? 'Not yet calculated')],
+              ...(totalExpense > 0 ? [
+                ['Total Estimated Cost', fmtINR(totalExpense)],
+                ['Gross Profit', printSummary.metrics ? fmtINR(printSummary.metrics.grossProfit) : 'Not yet calculated'],
+                ['Margin on Cost', printSummary.metrics ? `${printSummary.metrics.marginPercent.toFixed(2)}%` : 'Not yet calculated'],
+              ] : [['Total Estimated Cost', 'Not yet entered']]),
+            ].map(([k, v]) => (
+              <div key={k} className="grid grid-cols-[220px_1fr] gap-2 px-5 py-2">
+                <span className="text-xs font-semibold text-slate-500">{k}</span>
+                <span className="text-sm text-slate-800">{v}</span>
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+
       {/* Tabs */}
-      <div className="flex overflow-x-auto border-b border-slate-200 mb-8 pb-px no-scrollbar">
+      <div className="flex overflow-x-auto border-b border-slate-200 mb-8 pb-px no-scrollbar print:hidden">
          <button onClick={() => setActiveTab('overview')} className={`px-6 py-3 font-semibold text-sm border-b-2 whitespace-nowrap transition-colors ${activeTab === 'overview' ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>Tender Overview</button>
          <button onClick={() => setActiveTab('docs')} className={`px-6 py-3 font-semibold text-sm border-b-2 whitespace-nowrap transition-colors ${activeTab === 'docs' ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>Auto-Generate Documents</button>
          <button onClick={() => setActiveTab('calculator')} className={`px-6 py-3 font-semibold text-sm border-b-2 whitespace-nowrap transition-colors ${activeTab === 'calculator' ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>Bid Engine & Profit Calculator</button>
@@ -1724,7 +1774,7 @@ export default function ProjectDetails() {
         <div className="w-full">
            
            {activeTab === 'overview' && (
-             <div className="space-y-8">
+             <div className="space-y-8 print:hidden">
                {/* Source Documents — original tender files stored in Firebase Storage */}
                {(() => {
                  const ref = project?.payloadRef;

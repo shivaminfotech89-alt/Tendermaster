@@ -89,9 +89,9 @@ export default function Layout() {
   const anySecondaryActive = secondaryNavItems.some(isActive);
 
   return (
-    <div className="flex h-screen bg-slate-50 text-slate-900 font-sans overflow-hidden">
+    <div className="flex h-screen bg-slate-50 text-slate-900 font-sans overflow-hidden print:h-auto print:overflow-visible print:block">
       {/* Sidebar — desktop only */}
-      <aside className="w-64 bg-white border-r border-slate-200 flex flex-col shrink-0 hidden md:flex">
+      <aside className="w-64 bg-white border-r border-slate-200 flex flex-col shrink-0 hidden md:flex print:hidden">
         <div className="flex items-center gap-2.5 px-4 pt-5 pb-5 flex-shrink-0">
           <svg width="38" height="38" viewBox="0 0 56 56" className="shrink-0 rounded-[10px] shadow-[0_4px_12px_rgba(67,56,202,0.3)]">
             <rect width="56" height="56" rx="14" fill="#4f46e5" />
@@ -185,9 +185,9 @@ export default function Layout() {
       </aside>
 
       {/* Main content */}
-      <main className="flex-1 flex flex-col min-w-0 h-screen overflow-hidden">
+      <main className="flex-1 flex flex-col min-w-0 h-screen overflow-hidden print:h-auto print:overflow-visible print:block">
         {/* Mobile header */}
-        <header className="md:hidden h-16 bg-white border-b border-slate-200 flex items-center justify-between px-4 shrink-0">
+        <header className="md:hidden h-16 bg-white border-b border-slate-200 flex items-center justify-between px-4 shrink-0 print:hidden">
           <div className="flex items-center">
             <img src="/tendermaster-logo-lockup.png" alt="TenderMaster AI" className="h-10" />
           </div>
@@ -212,14 +212,14 @@ export default function Layout() {
         </header>
 
         {/* Page content — overflow-x-hidden prevents card shadows from creating a horizontal scrollbar */}
-        <div className="flex-1 overflow-y-auto overflow-x-hidden bg-slate-50 relative pb-[4.5rem] md:pb-0">
+        <div className="flex-1 overflow-y-auto overflow-x-hidden bg-slate-50 relative pb-[4.5rem] md:pb-0 print:overflow-visible print:h-auto print:pb-0">
           <Outlet />
         </div>
       </main>
 
       {/* ── Mobile bottom navigation bar (4 primary + More) ── */}
       <nav
-        className="md:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 flex items-stretch z-50"
+        className="md:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 flex items-stretch z-50 print:hidden"
         style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
       >
         {primaryNavItems.map((item) => (
@@ -260,12 +260,12 @@ export default function Layout() {
         <>
           {/* Scrim */}
           <div
-            className="md:hidden fixed inset-0 bg-black/40 z-[60]"
+            className="md:hidden fixed inset-0 bg-black/40 z-[60] print:hidden"
             onClick={() => setMoreOpen(false)}
           />
           {/* Sheet */}
           <div
-            className="md:hidden fixed bottom-0 left-0 right-0 bg-white rounded-t-2xl shadow-2xl z-[70]"
+            className="md:hidden fixed bottom-0 left-0 right-0 bg-white rounded-t-2xl shadow-2xl z-[70] print:hidden"
             style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
           >
             <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
@@ -313,7 +313,7 @@ export default function Layout() {
             if (reanalyzing) return;
             navigate('/dashboard/analyzer');
           }}
-          className="fixed bottom-20 right-4 md:top-6 md:right-6 md:bottom-auto bg-white border border-indigo-200 shadow-xl rounded-xl p-4 flex items-center gap-4 cursor-pointer hover:shadow-2xl transition-all z-50 group hover:border-indigo-400"
+          className="fixed bottom-20 right-4 md:top-6 md:right-6 md:bottom-auto bg-white border border-indigo-200 shadow-xl rounded-xl p-4 flex items-center gap-4 cursor-pointer hover:shadow-2xl transition-all z-50 group hover:border-indigo-400 print:hidden"
         >
           <button
             onClick={(e) => { e.stopPropagation(); setHidePopup(true); }}

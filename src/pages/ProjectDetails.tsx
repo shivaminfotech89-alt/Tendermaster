@@ -455,13 +455,18 @@ export default function ProjectDetails() {
   // today. Never touches credits, the 5-run cap, or analysisRuns — this
   // hits a dedicated, cache-checked endpoint, not /api/analyze-tender.
   useEffect(() => {
-    if (!project || !projectId) return;
+    console.log('[LangDebug] ProjectDetails language effect fired', {
+      projectId, hasProject: !!project, uiLanguage: i18n.language, detailsLanguage: project?.detailsLanguage,
+    });
+    if (!project || !projectId) { console.log('[LangDebug] bailing — no project/projectId yet'); return; }
     const baseLanguage: string = project.detailsLanguage ?? 'en';
     if (i18n.language === baseLanguage) {
+      console.log('[LangDebug] uiLanguage === baseLanguage — rendering base details, no call', { uiLanguage: i18n.language, baseLanguage });
       setRenderedDetails(null);
       setRenderLanguageError('');
       return;
     }
+    console.log('[LangDebug] language mismatch — calling /api/render-language', { uiLanguage: i18n.language, baseLanguage, projectId });
     let cancelled = false;
     (async () => {
       setRenderingLanguage(true);
@@ -472,7 +477,9 @@ export default function ProjectDetails() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ projectId, language: i18n.language }),
         });
+        console.log('[LangDebug] /api/render-language responded', { status: res.status, ok: res.ok });
         const data = await res.json();
+        console.log('[LangDebug] /api/render-language body', { language: data.language, cached: data.cached, fallback: data.fallback, hasDetails: !!data.details, error: data.error });
         if (!res.ok) {
           // A rejected translation (data.fallback === true) also lands
           // here — the server returns 502 in that case — so this always
@@ -481,10 +488,12 @@ export default function ProjectDetails() {
           // translation the merge/validation gate refused to trust).
           throw new Error(data.error || 'Failed to generate translated report');
         }
-        if (cancelled) return;
+        if (cancelled) { console.log('[LangDebug] effect cancelled before applying result — a newer effect run superseded this one'); return; }
         setRenderedDetails(data.details);
+        console.log('[LangDebug] renderedDetails set — Overview tab should now show translated content');
       } catch (e: any) {
         if (cancelled) return;
+        console.error('[LangDebug] render-language call failed', e);
         setRenderLanguageError(e?.message || 'Failed to generate translated report');
         setRenderedDetails(null); // fall back to base details
       } finally {
@@ -498,6 +507,28 @@ export default function ProjectDetails() {
   // report content — project.details itself is never mutated, so every
   // other tab/consumer keeps reading the base, original-language analysis.
   const displayDetails = renderedDetails ?? project?.details;
+
+  // Client-side display localization for KNOWN, FIXED sentinel/enum
+  // values — the underlying DATA is never touched (it's read straight off
+  // displayDetails, the same object the translation merge already
+  // guarantees keeps these byte-identical); only the DISPLAYED text is
+  // looked up via t(). Never sent through the AI translator — these are a
+  // small, finite set, not open-ended prose.
+  const localizeSentinel = (value: string | undefined | null): string => {
+    if (!value) return '';
+    const normalized = value.trim().toLowerCase();
+    if (normalized === 'none scheduled') return t('sentinel_none_scheduled');
+    if (normalized === 'not specified') return t('sentinel_not_specified');
+    return value;
+  };
+  const localizeLevel = (value: string | undefined | null): string => {
+    const normalized = (value || '').trim().toLowerCase();
+    if (normalized === 'low') return t('level_low');
+    if (normalized === 'high') return t('level_high');
+    return t('level_medium'); // matches the pre-existing 'Medium' default fallback
+  };
+  const localizeComplianceStatus = (status: string | undefined | null): string =>
+    status === 'MET' ? t('compliance_met') : t('compliance_not_met');
 
   useEffect(() => {
     if (!projectId || !user) return;
@@ -2426,13 +2457,13 @@ export default function ProjectDetails() {
                       : 'text-red-600 bg-red-50 border-red-200'
                 }`}>
                   <div className="text-center">
-                    <span className="text-sm font-bold uppercase tracking-widest opacity-80 mb-2 block">Match Score</span>
+                    <span className="text-sm font-bold uppercase tracking-widest opacity-80 mb-2 block">{t('match_score')}</span>
                     <span className="text-7xl font-black">{displayDetails.compatibility.score}</span>
                     <span className="text-2xl font-bold opacity-50">/100</span>
                   </div>
                 </div>
                 <div className="p-8 md:w-2/3 flex flex-col justify-center">
-                  <h3 className="text-lg font-bold text-slate-900 mb-2">AI Strategic Assessment</h3>
+                  <h3 className="text-lg font-bold text-slate-900 mb-2">{t('ai_strategic_assessment')}</h3>
                   <p className="text-slate-600 leading-relaxed text-sm md:text-base">
                     {displayDetails.compatibility.rationale}
                   </p>
@@ -2445,7 +2476,7 @@ export default function ProjectDetails() {
                 <div className="grid grid-cols-1 gap-4">
                   {displayDetails.tender_simplified.pros?.length > 0 && (
                   <div className="bg-emerald-50 rounded-lg p-4 border border-emerald-100">
-                    <h4 className="text-xs font-bold text-emerald-800 uppercase tracking-widest mb-3">Green Flags</h4>
+                    <h4 className="text-xs font-bold text-emerald-800 uppercase tracking-widest mb-3">{t('green_flags')}</h4>
                     <ul className="space-y-2">
                       {displayDetails.tender_simplified.pros.map((p: string, i: number) => (
                         <li key={i} className="flex gap-2 text-sm text-emerald-900">
@@ -2458,7 +2489,7 @@ export default function ProjectDetails() {
                   )}
                   {displayDetails.tender_simplified.cons_and_risks?.length > 0 && (
                   <div className="bg-red-50 rounded-lg p-4 border border-red-100">
-                    <h4 className="text-xs font-bold text-red-800 uppercase tracking-widest mb-3">Red Flags & Risks</h4>
+                    <h4 className="text-xs font-bold text-red-800 uppercase tracking-widest mb-3">{t('red_flags')}</h4>
                     <ul className="space-y-2">
                       {displayDetails.tender_simplified.cons_and_risks.map((p: string, i: number) => (
                         <li key={i} className="flex gap-2 text-sm text-red-900">
@@ -2473,21 +2504,21 @@ export default function ProjectDetails() {
               </div>
             )}
             <div className="flex flex-col gap-8 mt-8">
-               
+
                {/* Smart Timeline */}
                <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
                   <div className="p-5 border-b border-slate-100 flex items-center justify-between">
                      <h3 className="font-bold text-slate-800 flex items-center gap-2">
-                       <Calendar className="w-5 h-5 text-indigo-600" /> Smart Timeline
+                       <Calendar className="w-5 h-5 text-indigo-600" /> {t('smart_timeline')}
                      </h3>
                   </div>
                   <div className="p-5 overflow-x-auto">
                    <div className="flex flex-row items-start min-w-max gap-4 pb-4 pt-2 px-2">
                      {[
-                       { label: "Tender Published", date: "Past", done: true },
-                       { label: "Pre-bid Meeting", date: displayDetails?.timeline_and_milestones?.pre_bid_meeting || "TBD", done: false },
-                       { label: "Clarification Deadline", date: displayDetails?.timeline_and_milestones?.clarification_deadline || "TBD", done: false },
-                       { label: "Bid Submission", date: displayDetails?.timeline_and_milestones?.submission_deadline || "TBD", done: false, critical: true }
+                       { label: t('tender_published'), date: t('timeline_past'), done: true },
+                       { label: t('pre_bid_meeting'), date: localizeSentinel(displayDetails?.timeline_and_milestones?.pre_bid_meeting) || t('tbd'), done: false },
+                       { label: t('clarification_deadline'), date: localizeSentinel(displayDetails?.timeline_and_milestones?.clarification_deadline) || t('tbd'), done: false },
+                       { label: t('bid_submission'), date: localizeSentinel(displayDetails?.timeline_and_milestones?.submission_deadline) || t('tbd'), done: false, critical: true }
                      ].map((item, idx, arr) => {
                         const firstNotDoneIdx = arr.findIndex(i => !i.done);
                         const isActive = idx === firstNotDoneIdx;
@@ -2512,13 +2543,13 @@ export default function ProjectDetails() {
                <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
                   <div className="p-5 border-b border-slate-100">
                      <h3 className="font-bold text-slate-800 flex items-center gap-2">
-                       <ListTodo className="w-5 h-5 text-indigo-600" /> Action Center
+                       <ListTodo className="w-5 h-5 text-indigo-600" /> {t('action_center')}
                      </h3>
                   </div>
                   <div className="p-5">
                      <div className="mb-4">
                         <div className="flex justify-between text-xs font-bold text-slate-500 mb-1">
-                           <span>Submission Readiness</span>
+                           <span>{t('submission_readiness')}</span>
                            <span>
                              {(() => {
                                const docsCount = displayDetails?.required_documents_checklist?.length || 1;
@@ -2545,8 +2576,8 @@ export default function ProjectDetails() {
                        <li className="flex items-start gap-2">
                          <div className="mt-0.5"><CheckCircle className="w-5 h-5 text-emerald-500" /></div>
                          <div>
-                            <p className="text-sm font-medium text-slate-700">Tender Analysis Reviewed</p>
-                            <p className="text-xs text-slate-400">Completed automatically.</p>
+                            <p className="text-sm font-medium text-slate-700">{t('tender_analysis_reviewed')}</p>
+                            <p className="text-xs text-slate-400">{t('completed_automatically')}</p>
                          </div>
                        </li>
 
@@ -2555,7 +2586,7 @@ export default function ProjectDetails() {
                           const isUploaded = uploadedFiles.some((f: any) => (f.name || "").toLowerCase().includes((docItem.document_name || "").toLowerCase()) || (f.type || "").toLowerCase().includes((docItem.document_name || "").toLowerCase()));
                           const isManuallyChecked = checkedItems.includes(docItem.document_name);
                           const isChecked = isUploaded || isManuallyChecked;
-                          
+
                           return (
                             <li key={idx} className="flex items-start gap-2">
                               <button onClick={() => toggleCheckItem(docItem.document_name)} className="mt-0.5 cursor-pointer hover:opacity-80 transition-opacity">
@@ -2566,7 +2597,7 @@ export default function ProjectDetails() {
                                    {docItem.document_name}
                                  </p>
                                  <p className={`text-xs ${isUploaded ? 'text-emerald-500' : (isManuallyChecked ? 'text-indigo-500' : (docItem.is_mandatory ? 'text-rose-500 font-semibold' : 'text-slate-400'))}`}>
-                                    {isUploaded ? 'Uploaded & Verified' : (isManuallyChecked ? 'Marked complete' : (docItem.is_mandatory ? 'Missing - Mandatory' : 'Pending'))}
+                                    {isUploaded ? t('doc_uploaded_verified') : (isManuallyChecked ? t('doc_marked_complete') : (docItem.is_mandatory ? t('doc_missing_mandatory') : t('doc_pending')))}
                                  </p>
                               </div>
                             </li>
@@ -2576,8 +2607,8 @@ export default function ProjectDetails() {
                        <li className="flex items-start gap-2">
                          <div className="mt-0.5">{revenue > 0 ? <CheckCircle className="w-5 h-5 text-emerald-500" /> : <div className="w-5 h-5 rounded border-2 border-slate-300" />}</div>
                          <div>
-                            <p className={`text-sm font-medium ${revenue > 0 ? 'text-slate-500 line-through' : 'text-slate-700'}`}>Prepare Final Bid Amount</p>
-                            <p className="text-xs text-slate-400">{revenue > 0 ? "Saved" : "Pending calculation"}</p>
+                            <p className={`text-sm font-medium ${revenue > 0 ? 'text-slate-500 line-through' : 'text-slate-700'}`}>{t('prepare_final_bid')}</p>
+                            <p className="text-xs text-slate-400">{revenue > 0 ? t('saved') : t('pending_calculation')}</p>
                          </div>
                        </li>
                      </ul>
@@ -2585,18 +2616,18 @@ export default function ProjectDetails() {
                      {/* Required Annexures List */}
                      {displayDetails?.required_annexures && displayDetails.required_annexures.length > 0 && (
                        <div className="mt-6 border-t border-slate-100 pt-4">
-                         <h4 className="font-semibold text-slate-800 text-sm mb-3">Tender Required Annexures</h4>
+                         <h4 className="font-semibold text-slate-800 text-sm mb-3">{t('tender_required_annexures')}</h4>
                          <ul className="space-y-3">
                            {displayDetails.required_annexures.map((annex: any, idx: number) => (
                              <li key={idx} className="flex flex-col gap-1">
                                <div className="flex justify-between items-start">
                                  <p className="text-sm font-medium text-slate-700">{annex.annexure_name}</p>
                                  <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${annex.filling_complexity?.toLowerCase?.() === 'high' ? 'bg-amber-100 text-amber-800' : 'bg-indigo-100 text-indigo-800'}`}>
-                                  {annex.filling_complexity || 'Medium'}
+                                  {localizeLevel(annex.filling_complexity)}
                                  </span>
                                </div>
                                <p className="text-xs text-slate-500">{annex.purpose}</p>
-                               <button 
+                               <button
                                  className="text-xs text-indigo-600 font-medium text-left hover:underline w-max"
                                  onClick={() => {
                                    setDocType(`Auto-Fill: ${annex.annexure_name}`);
@@ -2604,7 +2635,7 @@ export default function ProjectDetails() {
                                    window.scrollTo({ top: 0, behavior: 'smooth' });
                                  }}
                                >
-                                 Generate Draft
+                                 {t('generate_draft')}
                                </button>
                              </li>
                            ))}
@@ -2621,9 +2652,9 @@ export default function ProjectDetails() {
               <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
                 <div className="p-5 border-b border-slate-100">
                   <h3 className="font-semibold text-slate-800 flex items-center gap-2">
-                    <CheckCircle className="w-5 h-5 text-indigo-600" /> Compliance Matrix
+                    <CheckCircle className="w-5 h-5 text-indigo-600" /> {t('compliance_matrix_title')}
                   </h3>
-                  <p className="text-xs text-slate-500 mt-1">Key eligibility and technical requirements checked against your profile.</p>
+                  <p className="text-xs text-slate-500 mt-1">{t('compliance_matrix_subtitle')}</p>
                 </div>
                 <div className="divide-y divide-slate-100">
                   {displayDetails.compliance_matrix.map((item: any, i: number) => (
@@ -2633,7 +2664,7 @@ export default function ProjectDetails() {
                           ? 'bg-emerald-100 text-emerald-700'
                           : 'bg-red-100 text-red-700'
                       }`}>
-                        {item.status}
+                        {localizeComplianceStatus(item.status)}
                       </span>
                       <div className="flex-1 min-w-0">
                         <p className="text-sm font-semibold text-slate-800">{item.requirement}</p>
@@ -2651,7 +2682,7 @@ export default function ProjectDetails() {
                 <div className="bg-slate-900 rounded-xl border border-slate-800 shadow-sm p-6 text-white h-full">
                   <h3 className="text-lg font-bold mb-4 flex items-center gap-2">
                      <Activity className="w-5 h-5 text-amber-400" />
-                     Execution Strategy
+                     {t('execution_strategy')}
                   </h3>
                   <div className="space-y-3">
                     {displayDetails.application_roadmap.winning_strategy_tips?.map((tip: string, i: number) => (
@@ -2662,16 +2693,16 @@ export default function ProjectDetails() {
                     ))}
                   </div>
                 </div>
-                
+
                 <div className="bg-indigo-50 border border-indigo-100 rounded-xl shadow-sm p-6 h-full">
                    <h3 className="text-lg font-bold text-indigo-950 mb-3 flex items-center gap-2">
                       <Target className="w-5 h-5 text-indigo-600" />
-                      Application Procedure & Road Map
+                      {t('application_procedure_roadmap')}
                    </h3>
                    <div className="text-sm font-semibold text-indigo-700 bg-indigo-100 px-3 py-1.5 rounded inline-block mb-4">
-                     Portal: {displayDetails.application_roadmap.portal_source}
+                     {t('portal_prefix')} {displayDetails.application_roadmap.portal_source}
                    </div>
-                   
+
                    <div className="space-y-4">
                      {displayDetails.application_roadmap.detailed_procedure_steps && displayDetails.application_roadmap.detailed_procedure_steps.length > 0 ? (
                        <div className="space-y-3">

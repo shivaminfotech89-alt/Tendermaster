@@ -26,10 +26,12 @@ function sampleDetails() {
       execution_duration: '6 months',
     },
     required_documents_checklist: [
-      { document_name: 'DSC', status: 'Mandatory', context: 'For online submission' },
+      { document_name: 'Class 3 Digital Signature Certificate (DSC)', status: 'Mandatory', context: 'For online submission' },
+      { document_name: 'PAN Card', status: 'Optional', context: 'For tax verification' },
     ],
     required_annexures: [
       { annexure_name: 'Annexure I - Technical Bid', purpose: 'To fill technical experience', filling_complexity: 'High' },
+      { annexure_name: 'Solvency Certificate', purpose: 'To prove financial standing', filling_complexity: 'Medium' },
     ],
     application_roadmap: {
       portal_source: 'GeM Portal',
@@ -66,25 +68,35 @@ function sampleDetails() {
 
 /** A "translated" payload built by literally prefixing every prose value
  *  with a language tag — makes it trivial to assert the RIGHT values moved
- *  and nothing else did. */
+ *  and nothing else did. Operates on extractProseFields' OWN output, so it
+ *  automatically exercises the split-and-preserve fields correctly (they
+ *  arrive here already stripped of their official portion). */
 function translatedPayload(details: any): ProseTranslationPayload {
   const extracted = extractProseFields(details);
   const tag = (s: string) => `[GU] ${s}`;
+  const tagArr = (arr: string[]) => arr.map(tag);
   return {
     compatibility_rationale: tag(extracted.compatibility_rationale),
     scope_of_work: tag(extracted.scope_of_work),
-    pros: extracted.pros.map(tag),
-    cons_and_risks: extracted.cons_and_risks.map(tag),
-    next_immediate_steps: extracted.next_immediate_steps.map(tag),
-    detailed_procedure_steps: extracted.detailed_procedure_steps.map(tag),
-    winning_strategy_tips: extracted.winning_strategy_tips.map(tag),
+    pros: tagArr(extracted.pros),
+    cons_and_risks: tagArr(extracted.cons_and_risks),
+    next_immediate_steps: tagArr(extracted.next_immediate_steps),
+    detailed_procedure_steps: tagArr(extracted.detailed_procedure_steps),
+    winning_strategy_tips: tagArr(extracted.winning_strategy_tips),
     bid_recommendation_rationale: tag(extracted.bid_recommendation_rationale),
     winning_probability_recommended_action: tag(extracted.winning_probability_recommended_action),
-    required_documents_checklist_context: extracted.required_documents_checklist_context.map(tag),
-    required_annexures_purpose: extracted.required_annexures_purpose.map(tag),
-    material_costs_rationale: extracted.material_costs_rationale.map(tag),
-    labour_costs_rationale: extracted.labour_costs_rationale.map(tag),
-    compliance_matrix_notes: extracted.compliance_matrix_notes.map(tag),
+    required_documents_checklist_context: tagArr(extracted.required_documents_checklist_context),
+    required_documents_checklist_status: tagArr(extracted.required_documents_checklist_status),
+    required_documents_checklist_document_name: tagArr(extracted.required_documents_checklist_document_name),
+    required_annexures_purpose: tagArr(extracted.required_annexures_purpose),
+    required_annexures_annexure_name: tagArr(extracted.required_annexures_annexure_name),
+    material_costs_rationale: tagArr(extracted.material_costs_rationale),
+    material_costs_item: tagArr(extracted.material_costs_item),
+    labour_costs_rationale: tagArr(extracted.labour_costs_rationale),
+    labour_costs_role: tagArr(extracted.labour_costs_role),
+    compliance_matrix_notes: tagArr(extracted.compliance_matrix_notes),
+    compliance_matrix_requirement: tagArr(extracted.compliance_matrix_requirement),
+    emd_mode: tag(extracted.emd_mode),
   };
 }
 
@@ -96,11 +108,32 @@ describe('extractProseFields', () => {
     expect(extracted.scope_of_work).toBe(details.tender_simplified.scope_of_work);
     expect(extracted.pros).toEqual(details.tender_simplified.pros);
     expect(extracted.cons_and_risks).toEqual(details.tender_simplified.cons_and_risks);
-    expect(extracted.required_documents_checklist_context).toEqual(['For online submission']);
-    expect(extracted.required_annexures_purpose).toEqual(['To fill technical experience']);
+    expect(extracted.required_documents_checklist_context).toEqual(['For online submission', 'For tax verification']);
+    expect(extracted.required_documents_checklist_status).toEqual(['Mandatory', 'Optional']);
+    expect(extracted.required_annexures_purpose).toEqual(['To fill technical experience', 'To prove financial standing']);
     expect(extracted.material_costs_rationale).toEqual(['Based on BOQ quantity x standard rate']);
+    expect(extracted.material_costs_item).toEqual(['Cement']);
     expect(extracted.labour_costs_rationale).toEqual(['For 3 months duration']);
+    expect(extracted.labour_costs_role).toEqual(['Site Engineer']);
     expect(extracted.compliance_matrix_notes).toEqual(['3yr avg 6.8Cr', 'No certificate on file']);
+    expect(extracted.compliance_matrix_requirement).toEqual(['Turnover >= 3Cr', 'ISO Certification']);
+    expect(extracted.emd_mode).toBe('Online');
+  });
+
+  test('document_name: only the descriptive portion is extracted, official parenthetical is stripped out', () => {
+    const extracted = extractProseFields(sampleDetails());
+    expect(extracted.required_documents_checklist_document_name).toEqual([
+      'Class 3 Digital Signature Certificate', // "(DSC)" stripped — never sent to the model
+      'PAN Card', // no parenthetical present — whole string is the translatable portion
+    ]);
+  });
+
+  test('annexure_name: only the descriptive portion is extracted, "Annexure <ref>" prefix is stripped out', () => {
+    const extracted = extractProseFields(sampleDetails());
+    expect(extracted.required_annexures_annexure_name).toEqual([
+      'Technical Bid', // "Annexure I - " stripped
+      'Solvency Certificate', // no "Annexure <ref>" prefix — whole string is translatable
+    ]);
   });
 
   test('missing/malformed source fields default to empty string/array, never throw', () => {
@@ -109,6 +142,7 @@ describe('extractProseFields', () => {
     const extracted = extractProseFields({});
     expect(extracted.compatibility_rationale).toBe('');
     expect(extracted.pros).toEqual([]);
+    expect(extracted.required_documents_checklist_document_name).toEqual([]);
   });
 });
 
@@ -128,18 +162,49 @@ describe('mergeTranslatedProse', () => {
     ]);
     expect(merged.bid_recommendation.rationale).toBe('[GU] Based on schedule total and historical bids.');
     expect(merged.compliance_matrix[0].notes).toBe('[GU] 3yr avg 6.8Cr');
+    expect(merged.compliance_matrix[0].requirement).toBe('[GU] Turnover >= 3Cr');
+    expect(merged.required_documents_checklist[0].status).toBe('[GU] Mandatory');
+    expect(merged.financial_estimate.material_costs[0].item).toBe('[GU] Cement');
+    expect(merged.financial_estimate.labour_costs[0].role).toBe('[GU] Site Engineer');
+    expect(merged.emd_details.mode).toBe('[GU] Online');
 
     // Everything else byte-identical to the original.
     expect(merged.compatibility.score).toBe(original.compatibility.score);
     expect(merged.tender_simplified.tender_name).toBe(original.tender_simplified.tender_name);
     expect(merged.tender_simplified.tender_number).toBe(original.tender_simplified.tender_number);
+    expect(merged.tender_simplified.authority_name).toBe(original.tender_simplified.authority_name);
     expect(merged.tender_simplified.is_active).toBe(original.tender_simplified.is_active);
     expect(merged.timeline_and_milestones).toEqual(original.timeline_and_milestones);
     expect(merged.compliance_matrix[0].status).toBe('MET');
     expect(merged.compliance_matrix[1].status).toBe('NOT MET');
     expect(merged.bid_recommendation.estimated_value).toBe(original.bid_recommendation.estimated_value);
     expect(merged.bid_recommendation.risk_level).toBe('Medium');
-    expect(merged.emd_details).toEqual(original.emd_details);
+    expect(merged.emd_details.amount).toBe(original.emd_details.amount);
+    expect(merged.emd_details.msme_exemption).toBe(original.emd_details.msme_exemption);
+    expect(merged.financial_estimate.material_costs[0].estimated_cost).toBe(original.financial_estimate.material_costs[0].estimated_cost);
+    expect(merged.required_annexures[0].filling_complexity).toBe('High');
+  });
+
+  test('document_name: descriptive portion translates, official parenthetical short-form is byte-identical and stays trailing', () => {
+    const original = sampleDetails();
+    const translated = translatedPayload(original);
+    const { details: merged, errors } = mergeTranslatedProse(original, translated);
+
+    expect(errors).toEqual([]);
+    expect(merged.required_documents_checklist[0].document_name).toBe('[GU] Class 3 Digital Signature Certificate (DSC)');
+    // No parenthetical in the original — whole string translated, nothing appended.
+    expect(merged.required_documents_checklist[1].document_name).toBe('[GU] PAN Card');
+  });
+
+  test('annexure_name: "Annexure <ref> - " prefix is byte-identical and stays leading, remainder translates', () => {
+    const original = sampleDetails();
+    const translated = translatedPayload(original);
+    const { details: merged, errors } = mergeTranslatedProse(original, translated);
+
+    expect(errors).toEqual([]);
+    expect(merged.required_annexures[0].annexure_name).toBe('Annexure I - [GU] Technical Bid');
+    // No "Annexure <ref>" prefix in the original — whole string translated.
+    expect(merged.required_annexures[1].annexure_name).toBe('[GU] Solvency Certificate');
   });
 
   test('[Schedule Total] tag and the whole boq_details subtree survive untouched', () => {
@@ -218,5 +283,21 @@ describe('validateTranslationPreservesStructure', () => {
     tampered.compliance_matrix[0].status = 'NOT MET';
     const errors = validateTranslationPreservesStructure(original, tampered);
     expect(errors.some(e => e.includes('compliance_matrix[0].status'))).toBe(true);
+  });
+
+  test('catches a document_name whose official parenthetical short-form was dropped', () => {
+    const original = sampleDetails();
+    const tampered = JSON.parse(JSON.stringify(original));
+    tampered.required_documents_checklist[0].document_name = 'Class 3 Digital Signature Certificate'; // "(DSC)" lost
+    const errors = validateTranslationPreservesStructure(original, tampered);
+    expect(errors.some(e => e.includes('required_documents_checklist[0].document_name'))).toBe(true);
+  });
+
+  test('catches an annexure_name whose "Annexure <ref>" prefix was dropped', () => {
+    const original = sampleDetails();
+    const tampered = JSON.parse(JSON.stringify(original));
+    tampered.required_annexures[0].annexure_name = 'Technical Bid'; // "Annexure I - " lost
+    const errors = validateTranslationPreservesStructure(original, tampered);
+    expect(errors.some(e => e.includes('required_annexures[0].annexure_name'))).toBe(true);
   });
 });

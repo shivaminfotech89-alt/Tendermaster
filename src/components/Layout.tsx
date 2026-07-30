@@ -31,7 +31,10 @@ export default function Layout() {
     !!analysisResult || /^\/dashboard\/projects\/.+/.test(location.pathname);
 
   const changeLanguage = (lng: string) => {
-    i18n.changeLanguage(lng);
+    console.log('[LangDebug] Layout.changeLanguage called', { from: i18n.language, to: lng });
+    i18n.changeLanguage(lng).then(() => {
+      console.log('[LangDebug] i18n.changeLanguage resolved, i18n.language is now', i18n.language);
+    });
     const name = LANG_NAMES[lng] ?? lng;
     // Viewing an existing project's report in this language is automatic
     // now (Language Fix 1) — no reanalysis needed, just a brief one-time

@@ -17,7 +17,7 @@ import { PLANS, TRIAL_CREDITS, TRIAL_DOC_LIMIT, CREDIT_VALIDITY_MONTHS } from '.
 import { probeAllPagesFromBuffer, isRetryable as isProbeRetryable } from './src/lib/modeb/probe-helpers';
 import { buildAnalysisSystemInstruction, ANALYSIS_RESPONSE_SCHEMA, ANALYSIS_RESPONSE_SCHEMA_CHUNK } from './src/lib/analysisPrompt';
 import { mergeChunkResults, validateAgainstAnalysisSchema, hasNoMeaningfulContent, classifyChunkCriticality, type ChunkCriticality } from './src/lib/analysisChunkMerge';
-import { extractProseFields, mergeTranslatedProse, PROSE_TRANSLATION_SCHEMA, buildTranslationSystemInstruction } from './src/lib/analysisTranslation';
+import { extractProseFields, mergeTranslatedProse, PROSE_TRANSLATION_SCHEMA, buildTranslationSystemInstruction, PROSE_SCHEMA_VERSION } from './src/lib/analysisTranslation';
 import { fmtINR } from './src/lib/boq/calculator';
 
 const lookupPromise = promisify(dns.lookup);
@@ -2450,11 +2450,13 @@ app.post("/api/render-language", verifyFirebaseToken, async (req: AuthenticatedR
     if (projectData.userId !== uid) return res.status(403).json({ error: "Access denied" });
 
     const baseLanguage: string = projectData.detailsLanguage ?? "en";
+    console.log(`[LangDebug] /api/render-language: projectId=${projectId} requestedLanguage=${language} storedDetailsLanguage=${projectData.detailsLanguage} resolvedBaseLanguage=${baseLanguage}`);
     if (language === baseLanguage) {
       // Already in the requested language — no translation needed. The
       // client is expected to render `details` directly without calling
       // this endpoint at all in this case; handled here too so a stray
       // call is still correct, just a no-op read.
+      console.log(`[LangDebug] /api/render-language: languages match, returning base details unchanged`);
       return res.json({ details: projectData.details, language: baseLanguage, cached: false });
     }
     if (!projectData.details) {
@@ -2463,7 +2465,16 @@ app.post("/api/render-language", verifyFirebaseToken, async (req: AuthenticatedR
 
     const cacheRef = projectRef.collection("details_i18n").doc(language);
     const cacheSnap = await cacheRef.get();
-    if (cacheSnap.exists) {
+    // A cache doc only counts as a hit if it was written under the CURRENT
+    // prose-field set (PROSE_SCHEMA_VERSION). Any older doc — including
+    // every one written before this field existed at all — is treated as
+    // a miss and regenerated below, then overwritten with the current
+    // version. This is what makes "invalidate every existing translation
+    // once coverage widens" happen automatically on deploy, with no
+    // one-off migration script and no risk of ever serving a translation
+    // that's missing fields this pass added (document_name, annexure_name,
+    // status, item, role, requirement, emd_mode).
+    if (cacheSnap.exists && cacheSnap.data()!.schemaVersion === PROSE_SCHEMA_VERSION) {
       return res.json({ details: cacheSnap.data()!.details, language, cached: true });
     }
 
@@ -2496,7 +2507,7 @@ app.post("/api/render-language", verifyFirebaseToken, async (req: AuthenticatedR
       });
     }
 
-    await cacheRef.set({ details: mergedDetails, language, createdAt: Timestamp.now() });
+    await cacheRef.set({ details: mergedDetails, language, schemaVersion: PROSE_SCHEMA_VERSION, createdAt: Timestamp.now() });
 
     return res.json({ details: mergedDetails, language, cached: false });
   } catch (err: any) {

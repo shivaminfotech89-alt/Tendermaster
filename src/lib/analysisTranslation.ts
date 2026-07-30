@@ -8,13 +8,40 @@
 //
 // SCOPE — view-only. The fields below are the COMPLETE set ever sent to
 // the translation model. Everything else in a stored `details` object
-// (every enum, every tag-prefixed label, every number, every date, the
-// entire boq_details subtree) is copied through byte-identical by
-// mergeTranslatedProse, never touched, and explicitly re-verified by
-// validateTranslationPreservesStructure after every merge. This is the
-// guarantee the Financial Engine's pricing-basis selection depends on
-// (boq_details.financial_values[].label's [Schedule Total] tag) — see the
-// Phase 1 classification this was designed against.
+// (every enum, every tag-prefixed label, every number, every date, every
+// official name/identifier, the entire boq_details subtree) is copied
+// through byte-identical by mergeTranslatedProse, never touched, and
+// explicitly re-verified by validateTranslationPreservesStructure after
+// every merge. This is the guarantee the Financial Engine's pricing-basis
+// selection depends on (boq_details.financial_values[].label's
+// [Schedule Total] tag) — see the Phase 1 classification this was
+// designed against.
+//
+// TWO fields are "mixed" — a descriptive portion Gemini composed, plus an
+// official/structural reference embedded in the same string:
+//   - required_documents_checklist[].document_name, e.g.
+//     "Class 3 Digital Signature Certificate (DSC)" — the parenthetical
+//     official short-form must survive untranslated so a bidder can match
+//     it against the government portal.
+//   - required_annexures[].annexure_name, e.g. "Annexure I - Technical Bid"
+//     — the leading "Annexure <ref>" structural label must survive.
+// splitTrailingParenthetical / splitLeadingAnnexureRef isolate the
+// TRANSLATABLE portion deterministically; the preserved portion is
+// RE-DERIVED FROM THE ORIGINAL at merge time and never round-tripped
+// through the model — same "the model only ever sees what it's allowed to
+// change" discipline as every other field here.
+
+// Bump whenever the prose-field set (extractProseFields/
+// PROSE_TRANSLATION_SCHEMA/mergeTranslatedProse) changes shape. server.ts
+// stamps every cached details_i18n/{lang} doc with this value and treats a
+// missing/older stamp as a cache miss — so widening coverage (like this
+// pass, which added document_name/annexure_name/status/item/role/
+// requirement/emd_mode on top of the original narrower set) automatically
+// invalidates every previously-cached translation the first time each
+// project is viewed post-deploy, with no manual cache-clearing script and
+// no risk of serving a stale, narrower translation next to a freshly
+// translated one.
+export const PROSE_SCHEMA_VERSION = 2;
 
 export interface ProseTranslationPayload {
   compatibility_rationale: string;
@@ -27,10 +54,17 @@ export interface ProseTranslationPayload {
   bid_recommendation_rationale: string;
   winning_probability_recommended_action: string;
   required_documents_checklist_context: string[];
+  required_documents_checklist_status: string[];
+  required_documents_checklist_document_name: string[];
   required_annexures_purpose: string[];
+  required_annexures_annexure_name: string[];
   material_costs_rationale: string[];
+  material_costs_item: string[];
   labour_costs_rationale: string[];
+  labour_costs_role: string[];
   compliance_matrix_notes: string[];
+  compliance_matrix_requirement: string[];
+  emd_mode: string;
 }
 
 function str(v: unknown): string {
@@ -40,10 +74,51 @@ function strArr(v: unknown): string[] {
   return Array.isArray(v) ? v.map(str) : [];
 }
 
+/** Detects a trailing parenthetical official short-form, e.g.
+ *  "Class 3 Digital Signature Certificate (DSC)" → translatable
+ *  "Class 3 Digital Signature Certificate", preserved " (DSC)" (kept
+ *  verbatim, including its own leading space and parens, appended after
+ *  translation). No match → the whole string is translatable, nothing
+ *  preserved (safe default — nothing downstream pattern-matches this
+ *  field, so over-translating a label that had no official suffix is
+ *  harmless). */
+function splitTrailingParenthetical(raw: unknown): { translatable: string; preserved: string } {
+  const s = str(raw);
+  if (!s) return { translatable: "", preserved: "" };
+  const m = /^(.*?)(\s*\([^()]*\)\s*)$/.exec(s);
+  if (m && m[1].trim().length > 0) {
+    return { translatable: m[1].trim(), preserved: m[2] };
+  }
+  return { translatable: s, preserved: "" };
+}
+
+/** Detects a leading "Annexure <ref>" structural prefix, e.g.
+ *  "Annexure I - Technical Bid" → preserved "Annexure I - ", translatable
+ *  "Technical Bid". No match → whole string translatable, same safe
+ *  default as above. */
+function splitLeadingAnnexureRef(raw: unknown): { translatable: string; preserved: string } {
+  const s = str(raw);
+  if (!s) return { translatable: "", preserved: "" };
+  const m = /^(\s*Annexure\s+[IVXLCDM0-9]+\s*[-–—:]?\s*)(.*)$/i.exec(s);
+  if (m && m[2].trim().length > 0) {
+    return { translatable: m[2].trim(), preserved: m[1] };
+  }
+  return { translatable: s, preserved: "" };
+}
+
 /** Pulls ONLY the prose-classified fields out of a stored `details` object
  *  — the exact and complete list from the Phase 1 trace. Nothing else in
- *  `details` is ever read by the translation call. */
+ *  `details` is ever read by the translation call. For document_name /
+ *  annexure_name, only the TRANSLATABLE portion (see split helpers above)
+ *  is included — the preserved official portion never leaves this
+ *  process. */
 export function extractProseFields(details: any): ProseTranslationPayload {
+  const docsChecklist: any[] = Array.isArray(details?.required_documents_checklist) ? details.required_documents_checklist : [];
+  const annexures: any[] = Array.isArray(details?.required_annexures) ? details.required_annexures : [];
+  const materialCosts: any[] = Array.isArray(details?.financial_estimate?.material_costs) ? details.financial_estimate.material_costs : [];
+  const labourCosts: any[] = Array.isArray(details?.financial_estimate?.labour_costs) ? details.financial_estimate.labour_costs : [];
+  const complianceMatrix: any[] = Array.isArray(details?.compliance_matrix) ? details.compliance_matrix : [];
+
   return {
     compatibility_rationale: str(details?.compatibility?.rationale),
     scope_of_work: str(details?.tender_simplified?.scope_of_work),
@@ -54,11 +129,18 @@ export function extractProseFields(details: any): ProseTranslationPayload {
     winning_strategy_tips: strArr(details?.application_roadmap?.winning_strategy_tips),
     bid_recommendation_rationale: str(details?.bid_recommendation?.rationale),
     winning_probability_recommended_action: str(details?.winning_probability?.recommended_action),
-    required_documents_checklist_context: (Array.isArray(details?.required_documents_checklist) ? details.required_documents_checklist : []).map((d: any) => str(d?.context)),
-    required_annexures_purpose: (Array.isArray(details?.required_annexures) ? details.required_annexures : []).map((d: any) => str(d?.purpose)),
-    material_costs_rationale: (Array.isArray(details?.financial_estimate?.material_costs) ? details.financial_estimate.material_costs : []).map((d: any) => str(d?.rationale)),
-    labour_costs_rationale: (Array.isArray(details?.financial_estimate?.labour_costs) ? details.financial_estimate.labour_costs : []).map((d: any) => str(d?.rationale)),
-    compliance_matrix_notes: (Array.isArray(details?.compliance_matrix) ? details.compliance_matrix : []).map((d: any) => str(d?.notes)),
+    required_documents_checklist_context: docsChecklist.map(d => str(d?.context)),
+    required_documents_checklist_status: docsChecklist.map(d => str(d?.status)),
+    required_documents_checklist_document_name: docsChecklist.map(d => splitTrailingParenthetical(d?.document_name).translatable),
+    required_annexures_purpose: annexures.map(d => str(d?.purpose)),
+    required_annexures_annexure_name: annexures.map(d => splitLeadingAnnexureRef(d?.annexure_name).translatable),
+    material_costs_rationale: materialCosts.map(d => str(d?.rationale)),
+    material_costs_item: materialCosts.map(d => str(d?.item)),
+    labour_costs_rationale: labourCosts.map(d => str(d?.rationale)),
+    labour_costs_role: labourCosts.map(d => str(d?.role)),
+    compliance_matrix_notes: complianceMatrix.map(d => str(d?.notes)),
+    compliance_matrix_requirement: complianceMatrix.map(d => str(d?.requirement)),
+    emd_mode: str(details?.emd_details?.mode),
   };
 }
 
@@ -75,17 +157,26 @@ export const PROSE_TRANSLATION_SCHEMA = {
     bid_recommendation_rationale: { type: "string" },
     winning_probability_recommended_action: { type: "string" },
     required_documents_checklist_context: { type: "array", items: { type: "string" } },
+    required_documents_checklist_status: { type: "array", items: { type: "string" } },
+    required_documents_checklist_document_name: { type: "array", items: { type: "string" } },
     required_annexures_purpose: { type: "array", items: { type: "string" } },
+    required_annexures_annexure_name: { type: "array", items: { type: "string" } },
     material_costs_rationale: { type: "array", items: { type: "string" } },
+    material_costs_item: { type: "array", items: { type: "string" } },
     labour_costs_rationale: { type: "array", items: { type: "string" } },
+    labour_costs_role: { type: "array", items: { type: "string" } },
     compliance_matrix_notes: { type: "array", items: { type: "string" } },
+    compliance_matrix_requirement: { type: "array", items: { type: "string" } },
+    emd_mode: { type: "string" },
   },
   required: [
     "compatibility_rationale", "scope_of_work", "pros", "cons_and_risks",
     "next_immediate_steps", "detailed_procedure_steps", "winning_strategy_tips",
     "bid_recommendation_rationale", "winning_probability_recommended_action",
-    "required_documents_checklist_context", "required_annexures_purpose",
-    "material_costs_rationale", "labour_costs_rationale", "compliance_matrix_notes",
+    "required_documents_checklist_context", "required_documents_checklist_status", "required_documents_checklist_document_name",
+    "required_annexures_purpose", "required_annexures_annexure_name",
+    "material_costs_rationale", "material_costs_item", "labour_costs_rationale", "labour_costs_role",
+    "compliance_matrix_notes", "compliance_matrix_requirement", "emd_mode",
   ],
 };
 
@@ -93,17 +184,20 @@ const LANGUAGE_NAMES: Record<string, string> = { hi: "Hindi", gu: "Gujarati", en
 
 export function buildTranslationSystemInstruction(language: string): string {
   const languageName = LANGUAGE_NAMES[language] ?? language;
-  return `You are a professional translator working on a tender-bidding analysis report. You will receive a JSON object whose values are ONLY narrative/descriptive text — rationales, summaries, recommended actions, risk notes, procedural steps — extracted from a larger report. Translate every string (and every string inside every array) into ${languageName}, preserving the professional tone and exact meaning. Do not translate numbers, currency symbols, or technical codes/reference numbers that happen to appear inside a sentence — translate the surrounding language and leave those tokens as written. Return a JSON object with the EXACT SAME KEYS as the input, and for every array field, the EXACT SAME NUMBER OF ELEMENTS in the EXACT SAME ORDER — never add, remove, merge, split, or reorder entries, and never omit a key even if its value is an empty string or empty array in the input.`;
+  return `You are a professional translator working on a tender-bidding analysis report. You will receive a JSON object whose values are ONLY narrative/descriptive text — rationales, summaries, recommended actions, risk notes, procedural steps, short labels — extracted from a larger report. Some string values are already fragments with any official reference codes/parenthetical short-forms stripped out; translate them as plain descriptive phrases. Translate every string (and every string inside every array) into ${languageName}, preserving the professional tone and exact meaning. Do not translate numbers, currency symbols, or technical codes/reference numbers that happen to appear inside a sentence — translate the surrounding language and leave those tokens as written. Return a JSON object with the EXACT SAME KEYS as the input, and for every array field, the EXACT SAME NUMBER OF ELEMENTS in the EXACT SAME ORDER — never add, remove, merge, split, or reorder entries, and never omit a key even if its value is an empty string or empty array in the input.`;
 }
 
 /** Verifies that `merged` differs from `original` in ONLY the prose fields
- *  extractProseFields ever pulls — every other value (scores, enums, dates,
- *  identifiers, the entire boq_details subtree with its [Schedule Total]/
- *  [Tender Notice Value] tags) must be byte-identical. This is a direct,
- *  hand-written mirror of mergeTranslatedProse's own construction (clone +
- *  targeted overlay), run as an explicit defense-in-depth gate rather than
- *  just trusted implicitly — same fail-safe philosophy as the Tier-2
- *  content-sanity gate: prove it, don't assume it. */
+ *  extractProseFields ever pulls — every other value (scores, enums,
+ *  dates, identifiers, official names, the entire boq_details subtree with
+ *  its [Schedule Total]/[Tender Notice Value] tags) must be byte-identical.
+ *  For the two "mixed" fields, the check is that the PRESERVED official
+ *  portion survives intact within the merged value, not full-string
+ *  equality (that field is EXPECTED to partially change). This is a
+ *  direct, hand-written mirror of mergeTranslatedProse's own construction
+ *  (clone + targeted overlay), run as an explicit defense-in-depth gate
+ *  rather than just trusted implicitly — same fail-safe philosophy as the
+ *  Tier-2 content-sanity gate: prove it, don't assume it. */
 export function validateTranslationPreservesStructure(original: any, merged: any): string[] {
   const errors: string[] = [];
   const eq = (a: unknown, b: unknown, path: string) => {
@@ -121,14 +215,21 @@ export function validateTranslationPreservesStructure(original: any, merged: any
   const origDocs = Array.isArray(original?.required_documents_checklist) ? original.required_documents_checklist : [];
   eq(origDocs.length, (merged?.required_documents_checklist ?? []).length, "required_documents_checklist.length");
   origDocs.forEach((item: any, i: number) => {
-    eq(item?.document_name, merged?.required_documents_checklist?.[i]?.document_name, `required_documents_checklist[${i}].document_name`);
-    eq(item?.status, merged?.required_documents_checklist?.[i]?.status, `required_documents_checklist[${i}].status`);
+    const { preserved } = splitTrailingParenthetical(item?.document_name);
+    const mergedName = str(merged?.required_documents_checklist?.[i]?.document_name);
+    if (preserved && !mergedName.endsWith(preserved)) {
+      errors.push(`required_documents_checklist[${i}].document_name: preserved official short-form was altered or dropped`);
+    }
   });
 
   const origAnnex = Array.isArray(original?.required_annexures) ? original.required_annexures : [];
   eq(origAnnex.length, (merged?.required_annexures ?? []).length, "required_annexures.length");
   origAnnex.forEach((item: any, i: number) => {
-    eq(item?.annexure_name, merged?.required_annexures?.[i]?.annexure_name, `required_annexures[${i}].annexure_name`);
+    const { preserved } = splitLeadingAnnexureRef(item?.annexure_name);
+    const mergedName = str(merged?.required_annexures?.[i]?.annexure_name);
+    if (preserved && !mergedName.startsWith(preserved)) {
+      errors.push(`required_annexures[${i}].annexure_name: preserved structural prefix was altered or dropped`);
+    }
     eq(item?.filling_complexity, merged?.required_annexures?.[i]?.filling_complexity, `required_annexures[${i}].filling_complexity`);
   });
 
@@ -137,14 +238,12 @@ export function validateTranslationPreservesStructure(original: any, merged: any
   const origMaterial = Array.isArray(original?.financial_estimate?.material_costs) ? original.financial_estimate.material_costs : [];
   eq(origMaterial.length, (merged?.financial_estimate?.material_costs ?? []).length, "financial_estimate.material_costs.length");
   origMaterial.forEach((item: any, i: number) => {
-    eq(item?.item, merged?.financial_estimate?.material_costs?.[i]?.item, `financial_estimate.material_costs[${i}].item`);
     eq(item?.estimated_cost, merged?.financial_estimate?.material_costs?.[i]?.estimated_cost, `financial_estimate.material_costs[${i}].estimated_cost`);
   });
 
   const origLabour = Array.isArray(original?.financial_estimate?.labour_costs) ? original.financial_estimate.labour_costs : [];
   eq(origLabour.length, (merged?.financial_estimate?.labour_costs ?? []).length, "financial_estimate.labour_costs.length");
   origLabour.forEach((item: any, i: number) => {
-    eq(item?.role, merged?.financial_estimate?.labour_costs?.[i]?.role, `financial_estimate.labour_costs[${i}].role`);
     eq(item?.estimated_cost, merged?.financial_estimate?.labour_costs?.[i]?.estimated_cost, `financial_estimate.labour_costs[${i}].estimated_cost`);
   });
   eq(original?.financial_estimate?.total_estimated_cost, merged?.financial_estimate?.total_estimated_cost, "financial_estimate.total_estimated_cost");
@@ -162,11 +261,12 @@ export function validateTranslationPreservesStructure(original: any, merged: any
   const origMatrix = Array.isArray(original?.compliance_matrix) ? original.compliance_matrix : [];
   eq(origMatrix.length, (merged?.compliance_matrix ?? []).length, "compliance_matrix.length");
   origMatrix.forEach((item: any, i: number) => {
-    eq(item?.requirement, merged?.compliance_matrix?.[i]?.requirement, `compliance_matrix[${i}].requirement`);
     eq(item?.status, merged?.compliance_matrix?.[i]?.status, `compliance_matrix[${i}].status`);
   });
 
-  eq(original?.emd_details, merged?.emd_details, "emd_details");
+  eq(original?.emd_details?.amount, merged?.emd_details?.amount, "emd_details.amount");
+  eq(original?.emd_details?.msme_exemption, merged?.emd_details?.msme_exemption, "emd_details.msme_exemption");
+
   // Whole-subtree deep-equality — the single highest-stakes check here:
   // this is where the [Schedule Total]/[Tender Notice Value] tags the
   // Financial Engine's pricing-basis selection depends on live.
@@ -176,11 +276,13 @@ export function validateTranslationPreservesStructure(original: any, merged: any
 }
 
 /** Deep-clones `original`, overlays ONLY the translated prose fields onto
- *  the clone, and validates the result. Rejects (returns `original`
- *  unchanged, with `errors`) if the model returned mismatched array
- *  lengths OR if the post-merge structural check finds anything outside
- *  the prose fields changed — same fail-safe philosophy as the Tier-2
- *  content gate: never cache/serve a result that isn't provably safe. */
+ *  the clone (reassembling the two "mixed" fields from the preserved
+ *  official portion + the translated remainder), and validates the
+ *  result. Rejects (returns `original` unchanged, with `errors`) if the
+ *  model returned mismatched array lengths OR if the post-merge
+ *  structural check finds anything outside the prose fields changed —
+ *  same fail-safe philosophy as the Tier-2 content gate: never
+ *  cache/serve a result that isn't provably safe. */
 export function mergeTranslatedProse(
   original: any,
   translated: ProseTranslationPayload,
@@ -209,10 +311,16 @@ export function mergeTranslatedProse(
   checkLen("detailed_procedure_steps", origProcSteps.length, translated?.detailed_procedure_steps);
   checkLen("winning_strategy_tips", origTips.length, translated?.winning_strategy_tips);
   checkLen("required_documents_checklist_context", origDocsChecklist.length, translated?.required_documents_checklist_context);
+  checkLen("required_documents_checklist_status", origDocsChecklist.length, translated?.required_documents_checklist_status);
+  checkLen("required_documents_checklist_document_name", origDocsChecklist.length, translated?.required_documents_checklist_document_name);
   checkLen("required_annexures_purpose", origAnnexures.length, translated?.required_annexures_purpose);
+  checkLen("required_annexures_annexure_name", origAnnexures.length, translated?.required_annexures_annexure_name);
   checkLen("material_costs_rationale", origMaterialCosts.length, translated?.material_costs_rationale);
+  checkLen("material_costs_item", origMaterialCosts.length, translated?.material_costs_item);
   checkLen("labour_costs_rationale", origLabourCosts.length, translated?.labour_costs_rationale);
+  checkLen("labour_costs_role", origLabourCosts.length, translated?.labour_costs_role);
   checkLen("compliance_matrix_notes", origComplianceMatrix.length, translated?.compliance_matrix_notes);
+  checkLen("compliance_matrix_requirement", origComplianceMatrix.length, translated?.compliance_matrix_requirement);
 
   if (errors.length > 0) {
     return { details: original, errors };
@@ -233,11 +341,35 @@ export function mergeTranslatedProse(
   }
   if (merged.bid_recommendation) merged.bid_recommendation.rationale = translated.bid_recommendation_rationale;
   if (merged.winning_probability) merged.winning_probability.recommended_action = translated.winning_probability_recommended_action;
-  (merged.required_documents_checklist ?? []).forEach((item: any, i: number) => { item.context = translated.required_documents_checklist_context[i]; });
-  (merged.required_annexures ?? []).forEach((item: any, i: number) => { item.purpose = translated.required_annexures_purpose[i]; });
-  (merged.financial_estimate?.material_costs ?? []).forEach((item: any, i: number) => { item.rationale = translated.material_costs_rationale[i]; });
-  (merged.financial_estimate?.labour_costs ?? []).forEach((item: any, i: number) => { item.rationale = translated.labour_costs_rationale[i]; });
-  (merged.compliance_matrix ?? []).forEach((item: any, i: number) => { item.notes = translated.compliance_matrix_notes[i]; });
+
+  (merged.required_documents_checklist ?? []).forEach((item: any, i: number) => {
+    item.context = translated.required_documents_checklist_context[i];
+    item.status = translated.required_documents_checklist_status[i];
+    const { preserved } = splitTrailingParenthetical(origDocsChecklist[i]?.document_name);
+    const translatedPortion = translated.required_documents_checklist_document_name[i];
+    item.document_name = preserved ? `${translatedPortion}${preserved}` : translatedPortion;
+  });
+
+  (merged.required_annexures ?? []).forEach((item: any, i: number) => {
+    item.purpose = translated.required_annexures_purpose[i];
+    const { preserved } = splitLeadingAnnexureRef(origAnnexures[i]?.annexure_name);
+    const translatedPortion = translated.required_annexures_annexure_name[i];
+    item.annexure_name = preserved ? `${preserved}${translatedPortion}` : translatedPortion;
+  });
+
+  (merged.financial_estimate?.material_costs ?? []).forEach((item: any, i: number) => {
+    item.rationale = translated.material_costs_rationale[i];
+    item.item = translated.material_costs_item[i];
+  });
+  (merged.financial_estimate?.labour_costs ?? []).forEach((item: any, i: number) => {
+    item.rationale = translated.labour_costs_rationale[i];
+    item.role = translated.labour_costs_role[i];
+  });
+  (merged.compliance_matrix ?? []).forEach((item: any, i: number) => {
+    item.notes = translated.compliance_matrix_notes[i];
+    item.requirement = translated.compliance_matrix_requirement[i];
+  });
+  if (merged.emd_details) merged.emd_details.mode = translated.emd_mode;
 
   const structuralErrors = validateTranslationPreservesStructure(original, merged);
   if (structuralErrors.length > 0) {

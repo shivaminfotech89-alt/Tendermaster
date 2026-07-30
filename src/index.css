@@ -4,6 +4,15 @@
   --font-sans: 'Inter', ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
 }
 
+/* Indeterminate progress bar — used where we have no real percentage to
+   report (e.g. a single in-flight API call), so an honest animated sweep
+   is shown instead of a fabricated number. */
+@keyframes indeterminate-bar {
+  0%   { transform: translateX(-100%); width: 40%; }
+  50%  { width: 60%; }
+  100% { transform: translateX(250%); width: 40%; }
+}
+
 @media print {
   @page {
     margin: 15mm 12mm;

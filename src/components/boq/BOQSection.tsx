@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import {
   AlertCircle, AlertTriangle, CheckCircle2, ChevronDown, ChevronRight,
-  Edit2, Lock, RotateCcw,
+  Edit2, Loader2, Lock, RotateCcw,
 } from 'lucide-react';
 import type { BOQData, BidSnapshotRow, FinancialValueCandidate } from '../../lib/boq/types';
 import { toIndianWords } from '../../lib/boq/indianWords';
@@ -27,6 +27,11 @@ interface BOQSectionProps {
   /** The real extracted Schedule-B sum (BOQViewer's meta.totalAmount) — used
    *  only for the Step 1 mis-entry warning, never for any calculation. */
   scheduleSum?: number | null;
+  /** Display-only: true while BOQ extraction is still in flight and no
+   *  Schedule-B amount has arrived yet. Never affects fetching/computing the
+   *  amount itself — only whether Step 1 shows a loading indicator instead
+   *  of the empty input form. */
+  scheduleBLoading?: boolean;
 }
 
 const INR_RE = /₹?\s*[\d,]+(?:\.\d+)?/;
@@ -52,6 +57,7 @@ export default function BOQSection({
   onRevenueSync, onFinalize, snapshots = [], snapshotsLoading = false,
   nominalQuantitiesSignal = false,
   scheduleSum = null,
+  scheduleBLoading = false,
 }: BOQSectionProps) {
   // ── Local UI state ─────────────────────────────────────────────────────────
   // Session-only — a 1-signal hint is a light nudge, not a decision that
@@ -703,6 +709,7 @@ export default function BOQSection({
       );
     }
 
+    const showScheduleBLoading = scheduleBLoading && boq.estimatedAmount == null;
     const suggested = candidates[suggestedIdx];
     const sourceNote = suggested
       ? suggested.page
@@ -727,15 +734,23 @@ export default function BOQSection({
           </div>
         </div>
 
-        <div>
+        {showScheduleBLoading && (
+          <div className="flex items-center gap-2 bg-white border border-amber-300 rounded-lg px-3 py-2.5 text-amber-700">
+            <Loader2 className="w-4 h-4 animate-spin shrink-0" />
+            <span className="text-sm font-medium">Fetching Schedule-B amount…</span>
+          </div>
+        )}
+
+        <div className={showScheduleBLoading ? 'opacity-50 pointer-events-none' : undefined}>
           <div className="flex items-center gap-2 bg-white border border-amber-300 rounded-lg px-3 py-2 focus-within:ring-2 focus-within:ring-amber-300">
             <span className="text-slate-400 font-bold text-sm">₹</span>
             <input
               type="text"
               value={amountInput || (boq.estimatedAmount != null ? boq.estimatedAmount.toString() : '')}
               onChange={e => handleAmountInputChange(e.target.value)}
-              placeholder="Type the Schedule-B amount here"
-              className="flex-1 bg-transparent text-slate-900 font-semibold text-sm outline-none"
+              placeholder={showScheduleBLoading ? 'Waiting for extraction…' : 'Type the Schedule-B amount here'}
+              disabled={showScheduleBLoading}
+              className="flex-1 bg-transparent text-slate-900 font-semibold text-sm outline-none disabled:cursor-not-allowed"
             />
           </div>
           {sourceNote && (
@@ -754,13 +769,13 @@ export default function BOQSection({
 
         <button
           onClick={handleConfirmAmount}
-          disabled={!boq.estimatedAmount}
+          disabled={!boq.estimatedAmount || showScheduleBLoading}
           className="w-full py-2.5 bg-amber-500 hover:bg-amber-600 disabled:opacity-50 disabled:cursor-not-allowed text-white font-semibold text-sm rounded-lg transition-colors flex items-center justify-center gap-2"
         >
           <CheckCircle2 className="w-4 h-4" />
           Confirm Schedule-B Amount
         </button>
-        {!boq.estimatedAmount && (
+        {!boq.estimatedAmount && !showScheduleBLoading && (
           <p className="text-xs text-amber-700 flex items-center gap-1">
             <AlertCircle className="w-3.5 h-3.5 shrink-0" />
             Type the amount above, then click to confirm

@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
-import { doc, getDoc, updateDoc, deleteDoc, addDoc, collection, query, where, getDocs, orderBy, writeBatch, serverTimestamp, arrayUnion, Timestamp, setDoc } from "firebase/firestore";
+import { doc, getDoc, updateDoc, deleteDoc, addDoc, collection, query, where, getDocs, orderBy, writeBatch, serverTimestamp, arrayUnion, Timestamp, setDoc, onSnapshot } from "firebase/firestore";
 import { ref as storageRef, uploadBytes, getDownloadURL } from "firebase/storage";
 import { db, storage } from "../lib/firebase";
 import { removeUndefined } from "../lib/firestore";
@@ -154,7 +154,36 @@ export default function ProjectDetails() {
   const [renderedDetails, setRenderedDetails] = useState<any>(null);
   const [renderingLanguage, setRenderingLanguage] = useState(false);
   const [renderLanguageError, setRenderLanguageError] = useState('');
-  
+  // Display-only elapsed-time counter for the "Generating… Report" progress
+  // card below — never a fabricated percentage, just real wall-clock time
+  // since renderingLanguage went true. Resets whenever it goes false again
+  // (including instantly, on a cache hit).
+  const [renderElapsedSeconds, setRenderElapsedSeconds] = useState(0);
+  useEffect(() => {
+    if (!renderingLanguage) { setRenderElapsedSeconds(0); return; }
+    const t = setInterval(() => setRenderElapsedSeconds(s => s + 1), 1000);
+    return () => clearInterval(t);
+  }, [renderingLanguage]);
+
+  // Display-only: mirrors boq_extraction/latest's status field (the exact
+  // same doc BOQViewer's own onSnapshot listener already watches) so the
+  // Schedule-B loading indicator works even when BOQViewer has never
+  // mounted (e.g. the user opens the Calculator tab directly). Read-only —
+  // never writes to this doc, never affects extraction itself.
+  const [boqExtractionStatus, setBoqExtractionStatus] = useState<
+    'loading' | 'running' | 'done' | 'failed' | 'no_boq_found' | 'not_attempted'
+  >('loading');
+  useEffect(() => {
+    if (!projectId) return;
+    const ref = doc(db, 'saved_tenders', projectId, 'boq_extraction', 'latest');
+    const unsub = onSnapshot(
+      ref,
+      (snap) => setBoqExtractionStatus(snap.exists() ? ((snap.data() as any).status ?? 'not_attempted') : 'not_attempted'),
+      () => setBoqExtractionStatus('failed'),
+    );
+    return () => unsub();
+  }, [projectId]);
+
   // Renaming State
   const [isEditingName, setIsEditingName] = useState(false);
   const [projectName, setProjectName] = useState("");
@@ -1582,6 +1611,13 @@ export default function ProjectDetails() {
   // always shows a figure whether or not the Bid Engine tab was ever opened.
   const printSummary = computeBidPrintSummary(boq, project?.details, totalExpense);
 
+  // Display-only: true while BOQ extraction is still in flight (per the
+  // read-only listener above) and no Schedule-B amount has arrived yet.
+  // Clears the instant any value exists — auto-prefilled or typed — so it
+  // can never stay stuck on once a value has loaded.
+  const scheduleBLoading = (boqExtractionStatus === 'loading' || boqExtractionStatus === 'running')
+    && boq.estimatedAmount == null;
+
   // Native browser print-to-PDF (replaces the former html2canvas/html2pdf
   // pipeline, which crashed on Tailwind v4's oklch() colors). Forces the
   // Overview tab active so its narrative content is in the DOM — the
@@ -2195,6 +2231,7 @@ export default function ProjectDetails() {
              snapshotsLoading={snapshotsLoading}
              nominalQuantitiesSignal={nominalQuantitiesSignal}
              scheduleSum={scheduleSum}
+             scheduleBLoading={scheduleBLoading}
            />
 
            {project.details?.bid_recommendation ? (
@@ -2489,9 +2526,20 @@ export default function ProjectDetails() {
         {activeTab === 'overview' && (
           <div className="space-y-8">
             {renderingLanguage && (
-              <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-4 flex items-center gap-3 text-sm text-indigo-800">
-                <Loader2 className="w-4 h-4 animate-spin shrink-0" />
-                Generating {OVERVIEW_LANGUAGE_NAMES[i18n.language] ?? i18n.language} Report…
+              <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-5 shadow-sm">
+                <div className="flex items-center gap-3 text-sm font-semibold text-indigo-800">
+                  <Loader2 className="w-5 h-5 animate-spin shrink-0" />
+                  Generating {OVERVIEW_LANGUAGE_NAMES[i18n.language] ?? i18n.language} Report…
+                  <span className="ml-auto text-xs font-normal text-indigo-500 tabular-nums shrink-0">{renderElapsedSeconds}s</span>
+                </div>
+                {/* Indeterminate — no fake percentage. We have no chunk/step
+                    count to measure real progress against (a single
+                    translate call), so an honest animated bar plus real
+                    elapsed time is used instead of a fabricated number. */}
+                <div className="mt-3 h-1.5 w-full bg-indigo-100 rounded-full overflow-hidden">
+                  <div className="h-full w-2/5 bg-indigo-500 rounded-full animate-[indeterminate-bar_1.4s_ease-in-out_infinite]" />
+                </div>
+                <p className="mt-2 text-xs text-indigo-500">Translating the report's narrative sections — this can take a few seconds.</p>
               </div>
             )}
             {!renderingLanguage && renderLanguageError && (
@@ -3458,6 +3506,7 @@ export default function ProjectDetails() {
                 onQuantitySignal={setNominalQuantitiesSignal}
                 onScheduleSumChange={setScheduleSum}
                 tenderValue={tenderValue}
+                scheduleBLoading={scheduleBLoading}
               />
             </div>
           )}

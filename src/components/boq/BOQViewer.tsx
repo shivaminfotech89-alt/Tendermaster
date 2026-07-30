@@ -67,6 +67,11 @@ interface BOQViewerProps {
   /** bid_recommendation.estimated_value, already parsed by the caller —
    *  reference-only display in the percentage-rate summary strip below. */
   tenderValue?: number | null;
+  /** Display-only: true while BOQ extraction is still in flight and no
+   *  Schedule-B amount has arrived yet — used only by the percentage-rate
+   *  summary strip below, to show a loading state instead of the "Confirm
+   *  in the Bid Engine tab" hint while a value may still be on its way. */
+  scheduleBLoading?: boolean;
 }
 
 const GRID_LABELS: Record<'item_rate' | 'lump_sum_epc', PricingGridLabels> = {
@@ -157,7 +162,7 @@ function ErrorUI({
   );
 }
 
-export default function BOQViewer({ projectId, onProceedToPricing, onManualExtract, boqType, boq, onItemRateTotalsChange, onQuantitySignal, onScheduleSumChange, tenderValue }: BOQViewerProps) {
+export default function BOQViewer({ projectId, onProceedToPricing, onManualExtract, boqType, boq, onItemRateTotalsChange, onQuantitySignal, onScheduleSumChange, tenderValue, scheduleBLoading = false }: BOQViewerProps) {
   const [status, setStatus] = useState<ExtractionStatus>('loading');
   const [items, setItems] = useState<BoqItem[]>([]);
   const isGridMode = boqType === 'item_rate' || boqType === 'lump_sum_epc';
@@ -706,9 +711,15 @@ export default function BOQViewer({ projectId, onProceedToPricing, onManualExtra
             </div>
             <div>
               <p className="text-xs font-medium text-indigo-500 uppercase tracking-wide mb-1">Schedule-B Amount</p>
-              <p className="text-lg font-bold text-indigo-900">
-                {boq?.estimatedAmount != null ? fmtIndian(boq.estimatedAmount) : '--'}
-              </p>
+              {boq?.estimatedAmount == null && scheduleBLoading ? (
+                <p className="text-sm font-semibold text-indigo-700 flex items-center gap-1.5">
+                  <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" /> Fetching…
+                </p>
+              ) : (
+                <p className="text-lg font-bold text-indigo-900">
+                  {boq?.estimatedAmount != null ? fmtIndian(boq.estimatedAmount) : '--'}
+                </p>
+              )}
             </div>
             <div>
               <p className="text-xs font-medium text-indigo-500 uppercase tracking-wide mb-1">Bid %</p>
@@ -740,7 +751,7 @@ export default function BOQViewer({ projectId, onProceedToPricing, onManualExtra
               </div>
             )}
           </div>
-          {boq?.estimatedAmount == null && (
+          {boq?.estimatedAmount == null && !scheduleBLoading && (
             <p className="text-xs text-indigo-700 mt-3">
               Confirm the Schedule-B Amount in the Bid Engine &amp; Profit Calculator tab to prepare your bid.
             </p>

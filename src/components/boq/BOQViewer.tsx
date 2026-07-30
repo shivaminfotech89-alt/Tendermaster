@@ -170,6 +170,11 @@ export default function BOQViewer({ projectId, onProceedToPricing, onManualExtra
   const { pricing, saveState, updateItem } = usePricingAutosave(isGridMode ? projectId : undefined);
   const [meta, setMeta] = useState<BOQMeta | null>(null);
   const [failReason, setFailReason] = useState('');
+  // Set only for an xlsx source that was read (its content already folded
+  // into the tender analysis) but had no sheet clearing the BOQ-recognition
+  // bar — lets the no_boq_found view say so explicitly instead of showing
+  // the same generic "no BOQ" message a PDF with no schedule at all gets.
+  const [noBoqReason, setNoBoqReason] = useState('');
   const [search, setSearch] = useState('');
   const [sortField, setSortField] = useState<SortField>('itemNo');
   const [sortDir, setSortDir] = useState<SortDir>('asc');
@@ -227,6 +232,7 @@ export default function BOQViewer({ projectId, onProceedToPricing, onManualExtra
           });
         }
         if (s === 'failed') setFailReason(data.reason ?? 'Unknown error');
+        if (s === 'no_boq_found') setNoBoqReason(data.reason ?? '');
       },
       (err) => {
         console.error('[BOQViewer] snapshot error', err);
@@ -275,6 +281,7 @@ export default function BOQViewer({ projectId, onProceedToPricing, onManualExtra
         });
       }
       if (s === 'failed') setFailReason(data.reason ?? 'Unknown error');
+      if (s === 'no_boq_found') setNoBoqReason(data.reason ?? '');
     } catch (e: any) {
       setStatus('failed');
       setFailReason(e?.message ?? 'Refresh failed');
@@ -566,7 +573,7 @@ export default function BOQViewer({ projectId, onProceedToPricing, onManualExtra
         <FileText className="w-10 h-10 text-slate-300" />
         <p className="font-semibold text-slate-600">No BOQ detected</p>
         <p className="text-sm text-center max-w-sm text-slate-400">
-          This tender document does not appear to contain a structured Bill of Quantities.
+          {noBoqReason || 'This tender document does not appear to contain a structured Bill of Quantities.'}
         </p>
         {onManualExtract && (
           <button

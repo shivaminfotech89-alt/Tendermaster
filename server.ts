@@ -1388,6 +1388,7 @@ async function createTier2Job(
     actualContent: any;
     fileNames: string[] | null;
     rawPdfUrls: string[] | null;
+    xlsxUrls: string[] | null;
     userProfile: string;
     language: string | null;
     extraContext: string | null;
@@ -1397,7 +1398,7 @@ async function createTier2Job(
   | { ok: true; jobId: string; chunkCount: number }
   | { ok: false; status: number; error: string }
 > {
-  const { uid, tenderType, actualContent, fileNames, rawPdfUrls, userProfile, language, extraContext, userProjectName } = params;
+  const { uid, tenderType, actualContent, fileNames, rawPdfUrls, xlsxUrls, userProfile, language, extraContext, userProjectName } = params;
 
   const { entries, notes, totalFilesProvided, filesAnalyzed, filesSkipped } = await fetchTier2FileEntries(tenderType, actualContent, fileNames);
   const chunkPlan = planTier2Chunks(entries);
@@ -1447,6 +1448,9 @@ async function createTier2Job(
       // Tier-1's handleAnalyze does. Passenger data only: never touches
       // fetchTier2FileEntries/chunk planning/the Gemini call.
       rawPdfUrls: Array.isArray(rawPdfUrls) && rawPdfUrls.length > 0 ? rawPdfUrls : null,
+      // Raw xlsx Storage URLs — same passenger-data pattern as rawPdfUrls,
+      // a separate additive BOQ-candidate source alongside PDFs.
+      xlsxUrls: Array.isArray(xlsxUrls) && xlsxUrls.length > 0 ? xlsxUrls : null,
       projectName: (typeof userProjectName === "string" && userProjectName.trim()) ? userProjectName.trim() : null,
     },
   });
@@ -1975,7 +1979,7 @@ app.post(
 app.post("/api/analyze-tender", verifyFirebaseToken, async (req: AuthenticatedRequest, res) => {
   try {
     const { tenderDocument, tenderType = "text", tenderContent, userProfile, language,
-            projectId: existingProjectId, fileNames, projectName: userProjectName, rawPdfUrls } = req.body;
+            projectId: existingProjectId, fileNames, projectName: userProjectName, rawPdfUrls, xlsxUrls } = req.body;
     const actualContent = tenderContent || tenderDocument;
     const isReanalysis = !!existingProjectId;
 
@@ -2062,6 +2066,7 @@ app.post("/api/analyze-tender", verifyFirebaseToken, async (req: AuthenticatedRe
         actualContent,
         fileNames: Array.isArray(fileNames) && fileNames.length > 0 ? (fileNames as string[]) : null,
         rawPdfUrls: Array.isArray(rawPdfUrls) && rawPdfUrls.length > 0 ? (rawPdfUrls as string[]) : null,
+        xlsxUrls: Array.isArray(xlsxUrls) && xlsxUrls.length > 0 ? (xlsxUrls as string[]) : null,
         userProfile,
         language: language ?? null,
         extraContext: req.body.extraContext ?? null,
@@ -2247,6 +2252,7 @@ app.post("/api/analyze-tender", verifyFirebaseToken, async (req: AuthenticatedRe
           actualContent,
           fileNames: Array.isArray(fileNames) && fileNames.length > 0 ? (fileNames as string[]) : null,
           rawPdfUrls: Array.isArray(rawPdfUrls) && rawPdfUrls.length > 0 ? (rawPdfUrls as string[]) : null,
+          xlsxUrls: Array.isArray(xlsxUrls) && xlsxUrls.length > 0 ? (xlsxUrls as string[]) : null,
           userProfile,
           language: language ?? null,
           extraContext: req.body.extraContext ?? null,
@@ -2702,7 +2708,7 @@ async function finalizeJob(
   }
 
   const uid: string = job.uid;
-  const { tenderType, tenderContent, fileNames, rawPdfUrls, projectName, language } = job.request;
+  const { tenderType, tenderContent, fileNames, rawPdfUrls, xlsxUrls, projectName, language } = job.request;
   const payloadRef =
     tenderType === "storage_urls" || tenderType === "url"
       ? tenderContent
@@ -2746,6 +2752,8 @@ async function finalizeJob(
         // job doc's request.rawPdfUrls instead of a synchronous client
         // callback, since Tier-2 has none.
         ...(Array.isArray(rawPdfUrls) && rawPdfUrls.length > 0 ? { payloadRefRaw: rawPdfUrls } : {}),
+        // Mirrors payloadRefRaw for the xlsx BOQ source.
+        ...(Array.isArray(xlsxUrls) && xlsxUrls.length > 0 ? { payloadRefXlsx: xlsxUrls } : {}),
         remarks,
         lowConfidence: isLow,
         savedAt: Timestamp.now(),

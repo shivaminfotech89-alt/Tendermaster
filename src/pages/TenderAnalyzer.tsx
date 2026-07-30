@@ -28,6 +28,8 @@ import { detectBidValidity, detectCompletionPeriod } from "../lib/boq/detectTend
 import { runBoqExtraction } from "../lib/boq/runBoqExtraction";
 import { removeUndefined } from "../lib/firestore";
 import { extractBoqWithFallback } from "../services/boqExtractionOrchestrator";
+import { extractBoqFromExcelWithVerification } from "../services/boqExcelExtractionOrchestrator";
+import { buildAnalysisText as buildXlsxAnalysisText } from "../services/boqExcelExtractService";
 
 const CollapsibleSection = ({ title, defaultOpen = true, children }: { title: string, defaultOpen?: boolean, children: React.ReactNode }) => {
   const [isOpen, setIsOpen] = useState(defaultOpen);
@@ -246,6 +248,10 @@ export default function TenderAnalyzer() {
   const rawExtractedTextRef = useRef<string>('');
   // BOQ-candidate buffers retained during upload; released immediately after extraction starts
   const boqPdfCandidatesRef = useRef<Array<{name: string; buffer: ArrayBuffer; score: number; pageCount: number}>>([]);
+  // Raw xlsx buffers retained during upload (standalone or from a ZIP) — a
+  // separate, additive BOQ candidate source alongside PDFs. Released
+  // immediately after extraction starts, same lifecycle as the PDF ref.
+  const boqXlsxCandidatesRef = useRef<Array<{name: string; buffer: ArrayBuffer}>>([]);
   // Raw PDF bytes for digital-PDF BOQ candidates; parallel to the file list (null = not a candidate or image PDF)
   const boqRawPdfBuffersRef = useRef<(ArrayBuffer | null)[]>([]);
   // Guards the Tier-2 BOQ auto-extraction trigger (below) against firing
@@ -417,6 +423,7 @@ export default function TenderAnalyzer() {
     rawExtractedTextRef.current = '';
     boqPdfCandidatesRef.current = [];
     boqRawPdfBuffersRef.current = [];
+    boqXlsxCandidatesRef.current = [];
     try {
       const zip = new JSZip();
       const contents = await zip.loadAsync(file);
@@ -469,20 +476,30 @@ export default function TenderAnalyzer() {
           try {
             const arrayBuffer = await zipEntry.async("arraybuffer");
             const workbook = XLSX.read(arrayBuffer, { type: "array" });
-            let allText = `\n--- CONTENT OF SPREADSHEET: ${filename} ---\n`;
-            for (const sheetName of workbook.SheetNames) {
-              allText += `\nSheet: ${sheetName}\n`;
-              const sheet = workbook.Sheets[sheetName];
-              const csv = XLSX.utils.sheet_to_csv(sheet);
-              allText += csv;
-            }
+            const shortName = filename.split('/').pop() || filename;
+
+            // Half 2 (analysis text): the whole document EXCEPT the numeric
+            // BOQ line-item table — never the qty/rate/amount cells. Those
+            // come only from Half 1's deterministic parse (runBoqExtraction
+            // → boqExcelExtractionOrchestrator), never from what the AI
+            // reads here.
+            const allText = `\n--- CONTENT OF SPREADSHEET: ${filename} ---\n${buildXlsxAnalysisText(workbook)}`;
             // btoa expects a string, so we convert text to base64
             // To handle unicode, we use TextEncoder
             const utf8Bytes = new TextEncoder().encode(allText);
             const base64Text = btoa(String.fromCharCode(...utf8Bytes));
             fileDataArray.push(`data:text/plain;base64,${base64Text}`);
-            fileNameArray.push(filename.split('/').pop() || filename);
+            fileNameArray.push(shortName);
             boqRawPdfBuffersRef.current.push(null); // spreadsheets never need raw PDF upload
+
+            // Half 1 (BOQ numbers): retain the raw bytes as a separate,
+            // additive BOQ candidate — the deterministic parse itself runs
+            // later (runBoqExtraction), never here, and never touches the
+            // PDF parser/verification harness.
+            const xlsxTotalBytes = boqXlsxCandidatesRef.current.reduce((s, c) => s + c.buffer.byteLength, 0);
+            if (xlsxTotalBytes + arrayBuffer.byteLength <= BOQ_BUFFER_CAP_BYTES) {
+              boqXlsxCandidatesRef.current.push({ name: shortName, buffer: arrayBuffer });
+            }
           } catch (err) {
             console.error(`Failed to parse spreadsheet ${filename}:`, err);
           }
@@ -615,6 +632,7 @@ export default function TenderAnalyzer() {
       let processedPayload = payload;
       let finalTenderType: string = inputType;
       const rawPdfUploadedUrls: string[] = [];
+      const xlsxUploadedUrls: string[] = [];
 
       if (inputType === 'pdf' || inputType === 'zip') {
         const dataUris = Array.isArray(payload) ? payload : [payload];
@@ -665,6 +683,26 @@ export default function TenderAnalyzer() {
           }
         }
 
+        // Upload raw xlsx bytes captured during upload (standalone .xlsx is
+        // not yet a supported upload mode; this covers .xlsx/.xls/.csv
+        // found inside a ZIP) — a separate Storage field (payloadRefXlsx),
+        // never mixed into payloadRefRaw's PDF-typed meaning, so
+        // runBoqExtraction can fetch them later for the deterministic xlsx
+        // BOQ parse alongside any PDF candidates.
+        for (let i = 0; i < boqXlsxCandidatesRef.current.length; i++) {
+          const candidate = boqXlsxCandidatesRef.current[i];
+          try {
+            const xlsxFileRef = storageRef(storage, `users/${user?.uid || 'anon'}/tenders/${Date.now()}_${i}_xlsx`);
+            await uploadBytes(xlsxFileRef, new Uint8Array(candidate.buffer), {
+              contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            });
+            xlsxUploadedUrls.push(await getDownloadURL(xlsxFileRef));
+            console.log(`[BOQ] raw xlsx uploaded: ${candidate.name} (${candidate.buffer.byteLength} bytes)`);
+          } catch (e) {
+            console.warn(`[BOQ] raw xlsx upload failed for ${candidate.name}:`, e);
+          }
+        }
+
         setAnalyzeStage('analyzing');
         setAnalyzedPayloadNames(nameSource.length === dataUris.length ? nameSource : dataUris.map((_, i) => `Document ${i + 1}`));
         processedPayload = uploadedUrls;
@@ -690,6 +728,7 @@ export default function TenderAnalyzer() {
           // so the server persists this onto the job doc at creation time
           // instead, for finalizeJob to copy onto the saved project.
           ...(rawPdfUploadedUrls.length > 0 ? { rawPdfUrls: rawPdfUploadedUrls } : {}),
+          ...(xlsxUploadedUrls.length > 0 ? { xlsxUrls: xlsxUploadedUrls } : {}),
         })
       });
 
@@ -766,6 +805,12 @@ export default function TenderAnalyzer() {
             payloadRefRaw: rawPdfUploadedUrls,
           }).catch(console.error);
         }
+        // Same, for raw xlsx BOQ-candidate Storage URLs.
+        if (xlsxUploadedUrls.length > 0) {
+          updateDoc(doc(db, 'saved_tenders', data.projectId), {
+            payloadRefXlsx: xlsxUploadedUrls,
+          }).catch(console.error);
+        }
 
         // Trigger BOQ extraction for all upload types when candidates were retained.
         // Always writes back a status — never silently fails.
@@ -785,6 +830,7 @@ export default function TenderAnalyzer() {
               // verification score — a well-structured BOQ beats a high filename score.
               let best: Awaited<ReturnType<typeof extractBoqWithFallback>> | null = null;
               let bestCandidateName = '';
+              let bestSource: 'pdf' | 'xlsx' = 'pdf';
               for (const candidate of [...candidates].sort((a, b) => b.score - a.score)) {
                 try {
                   const result = await extractBoqWithFallback(candidate.buffer);
@@ -799,14 +845,42 @@ export default function TenderAnalyzer() {
                       (!best || result.verification.score > best.verification.score)) {
                     best = result;
                     bestCandidateName = candidate.name;
+                    bestSource = 'pdf';
                   }
                 } catch (e) {
                   console.warn(`[BOQ] extraction failed for ${candidate.name}:`, e);
                 }
               }
 
+              // xlsx candidates — a separate, additive source competing on the
+              // same verification.score basis. Never replaces the PDF loop.
+              const xlsxCandidates = boqXlsxCandidatesRef.current;
+              boqXlsxCandidatesRef.current = [];
+              let xlsxNotRecognizedReason: string | null = null;
+              for (const candidate of xlsxCandidates) {
+                try {
+                  const result = await extractBoqFromExcelWithVerification(candidate.buffer);
+                  if (!result.boqRecognized) {
+                    xlsxNotRecognizedReason = 'This spreadsheet’s content was read and included in the tender analysis, but no BOQ line-item table was detected in it.';
+                  }
+                  console.log(`[BOQ] extracted from ${candidate.name} (xlsx)`, {
+                    items: result.extraction.items.length,
+                    verificationScore: result.verification.score,
+                    boqRecognized: result.boqRecognized,
+                  });
+                  if (result.extraction.items.length > 0 &&
+                      (!best || result.verification.score > best.verification.score)) {
+                    best = result;
+                    bestCandidateName = candidate.name;
+                    bestSource = 'xlsx';
+                  }
+                } catch (e) {
+                  console.warn(`[BOQ] xlsx extraction failed for ${candidate.name}:`, e);
+                }
+              }
+
               if (!best) {
-                await setDoc(latestRef, removeUndefined({ status: 'no_boq_found', updatedAt: serverTimestamp() }));
+                await setDoc(latestRef, removeUndefined({ status: 'no_boq_found', reason: xlsxNotRecognizedReason ?? undefined, updatedAt: serverTimestamp() }));
                 return;
               }
 
@@ -862,7 +936,7 @@ export default function TenderAnalyzer() {
                 items: extraction.items,
                 itemCount: extraction.items.length,
                 totalAmount,
-                engine: telemetry.engine,
+                engine: bestSource === 'xlsx' ? 'deterministic-xlsx' : telemetry.engine,
                 visionUsed: telemetry.engine === 'vision',
                 verificationScore: verification.score,
                 parserDurationMs: telemetry.parserDurationMs,
@@ -1040,21 +1114,26 @@ export default function TenderAnalyzer() {
         ? [payloadRef]
         : [];
 
-      if (rawPdfUrls.length === 0 && payloadUrls.length === 0) {
+      const payloadRefXlsx = projectData?.payloadRefXlsx;
+      const xlsxUrls: string[] = Array.isArray(payloadRefXlsx)
+        ? (payloadRefXlsx as string[]).filter((u: any) => typeof u === 'string' && u.startsWith('http'))
+        : [];
+
+      if (rawPdfUrls.length === 0 && payloadUrls.length === 0 && xlsxUrls.length === 0) {
         toast.error('No source documents found. Please re-upload this tender to extract the BOQ.');
         return;
       }
 
       await setDoc(latestRef, removeUndefined({ status: 'running', startedAt: serverTimestamp() }));
 
-      const result = await runBoqExtraction({ rawPdfUrls, payloadUrls, executionDurationHint });
+      const result = await runBoqExtraction({ rawPdfUrls, payloadUrls, xlsxUrls, executionDurationHint });
 
       if (result.status === 'failed') {
         await setDoc(latestRef, removeUndefined({ status: 'failed', reason: result.reason, updatedAt: serverTimestamp() }));
         return;
       }
       if (result.status === 'no_boq_found') {
-        await setDoc(latestRef, removeUndefined({ status: 'no_boq_found', updatedAt: serverTimestamp() }));
+        await setDoc(latestRef, removeUndefined({ status: 'no_boq_found', reason: result.reason, updatedAt: serverTimestamp() }));
         return;
       }
 

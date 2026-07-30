@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { detectRoleForText, detectHeader, isRepeatedHeader } from './headerDetection';
+import { detectRoleForText, detectTopRolesForText, detectHeader, isRepeatedHeader } from './headerDetection';
 import type { TextRow, ColumnAnchor } from '../../types/boq';
 
 describe('detectRoleForText', () => {
@@ -40,6 +40,72 @@ describe('detectRoleForText', () => {
   it('identifies long quantity header', () => {
     const r = detectRoleForText('Quantities Estimated But May Be More Or Less');
     expect(r.role).toBe('quantity');
+  });
+
+  // Smart_Meter SOR (.xlsx) header row synonyms — added for xlsx BOQ support.
+  // Existing PDF-format synonyms above are re-asserted first to prove this
+  // addition doesn't change any previously-passing PDF header mapping.
+  it('still identifies "Particulars" as description (regression guard)', () => {
+    expect(detectRoleForText('Particulars').role).toBe('description');
+  });
+
+  it('identifies "Activity" as description (xlsx SOR synonym)', () => {
+    const r = detectRoleForText('Activity');
+    expect(r.role).toBe('description');
+    expect(r.score).toBeGreaterThanOrEqual(60);
+  });
+
+  it('identifies "Sr. No." as item_no', () => {
+    expect(detectRoleForText('Sr. No.').role).toBe('item_no');
+  });
+
+  it('identifies "Service Code" as code', () => {
+    expect(detectRoleForText('Service Code').role).toBe('code');
+  });
+
+  it('identifies "UoM" as unit', () => {
+    expect(detectRoleForText('UoM').role).toBe('unit');
+  });
+
+  it('identifies "Qty." as quantity', () => {
+    expect(detectRoleForText('Qty.').role).toBe('quantity');
+  });
+
+  // detectRoleForText's single-best pick for "Unit Rate" ties at `unit`
+  // (a prefix match, same score as `estimated_rate`'s own prefix match) —
+  // that's expected/correct for this function in isolation. Disambiguating
+  // it in favor of estimated_rate when `unit` is already claimed by a
+  // sibling "UoM" column is detectTopRolesForText's job, tested below.
+  it('normalizes a multi-line "Unit Rate\\n[Rs.]" header (newline collapsed)', () => {
+    const r = detectRoleForText('Unit Rate\n[Rs.]');
+    expect(['unit', 'estimated_rate']).toContain(r.role);
+    expect(r.score).toBeGreaterThanOrEqual(60);
+  });
+});
+
+describe('detectTopRolesForText', () => {
+  it('returns both unit and estimated_rate as candidates for "Unit Rate\\n[Rs.]"', () => {
+    const results = detectTopRolesForText('Unit Rate\n[Rs.]');
+    const roles = results.map(r => r.role);
+    expect(roles).toContain('unit');
+    expect(roles).toContain('estimated_rate');
+  });
+
+  it('returns only unit (exact match) for "UoM"', () => {
+    const results = detectTopRolesForText('UoM');
+    expect(results[0].role).toBe('unit');
+    expect(results[0].score).toBe(100);
+  });
+
+  it('returns an empty array for junk text', () => {
+    expect(detectTopRolesForText('JUNK TEXT')).toEqual([]);
+  });
+
+  it('sorts candidates by score descending', () => {
+    const results = detectTopRolesForText('Unit Rate\n[Rs.]');
+    for (let i = 1; i < results.length; i++) {
+      expect(results[i - 1].score).toBeGreaterThanOrEqual(results[i].score);
+    }
   });
 });
 

@@ -1,4 +1,5 @@
 import { extractBoqWithFallback } from "../../services/boqExtractionOrchestrator";
+import { extractBoqFromExcelWithVerification } from "../../services/boqExcelExtractionOrchestrator";
 import { detectGstCess } from "./detectGstCess";
 import { detectBidValidity, detectCompletionPeriod } from "./detectTenderValidity";
 import type { BoqItem } from "../../types/boq";
@@ -11,6 +12,12 @@ export interface RunBoqExtractionInput {
    *  extracted TEXT, not PDF bytes (cost-optimised for Gemini), so they only
    *  actually help when the source was an image-path PDF stored as-is. */
   payloadUrls: string[];
+  /** Raw xlsx Storage URLs (payloadRefXlsx) — a separate additive source
+   *  alongside PDFs, never a replacement. Parsed via the deterministic xlsx
+   *  BOQ pipeline (boqExcelExtractService/boqExcelExtractionOrchestrator),
+   *  which never touches the PDF parser or verification harness, just
+   *  calls into the same verifyExtraction it already uses. */
+  xlsxUrls?: string[];
   /** project.details?.timeline_and_milestones?.execution_duration — used as
    *  a secondary signal by detectCompletionPeriod. */
   executionDurationHint?: string | null;
@@ -51,7 +58,15 @@ export type RunBoqExtractionResult =
        *  none of them have side effects. */
       detection: RunBoqExtractionDetection;
     }
-  | { status: 'no_boq_found' }
+  | {
+      status: 'no_boq_found';
+      /** Set when an xlsx candidate WAS read (its content already folded
+       *  into the tender analysis text) but no sheet in it cleared the
+       *  BOQ-recognition bar — distinguishes "we looked and genuinely found
+       *  nothing" from silent dropping. Absent for the plain PDF case,
+       *  which keeps its existing generic message. */
+      reason?: string;
+    }
   | { status: 'failed'; reason: string };
 
 /** Fetches PDF bytes from Storage URLs and runs the SAME
@@ -64,17 +79,18 @@ export type RunBoqExtractionResult =
  *  persistence (status:'running' before, boq_extraction/latest after,
  *  manualOverride gating on the detection patch). */
 export async function runBoqExtraction(input: RunBoqExtractionInput): Promise<RunBoqExtractionResult> {
-  const { rawPdfUrls, payloadUrls, executionDurationHint } = input;
+  const { rawPdfUrls, payloadUrls, xlsxUrls = [], executionDurationHint } = input;
   const urls = rawPdfUrls.length > 0 ? rawPdfUrls : payloadUrls;
   const usingRawUrls = rawPdfUrls.length > 0;
 
-  if (urls.length === 0) {
+  if (urls.length === 0 && xlsxUrls.length === 0) {
     return { status: 'failed', reason: 'No source documents found. Please re-upload this tender to extract the BOQ.' };
   }
 
   let fetchedCount = 0;
   let textOnlyCount = 0;
   let best: Awaited<ReturnType<typeof extractBoqWithFallback>> | null = null;
+  let bestSource: 'pdf' | 'xlsx' = 'pdf';
   let lastDownloadError: string | null = null;
 
   for (const url of urls) {
@@ -101,6 +117,34 @@ export async function runBoqExtraction(input: RunBoqExtractionInput): Promise<Ru
       if (result.extraction.items.length > 0 &&
           (!best || result.verification.score > best.verification.score)) {
         best = result;
+        bestSource = 'pdf';
+      }
+    } catch (e: any) {
+      lastDownloadError = e?.message ?? String(e);
+    }
+  }
+
+  // xlsx candidates — a separate, additive source. Competes for `best` on
+  // the same verification.score basis as PDF candidates; never replaces or
+  // reorders the PDF loop above.
+  let xlsxProcessedCount = 0;
+  let xlsxNotRecognizedReason: string | null = null;
+
+  for (const url of xlsxUrls) {
+    try {
+      const resp = await fetch(url);
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const buffer = await resp.arrayBuffer();
+      xlsxProcessedCount++;
+
+      const result = await extractBoqFromExcelWithVerification(buffer);
+      if (!result.boqRecognized) {
+        xlsxNotRecognizedReason = 'This spreadsheet’s content was read and included in the tender analysis, but no BOQ line-item table was detected in it.';
+      }
+      if (result.extraction.items.length > 0 &&
+          (!best || result.verification.score > best.verification.score)) {
+        best = result;
+        bestSource = 'xlsx';
       }
     } catch (e: any) {
       lastDownloadError = e?.message ?? String(e);
@@ -109,8 +153,10 @@ export async function runBoqExtraction(input: RunBoqExtractionInput): Promise<Ru
 
   // All downloaded files were text (digital PDFs stored without raw
   // backup). This happens for projects analysed before payloadRefRaw was
-  // introduced/attached.
-  if (!best && fetchedCount > 0 && textOnlyCount === fetchedCount && !usingRawUrls) {
+  // introduced/attached. Only applies when there was no xlsx source either
+  // — an xlsx candidate (even an unrecognized one) means this project does
+  // have a usable source, just not a PDF one.
+  if (!best && fetchedCount > 0 && textOnlyCount === fetchedCount && !usingRawUrls && xlsxProcessedCount === 0) {
     return {
       status: 'failed',
       reason: 'The original PDF is not available for re-extraction on this project. Re-analyse the tender to enable BOQ extraction.',
@@ -118,8 +164,11 @@ export async function runBoqExtraction(input: RunBoqExtractionInput): Promise<Ru
   }
 
   if (!best) {
-    if (fetchedCount === 0 && lastDownloadError) {
-      return { status: 'failed', reason: `Couldn't download the tender PDF: ${lastDownloadError}` };
+    if (xlsxNotRecognizedReason) {
+      return { status: 'no_boq_found', reason: xlsxNotRecognizedReason };
+    }
+    if (fetchedCount === 0 && xlsxProcessedCount === 0 && lastDownloadError) {
+      return { status: 'failed', reason: `Couldn't download the tender document: ${lastDownloadError}` };
     }
     return { status: 'no_boq_found' };
   }
@@ -170,7 +219,7 @@ export async function runBoqExtraction(input: RunBoqExtractionInput): Promise<Ru
     items: extraction.items,
     itemCount: extraction.items.length,
     totalAmount,
-    engine: telemetry.engine,
+    engine: bestSource === 'xlsx' ? 'deterministic-xlsx' : telemetry.engine,
     visionUsed: telemetry.engine === 'vision',
     verificationScore: verification.score,
     parserDurationMs: telemetry.parserDurationMs,

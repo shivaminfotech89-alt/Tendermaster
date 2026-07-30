@@ -8,7 +8,7 @@ import { snapToColumn } from './columnGrouping';
 // Add synonyms here when a new BOQ format uses unfamiliar column names.
 const ROLE_PATTERNS: Record<ColumnRole, string[]> = {
   item_no: ['item no', 'sr no', 'sr', 'no', 'sno', 's no', 'item', '#', 'sl no', 'sl', 'seq no', 'serial no', 'item number', 'sr number', 'schedule item', 'itemno'],
-  description: ['description', 'item description', 'particulars', 'work description', 'specification', 'details', 'name of work', 'nature of work', 'desc', 'item particulars'],
+  description: ['description', 'item description', 'particulars', 'work description', 'specification', 'details', 'name of work', 'nature of work', 'desc', 'item particulars', 'activity', 'work activity', 'scope of work'],
   unit: ['unit', 'uom', 'units', 'unit of measure', 'u m', 'uom'],
   quantity: ['quantity', 'qty', 'quantities', 'quantities estimated but may be more or less', 'nos', 'number', 'quantit', 'quantity in nos', 'qty nos'],
   code: ['code', 'item code', 'sor code', 'dsr code', 'work code', 'sor'],
@@ -82,6 +82,54 @@ export function detectRoleForText(text: string): { role: ColumnRole; score: numb
     return { role: 'unknown', score: 0 };
   }
   return { role: bestRole, score: bestScore };
+}
+
+/**
+ * Like detectRoleForText, but returns every role scoring >= 60 (not just the
+ * single best), sorted by score descending. detectRoleForText's own
+ * behavior/output is unchanged by this — this is an additive helper, not a
+ * refactor of it.
+ *
+ * Needed for the xlsx BOQ column-mapping pass (single-best-role-per-column
+ * assignment can otherwise strand a column entirely): "UoM" exactly matches
+ * `unit` (score 100), while "Unit Rate" ties at 92 between `unit` (a prefix
+ * match) and `estimated_rate` (also a prefix match) — detectRoleForText's
+ * single-best pick returns `unit` for "Unit Rate" too, but a per-row
+ * assignment loop that tries roles in score order and skips whichever is
+ * already claimed by an earlier column (UoM) needs the second candidate,
+ * `estimated_rate`, to fall through to.
+ */
+export function detectTopRolesForText(text: string): { role: ColumnRole; score: number }[] {
+  const norm = normalize(text);
+  const results: { role: ColumnRole; score: number }[] = [];
+
+  for (const [roleKey, patterns] of Object.entries(ROLE_PATTERNS)) {
+    if (roleKey === 'unknown') continue;
+    const role = roleKey as ColumnRole;
+    let bestForRole = 0;
+
+    for (const pattern of patterns) {
+      let score = 0;
+      if (norm === pattern) {
+        score = 100;
+      } else if (norm.startsWith(pattern) || pattern.startsWith(norm)) {
+        score = 92;
+      } else if (norm.includes(pattern) || pattern.includes(norm)) {
+        score = 85;
+      } else {
+        const sim = levenshteinSimilarity(norm, pattern);
+        if (sim >= 60) {
+          score = sim;
+        }
+      }
+      if (score > bestForRole) bestForRole = score;
+    }
+
+    if (bestForRole >= 60) results.push({ role, score: bestForRole });
+  }
+
+  results.sort((a, b) => b.score - a.score);
+  return results;
 }
 
 export function detectHeader(rows: TextRow[], columns: ColumnAnchor[]): HeaderDetectionResult | null {

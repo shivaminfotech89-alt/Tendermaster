@@ -340,19 +340,25 @@ export default function ProjectDetails() {
       ? [payloadRef]
       : [];
 
-    if (rawPdfUrls.length === 0 && payloadUrls.length === 0) {
+    const payloadRefXlsx = project?.payloadRefXlsx;
+    const xlsxUrls: string[] = Array.isArray(payloadRefXlsx)
+      ? (payloadRefXlsx as string[]).filter((u: any) => typeof u === 'string' && u.startsWith('http'))
+      : [];
+
+    if (rawPdfUrls.length === 0 && payloadUrls.length === 0 && xlsxUrls.length === 0) {
       toast.error('No source documents found. Please re-upload this tender to extract the BOQ.');
       return;
     }
 
     const latestRef = doc(db, 'saved_tenders', projectId, 'boq_extraction', 'latest');
     await setDoc(latestRef, removeUndefined({ status: 'running', startedAt: serverTimestamp() }));
-    console.log('[BOQ] status set to running', { rawPdfUrlCount: rawPdfUrls.length, payloadUrlCount: payloadUrls.length });
+    console.log('[BOQ] status set to running', { rawPdfUrlCount: rawPdfUrls.length, payloadUrlCount: payloadUrls.length, xlsxUrlCount: xlsxUrls.length });
 
     try {
       const result = await runBoqExtraction({
         rawPdfUrls,
         payloadUrls,
+        xlsxUrls,
         executionDurationHint: project?.details?.timeline_and_milestones?.execution_duration,
       });
 
@@ -362,8 +368,8 @@ export default function ProjectDetails() {
         return;
       }
       if (result.status === 'no_boq_found') {
-        await setDoc(latestRef, removeUndefined({ status: 'no_boq_found', updatedAt: serverTimestamp() }));
-        console.log('[BOQ] done — no BOQ', { durationMs: Date.now() - t0 });
+        await setDoc(latestRef, removeUndefined({ status: 'no_boq_found', reason: result.reason, updatedAt: serverTimestamp() }));
+        console.log('[BOQ] done — no BOQ', { reason: result.reason, durationMs: Date.now() - t0 });
         return;
       }
 

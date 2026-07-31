@@ -2339,6 +2339,16 @@ app.post("/api/analyze-tender", verifyFirebaseToken, async (req: AuthenticatedRe
           ...(Array.isArray(fileNames) && fileNames.length > 0
             ? { payloadRefNames: FieldValue.arrayUnion(...(fileNames as string[])) }
             : {}),
+          // Accumulate (never replace) raw BOQ-candidate Storage URLs — a
+          // revised BOQ file added during re-analysis must reach the
+          // deterministic extraction pipeline alongside the originals.
+          // Mirrors finalizeJob's Tier-2 update branch exactly.
+          ...(Array.isArray(rawPdfUrls) && rawPdfUrls.length > 0
+            ? { payloadRefRaw: FieldValue.arrayUnion(...(rawPdfUrls as string[])) }
+            : {}),
+          ...(Array.isArray(xlsxUrls) && xlsxUrls.length > 0
+            ? { payloadRefXlsx: FieldValue.arrayUnion(...(xlsxUrls as string[])) }
+            : {}),
           lowConfidence: isLow,
           lastReanalyzedAt: Timestamp.now(),
           analysisRuns: FieldValue.increment(1),

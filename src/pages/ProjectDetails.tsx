@@ -64,6 +64,37 @@ function friendlyAnalysisError(raw: string): string {
   return "Analysis couldn't be completed. Please try again or with smaller documents.";
 }
 
+// The full, reconstructable document set for a re-analysis request: the
+// project's ORIGINAL documents (project.payloadRef — real, durable Storage
+// URLs for every project created via TenderAnalyzer.tsx's upload flow,
+// which always uploads before analyzing) unioned with any documents added
+// later (project.sourceDocuments, accumulated by handleFileUpload). These
+// are two separate fields that were never previously combined for a
+// re-analysis request — that gap, not missing Storage persistence, is why
+// re-analysis couldn't see the full picture. Empty when neither field has
+// anything usable (e.g. an older project whose original analysis was
+// text/url-typed with no file ever stored) — callers must handle that case
+// explicitly rather than falling back to a text summary silently.
+function buildCombinedDocumentSet(project: any): { urls: string[]; names: string[] } {
+  const payloadRef = project?.payloadRef;
+  const payloadUrls: string[] = Array.isArray(payloadRef)
+    ? (payloadRef as unknown[]).filter((u): u is string => typeof u === 'string' && u.startsWith('http'))
+    : typeof payloadRef === 'string' && payloadRef.startsWith('http')
+    ? [payloadRef]
+    : [];
+  const payloadNames: string[] = Array.isArray(project?.payloadRefNames) ? project.payloadRefNames : [];
+
+  const sourceUrls: string[] = Array.isArray(project?.sourceDocuments)
+    ? (project.sourceDocuments as unknown[]).filter((u): u is string => typeof u === 'string' && u.startsWith('http'))
+    : [];
+  const sourceNames: string[] = Array.isArray(project?.sourceDocumentNames) ? project.sourceDocumentNames : [];
+
+  // sourceDocuments never contains originals (a separate field, populated
+  // only by handleFileUpload's own arrayUnion) — a plain concat is safe,
+  // no de-dup needed.
+  return { urls: [...payloadUrls, ...sourceUrls], names: [...payloadNames, ...sourceNames] };
+}
+
 function fmtDate(ts: any): string {
   if (!ts) return "";
   const d = ts?.toDate ? ts.toDate() : new Date(ts);
@@ -1030,6 +1061,16 @@ export default function ProjectDetails() {
   const handleManualReanalyze = async () => {
     if (!projectId || !project?.details) return;
 
+    // Backward-compat (older projects with no stored document URLs at
+    // all): never silently substitute a text summary for the real
+    // documents — that produces a plausible-looking but potentially wrong
+    // re-analysis. Stop with a clear, actionable message instead.
+    const combined = buildCombinedDocumentSet(project);
+    if (combined.urls.length === 0) {
+      toast.error("Original documents aren't available for this older project. Please re-upload the tender documents to re-analyze.");
+      return;
+    }
+
     setShowReanalyzeModal(false);
     setReanalyzing(true);
     try {
@@ -1039,8 +1080,9 @@ export default function ProjectDetails() {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            tenderType: Array.isArray(project.payloadRef) ? 'storage_urls' : (typeof project.payloadRef === 'string' && project.payloadRef.startsWith('http') ? 'url' : 'text'),
-            tenderContent: project.payloadRef || project.details.tender_simplified.scope_of_work,
+            tenderType: 'storage_urls',
+            tenderContent: combined.urls,
+            fileNames: combined.names,
             userProfile: JSON.stringify(businessProfile || {}),
             extraContext: payload,
             language: i18n.language,
@@ -1105,11 +1147,19 @@ export default function ProjectDetails() {
       
       try {
           const payload = `--- EXISTING PROJECT KNOWLEDGE ---\n${JSON.stringify(project.details)}\n\n--- NEW UPLOADED DOCUMENT: ${file.name} ---\nThe user uploaded this new document. Please re-analyze the entire project and output the completely updated JSON state, factoring in any changes (eligibility, dates, boq, etc).`;
-          
-          let tenderTypeToSend = "pdf";
+
           let contentToSend: string | string[] = "";
           let uploadedEntryNames: string[] = [];
-          
+          // Raw PDF bytes for digital-PDF entries, parallel to
+          // uploadedEntryNames — mirrors TenderAnalyzer.tsx's
+          // boqRawPdfBuffersRef: null for image PDFs (whose contentToSend
+          // IS already the raw bytes, no separate copy needed) or entries
+          // dropped for size; a real ArrayBuffer for digital PDFs, whose
+          // contentToSend is text-only (cost-optimised) and so needs a
+          // separate raw-bytes upload for BOQ extraction to have anything
+          // to parse.
+          const rawBuffers: (ArrayBuffer | null)[] = [];
+
           if (type === "ZIP File") {
              const zip = new JSZip();
              const contents = await zip.loadAsync(file);
@@ -1121,8 +1171,10 @@ export default function ProjectDetails() {
                    const shortName = filename.split('/').pop() || filename;
                    const arrayBuffer = await zipEntry.async("arraybuffer");
                    let dataUri: string;
+                   let isDigitalPdf = false;
                    try {
                      const extraction = await extractPdfText(arrayBuffer);
+                     isDigitalPdf = extraction.isDigital;
                      if (extraction.isDigital) {
                        console.log(`[PDF extraction] ${shortName} (ZIP) → TEXT (${extraction.charsExtracted} chars / ${extraction.pageCount} pages)`);
                        dataUri = `data:text/plain;base64,${textToBase64(extraction.text)}`;
@@ -1136,6 +1188,7 @@ export default function ProjectDetails() {
                    }
                    pdfBase64Array.push(dataUri);
                    zipEntryNames.push(shortName);
+                   rawBuffers.push(isDigitalPdf ? arrayBuffer : null);
                 }
              }
              if (pdfBase64Array.length === 0) {
@@ -1143,13 +1196,14 @@ export default function ProjectDetails() {
                  toast.error("No PDFs found in the ZIP.");
                  return;
              }
-             tenderTypeToSend = "zip";
              contentToSend = pdfBase64Array;
              uploadedEntryNames = zipEntryNames;
           } else {
              const arrayBuffer = await file.arrayBuffer();
+             let isDigitalPdf = false;
              try {
                const extraction = await extractPdfText(arrayBuffer);
+               isDigitalPdf = extraction.isDigital;
                if (extraction.isDigital) {
                  console.log(`[PDF extraction] ${file.name} → TEXT (${extraction.charsExtracted} chars / ${extraction.pageCount} pages)`);
                  contentToSend = `data:text/plain;base64,${textToBase64(extraction.text)}`;
@@ -1161,13 +1215,19 @@ export default function ProjectDetails() {
                console.warn(`[PDF extraction] ${file.name} → IMAGE fallback (extraction error)`);
                contentToSend = `data:application/pdf;base64,${arrayBufferToBase64(arrayBuffer)}`;
              }
+             rawBuffers.push(isDigitalPdf ? arrayBuffer : null);
           }
 
-          // Upload files to Firebase Storage so they appear in Source Documents
+          // Upload the new file(s) to Firebase Storage — the SAME
+          // mechanism fresh analysis uses successfully (real, durable
+          // download URLs, not base64 in the analysis request). Feeds
+          // BOTH Source Documents (existing behavior) and, from here on,
+          // the actual re-analysis request itself.
           const newSourceUrls: string[] = [];
           const newSourceNames: string[] = [];
+          const newRawPdfUrls: string[] = [];
           try {
-            const { ref: sRef, uploadString: uploadStr, getDownloadURL } = await import("firebase/storage");
+            const { ref: sRef, uploadString: uploadStr, uploadBytes: uploadBytesFn, getDownloadURL } = await import("firebase/storage");
             const { storage } = await import("../lib/firebase");
             const dataUris = Array.isArray(contentToSend) ? contentToSend as string[] : [contentToSend as string];
             for (let idx = 0; idx < dataUris.length; idx++) {
@@ -1178,38 +1238,73 @@ export default function ProjectDetails() {
               await uploadStr(fileRef, dataUris[idx], 'data_url');
               newSourceUrls.push(await getDownloadURL(fileRef));
               newSourceNames.push(entryName);
+
+              // BOQ raw-bytes upload — a separate object, only for digital
+              // PDFs whose Source-Document copy above is text-only.
+              const rawBuf = rawBuffers[idx];
+              if (rawBuf) {
+                try {
+                  const rawFileRef = sRef(storage, `users/${user?.uid}/tenders/${Date.now()}_${idx}_raw`);
+                  await uploadBytesFn(rawFileRef, new Uint8Array(rawBuf), { contentType: 'application/pdf' });
+                  newRawPdfUrls.push(await getDownloadURL(rawFileRef));
+                } catch (rawErr) {
+                  console.warn(`[BOQ] raw PDF upload failed for ${entryName}:`, rawErr);
+                }
+              }
             }
             if (newSourceUrls.length > 0 && projectId) {
-              await updateDoc(doc(db, "saved_tenders", projectId), {
+              await updateDoc(doc(db, "saved_tenders", projectId), removeUndefined({
                 sourceDocuments: arrayUnion(...newSourceUrls),
                 sourceDocumentNames: arrayUnion(...newSourceNames),
-              });
+                ...(newRawPdfUrls.length > 0 ? { payloadRefRaw: arrayUnion(...newRawPdfUrls) } : {}),
+              }));
               setProject((prev: any) => prev ? {
                 ...prev,
                 sourceDocuments: [...((prev.sourceDocuments as string[]) || []), ...newSourceUrls],
                 sourceDocumentNames: [...((prev.sourceDocumentNames as string[]) || []), ...newSourceNames],
+                ...(newRawPdfUrls.length > 0 ? { payloadRefRaw: [...((prev.payloadRefRaw as string[]) || []), ...newRawPdfUrls] } : {}),
               } : prev);
             }
           } catch (uploadErr) {
             console.warn("Source document storage upload failed — analysis will still proceed:", uploadErr);
           }
 
-          // fileNames tells the server which filenames to record in remarksHistory for this run
-          const reanalysisFileNames: string[] = uploadedEntryNames.length > 0
-            ? uploadedEntryNames
-            : [file.name];
+          // Combined document set: the project's EXISTING stored documents
+          // (originals + anything added on a previous run) plus the one(s)
+          // just uploaded above — never just the newly-added file alone,
+          // and never the pre-upload base64 (the bug this fix closes).
+          const existingCombined = buildCombinedDocumentSet(project);
+          const usingOriginalsCaveat = existingCombined.urls.length === 0 && newSourceUrls.length > 0;
+          const combinedUrls = [...existingCombined.urls, ...newSourceUrls];
+          const combinedNames = [...existingCombined.names, ...newSourceNames];
+
+          if (combinedUrls.length === 0) {
+            // Neither the project's stored originals nor this upload
+            // produced anything usable (e.g. the Storage upload above also
+            // failed) — never fall back to a text summary silently.
+            throw new Error("Original documents aren't available for this older project, and the new upload could not be stored. Please try uploading again.");
+          }
+
+          if (usingOriginalsCaveat) {
+            // Safer option (Requirement 2): analyze what we DO have — the
+            // newly-added document(s) — rather than blocking the user
+            // entirely, but say plainly that the older project's originals
+            // aren't part of this re-analysis.
+            toast('Original documents weren\'t stored for this older project — re-analysis is based on the newly added document(s) only.', { icon: 'ℹ️' });
+          }
 
           const response = await fetchWithAuth("/api/analyze-tender", {
              method: "POST",
              headers: { "Content-Type": "application/json" },
              body: JSON.stringify({
-               tenderType: Array.isArray(contentToSend) ? 'storage_urls' : (typeof contentToSend === 'string' && contentToSend.startsWith('http') ? 'url' : 'text'),
-               tenderContent: contentToSend,
+               tenderType: 'storage_urls',
+               tenderContent: combinedUrls,
+               ...(newRawPdfUrls.length > 0 ? { rawPdfUrls: newRawPdfUrls } : {}),
                userProfile: JSON.stringify(businessProfile || {}),
                extraContext: payload,
                language: i18n.language,
                projectId: projectId,
-               fileNames: reanalysisFileNames,
+               fileNames: combinedNames,
              })
           });
 
@@ -1228,13 +1323,12 @@ export default function ProjectDetails() {
             return;
           }
 
-          // Update project state
-          const updatedDetails = data.analysis;
-          setProject((prev: any) => ({ ...prev, details: updatedDetails }));
-
+          // Tier-1 — synchronous result. Re-fetch fresh rather than merging
+          // only `details` — also picks up remarksHistory/analysisRuns
+          // (Analysis Notes) and triggers BOQ extraction on the combined
+          // set through Fix 2a's gate, same as handleManualReanalyze.
           if (projectId) {
-             const docRef = doc(db, "saved_tenders", projectId);
-             await updateDoc(docRef, { details: updatedDetails, lastReanalyzedAt: serverTimestamp() });
+            await refreshProjectAfterReanalysis(projectId);
           }
           toast.success("Project completely re-analyzed with new document!");
       } catch (err: any) {

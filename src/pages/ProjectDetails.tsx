@@ -716,7 +716,7 @@ export default function ProjectDetails() {
       }
     })();
     return () => { cancelled = true; };
-  }, [i18n.language, project?.detailsLanguage, projectId]);
+  }, [i18n.language, project?.detailsLanguage, projectId, project?.lastReanalyzedAt]);
 
   // The ONLY thing the Overview tab's own report JSX should read for
   // report content — project.details itself is never mutated, so every
@@ -944,7 +944,8 @@ export default function ProjectDetails() {
       if (!response.ok) throw new Error(data.error || "Financial Re-analysis failed");
       const updatedDetails = data.analysis;
       
-      setProject((prev: any) => ({ ...prev, details: updatedDetails }));
+      const localReanalyzedAt = new Date();
+      setProject((prev: any) => ({ ...prev, details: updatedDetails, lastReanalyzedAt: localReanalyzedAt }));
       await updateDoc(docRef, { details: updatedDetails, lastReanalyzedAt: serverTimestamp() });
 
       toast.success("Calculations saved and Financial AI Risk re-analyzed!");
@@ -1144,122 +1145,159 @@ export default function ProjectDetails() {
     }
   };
 
+  // Processes ONE selected file into content entries ready for Storage
+  // upload: for a ZIP, every PDF/xlsx entry inside it; for a standalone
+  // PDF or xlsx, itself; for anything else, a best-effort single entry
+  // (matches the file's own prior fallback behavior for .doc/.docx — not
+  // changed here). Never touches Storage itself — the caller uploads.
+  const processFileForReanalysis = async (file: File): Promise<{
+    contentUris: string[];
+    entryNames: string[];
+    rawEntries: ({ kind: 'pdf' | 'xlsx'; buffer: ArrayBuffer } | null)[];
+  }> => {
+    const lowerName = file.name.toLowerCase();
+    const isZip = lowerName.endsWith('.zip') || file.type === "application/zip" || file.type === "application/x-zip-compressed";
+    const isXlsx = lowerName.endsWith('.xlsx') || lowerName.endsWith('.xls') || lowerName.endsWith('.csv');
+
+    if (isZip) {
+      const zip = new JSZip();
+      const contents = await zip.loadAsync(file);
+      const contentUris: string[] = [];
+      const entryNames: string[] = [];
+      const rawEntries: ({ kind: 'pdf' | 'xlsx'; buffer: ArrayBuffer } | null)[] = [];
+
+      for (const [filename, zipEntry] of Object.entries(contents.files)) {
+        if (zipEntry.dir) continue;
+        const lowerFilename = filename.toLowerCase();
+        if (lowerFilename.endsWith('.pdf')) {
+          const shortName = filename.split('/').pop() || filename;
+          const arrayBuffer = await zipEntry.async("arraybuffer");
+          let dataUri: string;
+          let isDigitalPdf = false;
+          try {
+            const extraction = await extractPdfText(arrayBuffer);
+            isDigitalPdf = extraction.isDigital;
+            dataUri = extraction.isDigital
+              ? `data:text/plain;base64,${textToBase64(extraction.text)}`
+              : `data:application/pdf;base64,${arrayBufferToBase64(arrayBuffer)}`;
+          } catch {
+            dataUri = `data:application/pdf;base64,${arrayBufferToBase64(arrayBuffer)}`;
+          }
+          contentUris.push(dataUri);
+          entryNames.push(shortName);
+          rawEntries.push(isDigitalPdf ? { kind: 'pdf', buffer: arrayBuffer } : null);
+        } else if (lowerFilename.endsWith('.xlsx') || lowerFilename.endsWith('.xls') || lowerFilename.endsWith('.csv')) {
+          const shortName = filename.split('/').pop() || filename;
+          const arrayBuffer = await zipEntry.async("arraybuffer");
+          try {
+            const workbook = XLSX.read(arrayBuffer, { type: "array" });
+            const allText = `\n--- CONTENT OF SPREADSHEET: ${filename} ---\n${buildXlsxAnalysisText(workbook)}`;
+            const utf8Bytes = new TextEncoder().encode(allText);
+            const base64Text = btoa(String.fromCharCode(...utf8Bytes));
+            contentUris.push(`data:text/plain;base64,${base64Text}`);
+            entryNames.push(shortName);
+            rawEntries.push({ kind: 'xlsx', buffer: arrayBuffer });
+          } catch (err) {
+            console.error(`Failed to parse spreadsheet ${filename}:`, err);
+          }
+        }
+      }
+      return { contentUris, entryNames, rawEntries };
+    }
+
+    if (isXlsx) {
+      // A revised Excel BOQ selected directly (not bundled in a ZIP) —
+      // same principle as the ZIP-entry xlsx branch: item-table-excluded
+      // text goes into the analysis content; the real bytes go to a
+      // separate BOQ-candidate upload (payloadRefXlsx), never mixed.
+      const arrayBuffer = await file.arrayBuffer();
+      const workbook = XLSX.read(arrayBuffer, { type: "array" });
+      const allText = `\n--- CONTENT OF SPREADSHEET: ${file.name} ---\n${buildXlsxAnalysisText(workbook)}`;
+      const utf8Bytes = new TextEncoder().encode(allText);
+      const base64Text = btoa(String.fromCharCode(...utf8Bytes));
+      return {
+        contentUris: [`data:text/plain;base64,${base64Text}`],
+        entryNames: [file.name],
+        rawEntries: [{ kind: 'xlsx', buffer: arrayBuffer }],
+      };
+    }
+
+    // PDF (or best-effort fallback for anything else, e.g. .doc/.docx —
+    // unchanged from the prior single-file behavior).
+    const arrayBuffer = await file.arrayBuffer();
+    let isDigitalPdf = false;
+    let dataUri: string;
+    try {
+      const extraction = await extractPdfText(arrayBuffer);
+      isDigitalPdf = extraction.isDigital;
+      dataUri = extraction.isDigital
+        ? `data:text/plain;base64,${textToBase64(extraction.text)}`
+        : `data:application/pdf;base64,${arrayBufferToBase64(arrayBuffer)}`;
+    } catch {
+      dataUri = `data:application/pdf;base64,${arrayBufferToBase64(arrayBuffer)}`;
+    }
+    return {
+      contentUris: [dataUri],
+      entryNames: [file.name],
+      rawEntries: [isDigitalPdf ? { kind: 'pdf', buffer: arrayBuffer } : null],
+    };
+  };
+
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
-      const file = e.target.files[0];
-      
-      let type = "Other";
-      if (file.name.toLowerCase().includes('corrigendum')) type = "Corrigendum";
-      else if (file.name.toLowerCase().includes('boq')) type = "BOQ";
-      else if (file.name.toLowerCase().includes('zip') || file.type === "application/zip" || file.type === "application/x-zip-compressed") type = "ZIP File";
-      else if (file.name.toLowerCase().includes('pdf') || file.type === "application/pdf") type = "Tender Document";
-      
-      const newFiles = [...uploadedFiles, { name: file.name, size: formatFileSize(file.size), type, bytes: file.size }];
+      const files = Array.from(e.target.files);
+
+      const classifyType = (f: File): string => {
+        const n = f.name.toLowerCase();
+        if (n.includes('corrigendum')) return "Corrigendum";
+        if (n.includes('boq')) return "BOQ";
+        if (n.endsWith('.zip') || f.type === "application/zip" || f.type === "application/x-zip-compressed") return "ZIP File";
+        if (n.endsWith('.xlsx') || n.endsWith('.xls') || n.endsWith('.csv')) return "Excel BOQ";
+        if (n.endsWith('.pdf') || f.type === "application/pdf") return "Tender Document";
+        return "Other";
+      };
+
+      const newFiles = [
+        ...uploadedFiles,
+        ...files.map(f => ({ name: f.name, size: formatFileSize(f.size), type: classifyType(f), bytes: f.size })),
+      ];
       setUploadedFiles(newFiles);
-      
+
       if (projectId) {
         const docRef = doc(db, "saved_tenders", projectId);
         await updateDoc(docRef, { uploadedFiles: newFiles });
       }
 
       setReanalyzing(true);
-      
+
       try {
-          const payload = `--- EXISTING PROJECT KNOWLEDGE ---\n${JSON.stringify(project.details)}\n\n--- NEW UPLOADED DOCUMENT: ${file.name} ---\nThe user uploaded this new document. Please re-analyze the entire project and output the completely updated JSON state, factoring in any changes (eligibility, dates, boq, etc).`;
+          const fileNamesList = files.map(f => f.name).join(', ');
+          const payload = `--- EXISTING PROJECT KNOWLEDGE ---\n${JSON.stringify(project.details)}\n\n--- NEW UPLOADED DOCUMENT(S): ${fileNamesList} ---\nThe user uploaded ${files.length > 1 ? 'these new documents' : 'this new document'}. Please re-analyze the entire project and output the completely updated JSON state, factoring in any changes (eligibility, dates, boq, etc).`;
 
-          let contentToSend: string | string[] = "";
-          let uploadedEntryNames: string[] = [];
-          // Raw bytes for entries needing a separate BOQ-candidate upload,
-          // parallel to uploadedEntryNames — mirrors TenderAnalyzer.tsx's
-          // boqRawPdfBuffersRef/boqXlsxCandidatesRef: null for image PDFs
-          // (whose contentToSend IS already the raw bytes, no separate copy
-          // needed); {kind:'pdf', buffer} for digital PDFs, whose
-          // contentToSend is text-only (cost-optimised) and so needs a
-          // separate raw-bytes upload for BOQ extraction to have anything
-          // to parse; {kind:'xlsx', buffer} for spreadsheet entries, which
-          // always need a separate raw upload (contentToSend for those is
-          // item-table-excluded analysis text, never the real bytes).
-          const rawBuffers: ({ kind: 'pdf' | 'xlsx'; buffer: ArrayBuffer } | null)[] = [];
-
-          if (type === "ZIP File") {
-             const zip = new JSZip();
-             const contents = await zip.loadAsync(file);
-             const pdfBase64Array: string[] = [];
-             const zipEntryNames: string[] = [];
-
-             for (const [filename, zipEntry] of Object.entries(contents.files)) {
-                if (zipEntry.dir) continue;
-                const lowerFilename = filename.toLowerCase();
-                if (lowerFilename.endsWith('.pdf')) {
-                   const shortName = filename.split('/').pop() || filename;
-                   const arrayBuffer = await zipEntry.async("arraybuffer");
-                   let dataUri: string;
-                   let isDigitalPdf = false;
-                   try {
-                     const extraction = await extractPdfText(arrayBuffer);
-                     isDigitalPdf = extraction.isDigital;
-                     if (extraction.isDigital) {
-                       console.log(`[PDF extraction] ${shortName} (ZIP) → TEXT (${extraction.charsExtracted} chars / ${extraction.pageCount} pages)`);
-                       dataUri = `data:text/plain;base64,${textToBase64(extraction.text)}`;
-                     } else {
-                       console.log(`[PDF extraction] ${shortName} (ZIP) → IMAGE fallback (${extraction.charsExtracted} chars / ${extraction.pageCount} pages)`);
-                       dataUri = `data:application/pdf;base64,${arrayBufferToBase64(arrayBuffer)}`;
-                     }
-                   } catch {
-                     console.warn(`[PDF extraction] ${shortName} (ZIP) → IMAGE fallback (extraction error)`);
-                     dataUri = `data:application/pdf;base64,${arrayBufferToBase64(arrayBuffer)}`;
-                   }
-                   pdfBase64Array.push(dataUri);
-                   zipEntryNames.push(shortName);
-                   rawBuffers.push(isDigitalPdf ? { kind: 'pdf', buffer: arrayBuffer } : null);
-                } else if (lowerFilename.endsWith('.xlsx') || lowerFilename.endsWith('.xls') || lowerFilename.endsWith('.csv')) {
-                   // A revised Excel BOQ added during re-analysis — same
-                   // principle as PDFs: item-table-excluded text goes into
-                   // the analysis content; the real bytes go to a separate
-                   // BOQ-candidate upload (payloadRefXlsx), never mixed.
-                   const shortName = filename.split('/').pop() || filename;
-                   const arrayBuffer = await zipEntry.async("arraybuffer");
-                   try {
-                     const workbook = XLSX.read(arrayBuffer, { type: "array" });
-                     const allText = `\n--- CONTENT OF SPREADSHEET: ${filename} ---\n${buildXlsxAnalysisText(workbook)}`;
-                     const utf8Bytes = new TextEncoder().encode(allText);
-                     const base64Text = btoa(String.fromCharCode(...utf8Bytes));
-                     pdfBase64Array.push(`data:text/plain;base64,${base64Text}`);
-                     zipEntryNames.push(shortName);
-                     rawBuffers.push({ kind: 'xlsx', buffer: arrayBuffer });
-                   } catch (err) {
-                     console.error(`Failed to parse spreadsheet ${filename}:`, err);
-                   }
-                }
-             }
-             if (pdfBase64Array.length === 0) {
-                 setReanalyzing(false);
-                 toast.error("No PDFs or spreadsheets found in the ZIP.");
-                 return;
-             }
-             contentToSend = pdfBase64Array;
-             uploadedEntryNames = zipEntryNames;
-          } else {
-             const arrayBuffer = await file.arrayBuffer();
-             let isDigitalPdf = false;
-             try {
-               const extraction = await extractPdfText(arrayBuffer);
-               isDigitalPdf = extraction.isDigital;
-               if (extraction.isDigital) {
-                 console.log(`[PDF extraction] ${file.name} → TEXT (${extraction.charsExtracted} chars / ${extraction.pageCount} pages)`);
-                 contentToSend = `data:text/plain;base64,${textToBase64(extraction.text)}`;
-               } else {
-                 console.log(`[PDF extraction] ${file.name} → IMAGE fallback (${extraction.charsExtracted} chars / ${extraction.pageCount} pages)`);
-                 contentToSend = `data:application/pdf;base64,${arrayBufferToBase64(arrayBuffer)}`;
-               }
-             } catch {
-               console.warn(`[PDF extraction] ${file.name} → IMAGE fallback (extraction error)`);
-               contentToSend = `data:application/pdf;base64,${arrayBufferToBase64(arrayBuffer)}`;
-             }
-             rawBuffers.push(isDigitalPdf ? { kind: 'pdf', buffer: arrayBuffer } : null);
+          // Process every selected file (not just the first) and
+          // accumulate their content entries + raw BOQ-candidate buffers
+          // across all of them before a single combined upload/request.
+          const allContentUris: string[] = [];
+          const allEntryNames: string[] = [];
+          const allRawEntries: ({ kind: 'pdf' | 'xlsx'; buffer: ArrayBuffer } | null)[] = [];
+          for (const f of files) {
+            try {
+              const result = await processFileForReanalysis(f);
+              allContentUris.push(...result.contentUris);
+              allEntryNames.push(...result.entryNames);
+              allRawEntries.push(...result.rawEntries);
+            } catch (fileErr) {
+              console.error(`Failed to process ${f.name}:`, fileErr);
+            }
           }
 
-          // Upload the new file(s) to Firebase Storage — the SAME
+          if (allContentUris.length === 0) {
+              setReanalyzing(false);
+              toast.error("No PDFs or spreadsheets found in the selected file(s).");
+              return;
+          }
+
+          // Upload every processed entry to Firebase Storage — the SAME
           // mechanism fresh analysis uses successfully (real, durable
           // download URLs, not base64 in the analysis request). Feeds
           // BOTH Source Documents (existing behavior) and, from here on,
@@ -1271,13 +1309,10 @@ export default function ProjectDetails() {
           try {
             const { ref: sRef, uploadString: uploadStr, uploadBytes: uploadBytesFn, getDownloadURL } = await import("firebase/storage");
             const { storage } = await import("../lib/firebase");
-            const dataUris = Array.isArray(contentToSend) ? contentToSend as string[] : [contentToSend as string];
-            for (let idx = 0; idx < dataUris.length; idx++) {
-              const entryName = uploadedEntryNames.length === dataUris.length
-                ? uploadedEntryNames[idx]
-                : (dataUris.length === 1 ? file.name : `${file.name} — part ${idx + 1}`);
-              const fileRef = sRef(storage, `users/${user?.uid}/tenders/${Date.now()}_${idx}_${file.name}`);
-              await uploadStr(fileRef, dataUris[idx], 'data_url');
+            for (let idx = 0; idx < allContentUris.length; idx++) {
+              const entryName = allEntryNames[idx] ?? `Document ${idx + 1}`;
+              const fileRef = sRef(storage, `users/${user?.uid}/tenders/${Date.now()}_${idx}_${entryName}`);
+              await uploadStr(fileRef, allContentUris[idx], 'data_url');
               newSourceUrls.push(await getDownloadURL(fileRef));
               newSourceNames.push(entryName);
 
@@ -1285,7 +1320,7 @@ export default function ProjectDetails() {
               // whose Source-Document copy above isn't already the real
               // bytes (digital PDFs get text there; xlsx entries always
               // get item-table-excluded text there).
-              const rawEntry = rawBuffers[idx];
+              const rawEntry = allRawEntries[idx];
               if (rawEntry) {
                 try {
                   const suffix = rawEntry.kind === 'xlsx' ? 'xlsx' : 'raw';
@@ -1391,7 +1426,8 @@ export default function ProjectDetails() {
           try {
             const docRef = doc(db, "saved_tenders", projectId);
             const currentRemarks = project?.remarks || { totalFilesProvided: 0, filesAnalyzed: 0, filesSkipped: [], notes: [] };
-            const noteText = `Re-analysis failed after uploading "${file.name}": ${friendly} The file appears in Source Documents but was not included in the analysis.`;
+            const uploadedNames = files.map(f => f.name).join(', ');
+            const noteText = `Re-analysis failed after uploading "${uploadedNames}": ${friendly} The file(s) appear in Source Documents but were not included in the analysis.`;
             const updatedRemarks = { ...currentRemarks, notes: [...(currentRemarks.notes || []), noteText] };
             await updateDoc(docRef, { remarks: updatedRemarks });
             setProject((prev: any) => prev ? { ...prev, remarks: updatedRemarks } : prev);
@@ -2292,7 +2328,7 @@ export default function ProjectDetails() {
                     <button disabled={reanalyzing} onClick={() => fileInputRef.current?.click()} className="text-indigo-600 hover:bg-indigo-50 p-2 rounded-lg transition-colors disabled:opacity-50">
                       {reanalyzing ? <Loader2 className="w-5 h-5 animate-spin" /> : <Plus className="w-5 h-5" />}
                     </button>
-                    <input type="file" ref={fileInputRef} className="hidden" accept=".pdf,.doc,.docx,.zip,application/pdf,application/zip" onChange={handleFileUpload} />
+                    <input type="file" ref={fileInputRef} className="hidden" multiple accept=".pdf,.doc,.docx,.zip,.xlsx,.xls,.csv,application/pdf,application/zip,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={handleFileUpload} />
                  </div>
                  <div className="p-5">
                     {uploadedFiles.length === 0 ? (

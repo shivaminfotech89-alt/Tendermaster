@@ -31,6 +31,7 @@ import { extractBoqWithFallback } from "../services/boqExtractionOrchestrator";
 import { extractBoqFromExcelWithVerification } from "../services/boqExcelExtractionOrchestrator";
 import { buildAnalysisText as buildXlsxAnalysisText } from "../services/boqExcelExtractService";
 import { decideBoqReplacement } from "../lib/boq/boqReplacementGate";
+import { driveAnalysisJob } from "../lib/analysisJobDriver";
 
 const CollapsibleSection = ({ title, defaultOpen = true, children }: { title: string, defaultOpen?: boolean, children: React.ReactNode }) => {
   const [isOpen, setIsOpen] = useState(defaultOpen);
@@ -172,17 +173,6 @@ export default function TenderAnalyzer() {
   // If a job is 'running' and its startedAt is older than this, treat it as
   // abandoned — mirrors BOQViewer's STALE_MS convention for the same reason.
   const JOB_STALE_MS = 5 * 60_000;
-  // noMoreClaimable means a chunk is stuck 'running' server-side but not yet
-  // past the server's own CHUNK_STALE_MS (3 min) reclaim window — NOT that
-  // the job is done. Waiting and retrying (rather than silently giving up)
-  // lets the loop pick the chunk back up the moment it becomes reclaimable,
-  // with no page reload required. Bounded so a genuinely wedged job doesn't
-  // spin forever — 16 retries x 15s = 4 minutes, comfortably past the
-  // server's 3-minute window with margin, and just under the 5-minute
-  // JOB_STALE_MS above, so the existing stale-job Resume UI is already the
-  // visible backstop by the time this gives up.
-  const NO_MORE_CLAIMABLE_RETRY_DELAY_MS = 15_000;
-  const NO_MORE_CLAIMABLE_MAX_RETRIES = 16;
 
   const [analyzedPayload, setAnalyzedPayload] = useState<any>(null);
   const [docExported, setDocExported] = useState(false);
@@ -1063,61 +1053,6 @@ export default function TenderAnalyzer() {
       setAnalyzing(false);
       setAnalyzeStage('');
       setUploadPercent(0);
-    }
-  };
-
-  // Drives a Tier-2 job's chunks sequentially — client-driven by design,
-  // matching the approved architecture: no fire-and-forget, the browser
-  // holds each chunk's request open for its full duration, and awaits it
-  // before requesting the next (no concurrency in this step). The SERVER
-  // decides which chunk is "next" on every call (see
-  // /api/process-analysis-job's claim logic) — this loop's only job is to
-  // keep calling until told there's nothing left to do. The onSnapshot
-  // listener below is the actual source of truth for UI state; this loop's
-  // own responses are only used to decide when to stop looping.
-  const driveAnalysisJob = async (jobId: string) => {
-    let noMoreClaimableStreak = 0;
-    for (;;) {
-      try {
-        const res = await fetchWithAuth('/api/process-analysis-job', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ jobId }),
-        });
-        const resText = await res.text();
-        let resData: any = null;
-        try { resData = JSON.parse(resText); } catch { /* onSnapshot still reflects real status */ }
-        if (!res.ok) {
-          console.error('[TenderAnalyzer] process-analysis-job failed:', resData?.error);
-          return; // the affected chunk's/job's failure state is written server-side; stop looping
-        }
-        if (
-          resData?.jobStatus === 'blocked' ||
-          resData?.jobStatus === 'done' ||
-          resData?.jobStatus === 'failed' ||
-          resData?.jobStatus === 'abandoned'
-        ) {
-          return;
-        }
-        if (resData?.noMoreClaimable) {
-          // A chunk is stuck 'running' but not yet past the server's own
-          // stale-reclaim window — this is NOT the job finishing, just
-          // nothing claimable RIGHT NOW. Silently stopping here would leave
-          // the user staring at a dead progress bar with no way forward
-          // short of a manual page reload. Wait and retry instead, bounded
-          // so a genuinely wedged job doesn't spin forever — see the
-          // NO_MORE_CLAIMABLE_* constants above.
-          noMoreClaimableStreak++;
-          if (noMoreClaimableStreak > NO_MORE_CLAIMABLE_MAX_RETRIES) return;
-          await new Promise(r => setTimeout(r, NO_MORE_CLAIMABLE_RETRY_DELAY_MS));
-          continue;
-        }
-        noMoreClaimableStreak = 0;
-        // Otherwise: one chunk was processed (or reclaimed) — loop for the next.
-      } catch (e) {
-        console.error('[TenderAnalyzer] process-analysis-job request failed:', e);
-        return; // user can Resume manually via the stale-UI path below
-      }
     }
   };
 

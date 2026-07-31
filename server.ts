@@ -1393,12 +1393,15 @@ async function createTier2Job(
     language: string | null;
     extraContext: string | null;
     userProjectName: string | null;
+    /** Fix 2b — set only for a re-analysis. Tells finalizeJob to UPDATE
+     *  this existing project instead of creating a new one. */
+    existingProjectId: string | null;
   },
 ): Promise<
   | { ok: true; jobId: string; chunkCount: number }
   | { ok: false; status: number; error: string }
 > {
-  const { uid, tenderType, actualContent, fileNames, rawPdfUrls, xlsxUrls, userProfile, language, extraContext, userProjectName } = params;
+  const { uid, tenderType, actualContent, fileNames, rawPdfUrls, xlsxUrls, userProfile, language, extraContext, userProjectName, existingProjectId } = params;
 
   const { entries, notes, totalFilesProvided, filesAnalyzed, filesSkipped } = await fetchTier2FileEntries(tenderType, actualContent, fileNames);
   const chunkPlan = planTier2Chunks(entries);
@@ -1452,6 +1455,7 @@ async function createTier2Job(
       // a separate additive BOQ-candidate source alongside PDFs.
       xlsxUrls: Array.isArray(xlsxUrls) && xlsxUrls.length > 0 ? xlsxUrls : null,
       projectName: (typeof userProjectName === "string" && userProjectName.trim()) ? userProjectName.trim() : null,
+      existingProjectId: existingProjectId || null,
     },
   });
   chunkPlan.forEach((chunk, index) => {
@@ -2050,16 +2054,10 @@ app.post("/api/analyze-tender", verifyFirebaseToken, async (req: AuthenticatedRe
     // OR too many tokens; neither check can be bypassed by the other. Only
     // storage_urls carries a knowable file count up front (URLs are cheap
     // to count; other tenderTypes are single documents). No file is ever
-    // skipped for count reasons: over the safe count routes to Tier-2 for
-    // new analyses, or is rejected with a clear, actionable error for
-    // re-analysis (Tier-2 doesn't support re-analysis yet — a separate,
-    // deliberately out-of-scope feature, not silently dropped content).
+    // skipped for count reasons — over the safe count routes to Tier-2,
+    // for BOTH new analyses and re-analysis (Fix 2b) — createTier2Job's
+    // existingProjectId param decides create-vs-update in finalizeJob.
     if (tenderType === "storage_urls" && Array.isArray(actualContent) && actualContent.length > TIER1_SAFE_FILE_COUNT) {
-      if (isReanalysis) {
-        return res.status(413).json({
-          error: "Too many files to add in one re-analysis — please combine into fewer PDFs or contact support.",
-        });
-      }
       const result = await createTier2Job(db, {
         uid,
         tenderType,
@@ -2071,6 +2069,7 @@ app.post("/api/analyze-tender", verifyFirebaseToken, async (req: AuthenticatedRe
         language: language ?? null,
         extraContext: req.body.extraContext ?? null,
         userProjectName,
+        existingProjectId: isReanalysis ? existingProjectId : null,
       });
       if (result.ok === false) return res.status(result.status).json({ error: result.error });
       return res.json({ tier: 2, jobId: result.jobId, chunkCount: result.chunkCount });
@@ -2230,14 +2229,16 @@ app.post("/api/analyze-tender", verifyFirebaseToken, async (req: AuthenticatedRe
     // (c) Token estimate for text content (chars ÷ 4, 10 % headroom below 1 M limit)
     const estimatedTokens = Math.round(totalTextChars / 4);
     if (estimatedTokens > TIER2_TOKEN_THRESHOLD) {
-      // Tier 2 (large-tender async job) — Step A scope: only for NEW analyses
-      // on the storage_urls/url/text paths, whose request content is small
-      // enough (URL strings, or text already under the token cap above) to
-      // store directly in the analysis_jobs doc. Re-analysis and the
-      // inline-base64 pdf/pdfs/zip paths keep today's exact reject below —
-      // widening Tier 2 to those is a separate, later step, not this one.
+      // Tier 2 (large-tender async job) — on the storage_urls/url/text
+      // paths, whose request content is small enough (URL strings, or text
+      // already under the token cap above) to store directly in the
+      // analysis_jobs doc. The inline-base64 pdf/pdfs/zip paths keep
+      // today's exact reject below — those aren't small enough to persist
+      // on a job doc; widening Tier 2 to them is a separate, later step.
+      // Re-analysis is included (Fix 2b) — existingProjectId decides
+      // create-vs-update in finalizeJob.
       const jobifiableType = tenderType === "storage_urls" || tenderType === "url" || tenderType === "text";
-      if (!isReanalysis && jobifiableType) {
+      if (jobifiableType) {
         // This is the SECOND, independent Tier-2 trigger (token volume) —
         // the file-count trigger above already handled storage_urls
         // submissions over TIER1_SAFE_FILE_COUNT before we ever got here,
@@ -2257,6 +2258,7 @@ app.post("/api/analyze-tender", verifyFirebaseToken, async (req: AuthenticatedRe
           language: language ?? null,
           extraContext: req.body.extraContext ?? null,
           userProjectName,
+          existingProjectId: isReanalysis ? existingProjectId : null,
         });
         if (result.ok === false) return res.status(result.status).json({ error: result.error });
         return res.json({ tier: 2, jobId: result.jobId, chunkCount: result.chunkCount });
@@ -2708,7 +2710,7 @@ async function finalizeJob(
   }
 
   const uid: string = job.uid;
-  const { tenderType, tenderContent, fileNames, rawPdfUrls, xlsxUrls, projectName, language } = job.request;
+  const { tenderType, tenderContent, fileNames, rawPdfUrls, xlsxUrls, projectName, language, existingProjectId } = job.request;
   const payloadRef =
     tenderType === "storage_urls" || tenderType === "url"
       ? tenderContent
@@ -2716,12 +2718,75 @@ async function finalizeJob(
         ? String(tenderContent).slice(0, 2000)
         : "Document";
 
+  // Fix 2b — a re-analysis job (existingProjectId set) UPDATES the project
+  // it was created against instead of creating a new one. Every write
+  // below this point — success or failure — reflects that branch.
+  const isReanalysis = !!existingProjectId;
   const userRef = db.collection("users").doc(uid);
-  const projectRef = db.collection("saved_tenders").doc();
-  const newProjectId = projectRef.id;
+  const projectRef = isReanalysis
+    ? db.collection("saved_tenders").doc(existingProjectId)
+    : db.collection("saved_tenders").doc();
+  const finalProjectId = isReanalysis ? existingProjectId : projectRef.id;
 
   try {
     await db.runTransaction(async (tx) => {
+      if (isReanalysis) {
+        // ── UPDATE existing project — never creates a duplicate ──────────
+        const existingSnap = await tx.get(projectRef);
+        if (!existingSnap.exists) throw new Error("PROJECT_NOT_FOUND");
+        const existingData = existingSnap.data() as Record<string, any>;
+        if (existingData.userId !== uid) throw new Error("PROJECT_ACCESS_DENIED");
+
+        // Cumulative remarksHistory — byte-identical construction to the
+        // Tier-1 synchronous re-analysis path (server.ts, isReanalysis
+        // branch above) so Analysis Notes renders both the same way.
+        const existingHistory: any[] = Array.isArray(existingData.remarksHistory) ? existingData.remarksHistory : [];
+        const baseHistory: any[] =
+          existingHistory.length === 0 && existingData.remarks
+            ? [{
+                run: 1,
+                at: existingData.savedAt ?? null,
+                fileNames: existingData.payloadRefNames ?? [],
+                ...existingData.remarks,
+              }]
+            : existingHistory;
+        const runFileNames: string[] =
+          Array.isArray(fileNames) && fileNames.length > 0
+            ? fileNames as string[]
+            : (existingData.payloadRefNames ?? []);
+        const runNumber = (existingData.analysisRuns ?? 1) + 1;
+        const newRun = { run: runNumber, at: Timestamp.now(), fileNames: runFileNames, ...remarks };
+
+        // No credit check/deduction — re-analysis never spends credits,
+        // only counts against the 5-run cap, already validated before this
+        // job was ever created. projectName, boq, payments, and
+        // bid_snapshots are never referenced below — preserved by omission,
+        // matching the Tier-1 sync path's own discipline exactly.
+        tx.update(projectRef, {
+          details: parsedData,
+          detailsLanguage: language ?? "en",
+          remarks,
+          remarksHistory: [...baseHistory, newRun],
+          ...(Array.isArray(fileNames) && fileNames.length > 0
+            ? { payloadRefNames: FieldValue.arrayUnion(...(fileNames as string[])) }
+            : {}),
+          // Accumulate (never replace) raw BOQ-candidate Storage URLs — a
+          // revised BOQ file added during re-analysis must reach the
+          // deterministic extraction pipeline alongside the originals.
+          ...(Array.isArray(rawPdfUrls) && rawPdfUrls.length > 0
+            ? { payloadRefRaw: FieldValue.arrayUnion(...(rawPdfUrls as string[])) }
+            : {}),
+          ...(Array.isArray(xlsxUrls) && xlsxUrls.length > 0
+            ? { payloadRefXlsx: FieldValue.arrayUnion(...(xlsxUrls as string[])) }
+            : {}),
+          lowConfidence: isLow,
+          lastReanalyzedAt: Timestamp.now(),
+          analysisRuns: FieldValue.increment(1),
+        });
+        return;
+      }
+
+      // ── CREATE new project (unchanged) ──────────────────────────────────
       const userSnap = await tx.get(userRef);
       const userData = userSnap.data() || {};
       const creditsTotal: number = userData.creditsTotal ?? 0;
@@ -2765,10 +2830,25 @@ async function finalizeJob(
       await jobRef.update({ status: "failed", reason: "CREDITS_EXHAUSTED", chunksDone: finalChunksDone, chunksFailed: finalChunksFailed, updatedAt: Timestamp.now() });
       return { jobStatus: "failed", reason: "CREDITS_EXHAUSTED" };
     }
+    if (txErr.message === "PROJECT_NOT_FOUND" || txErr.message === "PROJECT_ACCESS_DENIED") {
+      // Existing project + its BOQ + bid are completely untouched — this
+      // threw before any write was made, same guarantee as every other
+      // failure branch above.
+      await jobRef.update({ status: "failed", reason: txErr.message, chunksDone: finalChunksDone, chunksFailed: finalChunksFailed, updatedAt: Timestamp.now() });
+      return { jobStatus: "failed", reason: txErr.message };
+    }
     console.error("[finalizeJob] Save transaction failed:", txErr);
     const reason = `Save failed: ${String(txErr?.message || txErr).slice(0, 300)}`;
     await jobRef.update({ status: "failed", reason, chunksDone: finalChunksDone, chunksFailed: finalChunksFailed, updatedAt: Timestamp.now() });
     return { jobStatus: "failed", reason };
+  }
+
+  if (isReanalysis) {
+    // The underlying analysis just changed — any cached translated reports
+    // now describe a stale analysis. Best-effort, same as the Tier-1 sync
+    // path: a failure here shouldn't fail the reanalysis itself.
+    await invalidateLanguageCache(db, existingProjectId).catch((e) =>
+      console.error("[finalizeJob] Failed to invalidate language cache:", e));
   }
 
   // Persists the TRUE final terminal counts (computed once, above) — the
@@ -2779,7 +2859,7 @@ async function finalizeJob(
   // operates on the fresh, correct chunkDocs passed in above.
   await jobRef.update({
     status: "done",
-    projectId: newProjectId,
+    projectId: finalProjectId,
     details: parsedData,
     remarks,
     lowConfidence: isLow,
@@ -2788,10 +2868,10 @@ async function finalizeJob(
     updatedAt: Timestamp.now(),
   });
 
-  logUsageEvent({ uid, type: "analysis", projectId: newProjectId, success: true, lowConfidence: isLow });
+  logUsageEvent({ uid, type: isReanalysis ? "reanalysis" : "analysis", projectId: finalProjectId, success: true, lowConfidence: isLow });
 
   return {
-    jobStatus: "done", projectId: newProjectId, details: parsedData, remarks, lowConfidence: isLow,
+    jobStatus: "done", projectId: finalProjectId, details: parsedData, remarks, lowConfidence: isLow,
     chunkCount: job.chunkCount, chunksDone: finalChunksDone, chunksFailed: finalChunksFailed,
   };
 }

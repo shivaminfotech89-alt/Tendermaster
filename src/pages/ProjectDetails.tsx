@@ -29,6 +29,7 @@ import { buildRateContractHint, resolveRateContractRevenue } from "../lib/boq/de
 import { inferLegacyConfirmations } from "../lib/boq/confirmationMigration";
 import { computeBidPrintSummary } from "../lib/boq/printSummary";
 import { decideBoqReplacement } from "../lib/boq/boqReplacementGate";
+import { driveAnalysisJob } from "../lib/analysisJobDriver";
 
 function formatFileSize(bytes: number): string {
   if (bytes >= 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
@@ -943,14 +944,97 @@ export default function ProjectDetails() {
     }
   };
 
+  // Re-reads the project doc fresh after a successful re-analysis (sync
+  // Tier-1 or completed Tier-2 job) and merges only the fields re-analysis
+  // is documented to touch — details, remarks/remarksHistory,
+  // payloadRefNames/Raw/Xlsx, detailsLanguage, lowConfidence,
+  // lastReanalyzedAt, analysisRuns. Never a blanket replace: boq/materials/
+  // labour/etc. are preserved by simply not being in this list, so a
+  // concurrent live edit elsewhere on the page can't be clobbered by a
+  // stale snapshot. Also the fix for the Analysis Notes panel showing
+  // stale file history — the old code only ever merged `details`.
+  const refreshProjectAfterReanalysis = async (targetProjectId: string) => {
+    const freshSnap = await getDoc(doc(db, "saved_tenders", targetProjectId));
+    if (!freshSnap.exists()) return;
+    const fresh = freshSnap.data() as any;
+    setProject((prev: any) => (prev ? {
+      ...prev,
+      details: fresh.details,
+      detailsLanguage: fresh.detailsLanguage,
+      remarks: fresh.remarks,
+      remarksHistory: fresh.remarksHistory,
+      payloadRefNames: fresh.payloadRefNames,
+      payloadRefRaw: fresh.payloadRefRaw,
+      payloadRefXlsx: fresh.payloadRefXlsx,
+      lowConfidence: fresh.lowConfidence,
+      lastReanalyzedAt: fresh.lastReanalyzedAt,
+      analysisRuns: fresh.analysisRuns,
+    } : fresh));
+    // The revised analysis may have brought a revised BOQ file along with
+    // it — runs through Fix 2a's decideBoqReplacement gate exactly like a
+    // manual re-extract, so a priced active BOQ is never silently replaced.
+    handleManualBoqExtract().catch((e) => console.error('[ProjectDetails] post-reanalysis BOQ extraction failed', e));
+  };
+
+  // Drives a large re-analysis's Tier-2 job to completion and resolves once
+  // it reaches a terminal state — never throws for an expected outcome
+  // (done/failed/blocked/abandoned), so handleManualReanalyze's `finally`
+  // only fires once the whole thing is actually settled. Deliberately
+  // simpler than TenderAnalyzer.tsx's full blocked-chunk Retry/Abandon/
+  // Proceed-without UI: a blocked/failed large re-analysis here just
+  // reports as failed (existing project + BOQ + bid fully untouched, per
+  // Fix 2b's transaction guarantee) rather than offering granular per-
+  // chunk resolution — the user can retry the whole re-analysis.
+  const driveReanalysisJob = (jobId: string): Promise<void> => {
+    return new Promise<void>((resolve) => {
+      let settled = false;
+      const jobRef = doc(db, 'analysis_jobs', jobId);
+      const unsub = onSnapshot(
+        jobRef,
+        async (snap) => {
+          if (settled || !snap.exists()) return;
+          const data = snap.data() as any;
+          if (data.status === 'done') {
+            settled = true;
+            unsub();
+            if (data.projectId) {
+              await refreshProjectAfterReanalysis(data.projectId);
+              toast.success("Large re-analysis complete!");
+            }
+            resolve();
+          } else if (data.status === 'failed') {
+            settled = true;
+            unsub();
+            toast.error(friendlyAnalysisError(data.reason || 'Re-analysis failed'));
+            resolve();
+          } else if (data.status === 'blocked' || data.status === 'abandoned') {
+            settled = true;
+            unsub();
+            toast.error('Large re-analysis could not complete automatically — please try again, or with fewer/smaller documents.');
+            resolve();
+          }
+          // 'queued'/'running' — keep waiting.
+        },
+        (err) => {
+          if (settled) return;
+          settled = true;
+          console.error('[ProjectDetails] reanalysis job snapshot error', err);
+          toast.error('Lost connection while re-analyzing. Please check back shortly.');
+          resolve();
+        },
+      );
+      driveAnalysisJob(jobId).catch((e) => console.error('[ProjectDetails] driveAnalysisJob error', e));
+    });
+  };
+
   const handleManualReanalyze = async () => {
     if (!projectId || !project?.details) return;
-    
+
     setShowReanalyzeModal(false);
     setReanalyzing(true);
     try {
         const payload = `--- CURRENT STATE TO BE IMPROVED ---\n${JSON.stringify(project.details)}\n\nPlease re-analyze this tender from scratch and return the JSON. Ensure risk values and projections are thoroughly detailed.`;
-        
+
         const response = await fetchWithAuth("/api/analyze-tender", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -972,13 +1056,16 @@ export default function ProjectDetails() {
           throw new Error(`The document is too large or the analysis took too long for Vercel limits (60s). Please try a smaller document or check back later.`);
         }
         if (!response.ok) throw new Error(data.error || "Re-analysis failed");
-        
-        const updatedDetails = data.analysis;
-        setProject((prev: any) => ({ ...prev, details: updatedDetails }));
 
-        const docRef = doc(db, "saved_tenders", projectId);
-        await updateDoc(docRef, { details: updatedDetails, lastReanalyzedAt: serverTimestamp() });
+        if (data.tier === 2 && data.jobId) {
+          // Large re-analysis — routed to Tier-2 (Fix 2b). Drive it to
+          // completion; driveReanalysisJob owns its own success/failure UX.
+          await driveReanalysisJob(data.jobId);
+          return;
+        }
 
+        // Tier-1 — synchronous result (unchanged path).
+        await refreshProjectAfterReanalysis(projectId);
         toast.success("Project thoroughly re-analyzed!");
     } catch (e: any) {
         console.error(e);
@@ -1134,7 +1221,13 @@ export default function ProjectDetails() {
             throw new Error(`The document is too large or the analysis took too long for Vercel limits (60s). Please try a smaller document or check back later.`);
           }
           if (!response.ok) throw new Error(data.error || "Re-analysis failed");
-          
+
+          if (data.tier === 2 && data.jobId) {
+            // Large re-analysis — routed to Tier-2 (Fix 2b).
+            await driveReanalysisJob(data.jobId);
+            return;
+          }
+
           // Update project state
           const updatedDetails = data.analysis;
           setProject((prev: any) => ({ ...prev, details: updatedDetails }));

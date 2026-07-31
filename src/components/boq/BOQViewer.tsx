@@ -38,6 +38,14 @@ interface BOQMeta {
   parserDurationMs: number;
 }
 
+interface PendingBoq {
+  itemCount: number;
+  totalAmount: number;
+  engine: string;
+  verificationScore: number;
+  dismissedAt?: any;
+}
+
 interface BOQViewerProps {
   projectId: string;
   onProceedToPricing: () => void;
@@ -72,6 +80,14 @@ interface BOQViewerProps {
    *  summary strip below, to show a loading state instead of the "Confirm
    *  in the Bid Engine tab" hint while a value may still be on its way. */
   scheduleBLoading?: boolean;
+  /** Applies the pending revised BOQ (boq_extraction/pending) as the new
+   *  active BOQ — only ever called after the user has explicitly confirmed
+   *  in the warning dialog this component renders. */
+  onApplyPendingBoq?: () => Promise<void>;
+  /** Dismisses the pending-revision notice without applying it — the
+   *  active, priced BOQ is untouched; the pending record itself is kept
+   *  (marked dismissed) so it can still be reviewed later, not deleted. */
+  onDismissPendingBoq?: () => Promise<void>;
 }
 
 const GRID_LABELS: Record<'item_rate' | 'lump_sum_epc', PricingGridLabels> = {
@@ -162,7 +178,7 @@ function ErrorUI({
   );
 }
 
-export default function BOQViewer({ projectId, onProceedToPricing, onManualExtract, boqType, boq, onItemRateTotalsChange, onQuantitySignal, onScheduleSumChange, tenderValue, scheduleBLoading = false }: BOQViewerProps) {
+export default function BOQViewer({ projectId, onProceedToPricing, onManualExtract, boqType, boq, onItemRateTotalsChange, onQuantitySignal, onScheduleSumChange, tenderValue, scheduleBLoading = false, onApplyPendingBoq, onDismissPendingBoq }: BOQViewerProps) {
   const [status, setStatus] = useState<ExtractionStatus>('loading');
   const [items, setItems] = useState<BoqItem[]>([]);
   const isGridMode = boqType === 'item_rate' || boqType === 'lump_sum_epc';
@@ -170,6 +186,10 @@ export default function BOQViewer({ projectId, onProceedToPricing, onManualExtra
   const { pricing, saveState, updateItem } = usePricingAutosave(isGridMode ? projectId : undefined);
   const [meta, setMeta] = useState<BOQMeta | null>(null);
   const [failReason, setFailReason] = useState('');
+  const [pendingBoq, setPendingBoq] = useState<PendingBoq | null>(null);
+  const [showPendingWarning, setShowPendingWarning] = useState(false);
+  const [applyingPending, setApplyingPending] = useState(false);
+  const [dismissingPending, setDismissingPending] = useState(false);
   // Set only for an xlsx source that was read (its content already folded
   // into the tender analysis) but had no sheet clearing the BOQ-recognition
   // bar — lets the no_boq_found view say so explicitly instead of showing
@@ -244,6 +264,26 @@ export default function BOQViewer({ projectId, onProceedToPricing, onManualExtra
     return () => unsub();
   }, [projectId]);
 
+  // A revised BOQ awaiting explicit user confirmation — never applied
+  // automatically. Read-only here; the actual apply/dismiss writes happen
+  // in the parent (ProjectDetails.tsx), which owns boq/handleBoqChange.
+  useEffect(() => {
+    const pendingRef = doc(db, 'saved_tenders', projectId, 'boq_extraction', 'pending');
+    const unsub = onSnapshot(pendingRef, (snap) => {
+      if (!snap.exists()) { setPendingBoq(null); return; }
+      const data = snap.data() as any;
+      if (data.status !== 'pending_review') { setPendingBoq(null); return; }
+      setPendingBoq({
+        itemCount: data.itemCount ?? 0,
+        totalAmount: data.totalAmount ?? 0,
+        engine: data.engine ?? 'deterministic',
+        verificationScore: data.verificationScore ?? 0,
+        dismissedAt: data.dismissedAt,
+      });
+    });
+    return () => unsub();
+  }, [projectId]);
+
   // Timeout guard: if status stays 'running', fire after (BOQ_TIMEOUT_MS - elapsed).
   // Depends on startedAtMs so reconnects don't restart the clock from zero.
   useEffect(() => {
@@ -287,6 +327,31 @@ export default function BOQViewer({ projectId, onProceedToPricing, onManualExtra
       setFailReason(e?.message ?? 'Refresh failed');
     } finally {
       setRefreshing(false);
+    }
+  };
+
+  const handleConfirmApplyPending = async () => {
+    if (!onApplyPendingBoq) return;
+    setApplyingPending(true);
+    try {
+      await onApplyPendingBoq();
+      setShowPendingWarning(false);
+    } catch (e) {
+      console.error('[BOQViewer] failed to apply pending BOQ', e);
+    } finally {
+      setApplyingPending(false);
+    }
+  };
+
+  const handleDeclinePending = async () => {
+    if (!onDismissPendingBoq) return;
+    setDismissingPending(true);
+    try {
+      await onDismissPendingBoq();
+    } catch (e) {
+      console.error('[BOQViewer] failed to dismiss pending BOQ', e);
+    } finally {
+      setDismissingPending(false);
     }
   };
 
@@ -607,6 +672,79 @@ export default function BOQViewer({ projectId, onProceedToPricing, onManualExtra
   return (
     <div className="space-y-6">
       <ReferenceBoqBanner />
+
+      {pendingBoq && !pendingBoq.dismissedAt && (
+        <div className="bg-amber-50 border border-amber-300 rounded-xl p-4 flex items-start gap-3">
+          <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-bold text-amber-900">A revised BOQ was detected</p>
+            <p className="text-xs text-amber-700 mt-0.5">
+              {pendingBoq.itemCount} item{pendingBoq.itemCount === 1 ? '' : 's'} found — different from your current active BOQ ({meta?.itemCount ?? items.length} item{(meta?.itemCount ?? items.length) === 1 ? '' : 's'}). Your current BOQ is unchanged and still active.
+            </p>
+          </div>
+          <button
+            onClick={() => setShowPendingWarning(true)}
+            className="shrink-0 px-3 py-1.5 text-xs font-semibold rounded-lg bg-amber-600 hover:bg-amber-700 text-white transition-colors"
+          >
+            Review
+          </button>
+        </div>
+      )}
+      {pendingBoq && pendingBoq.dismissedAt && (
+        <button
+          onClick={() => setShowPendingWarning(true)}
+          className="text-xs text-amber-700 hover:text-amber-900 underline flex items-center gap-1"
+        >
+          <AlertTriangle className="w-3.5 h-3.5" />
+          A revised BOQ is available for review ({pendingBoq.itemCount} items)
+        </button>
+      )}
+
+      {showPendingWarning && pendingBoq && (
+        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full p-6 space-y-4">
+            <h3 className="text-lg font-bold text-slate-900">Apply revised BOQ?</h3>
+            <p className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg p-3">
+              Applying this revised BOQ will change your BOQ items and Schedule-B amount, and recalculate your bid — your entered rates and quoted amount may change.
+            </p>
+            <div className="grid grid-cols-2 gap-3 text-sm">
+              <div className="border border-slate-200 rounded-lg p-3">
+                <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">Current (active)</p>
+                <p className="font-bold text-slate-800">{meta?.itemCount ?? items.length} items</p>
+                <p className="text-slate-500">{fmtIndian(meta?.totalAmount ?? 0)}</p>
+              </div>
+              <div className="border border-amber-300 bg-amber-50 rounded-lg p-3">
+                <p className="text-xs font-semibold text-amber-600 uppercase tracking-wide mb-1">Revised</p>
+                <p className="font-bold text-amber-900">{pendingBoq.itemCount} items</p>
+                <p className="text-amber-700">{fmtIndian(pendingBoq.totalAmount)}</p>
+              </div>
+            </div>
+            <div className="flex gap-3 pt-2">
+              <button
+                onClick={() => setShowPendingWarning(false)}
+                disabled={applyingPending || dismissingPending}
+                className="flex-1 py-2.5 rounded-xl border border-slate-200 text-slate-600 font-semibold text-sm hover:bg-slate-50 disabled:opacity-50 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleDeclinePending}
+                disabled={applyingPending || dismissingPending}
+                className="flex-1 py-2.5 rounded-xl border border-slate-200 text-slate-600 font-semibold text-sm hover:bg-slate-50 disabled:opacity-50 transition-colors"
+              >
+                {dismissingPending ? 'Keeping current…' : 'Keep current BOQ'}
+              </button>
+              <button
+                onClick={handleConfirmApplyPending}
+                disabled={applyingPending || dismissingPending}
+                className="flex-1 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-semibold text-sm disabled:opacity-50 transition-colors"
+              >
+                {applyingPending ? 'Applying…' : 'Apply revised BOQ'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Summary cards */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">

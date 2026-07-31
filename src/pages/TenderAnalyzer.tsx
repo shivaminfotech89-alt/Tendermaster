@@ -30,6 +30,7 @@ import { removeUndefined } from "../lib/firestore";
 import { extractBoqWithFallback } from "../services/boqExtractionOrchestrator";
 import { extractBoqFromExcelWithVerification } from "../services/boqExcelExtractionOrchestrator";
 import { buildAnalysisText as buildXlsxAnalysisText } from "../services/boqExcelExtractService";
+import { decideBoqReplacement } from "../lib/boq/boqReplacementGate";
 
 const CollapsibleSection = ({ title, defaultOpen = true, children }: { title: string, defaultOpen?: boolean, children: React.ReactNode }) => {
   const [isOpen, setIsOpen] = useState(defaultOpen);
@@ -823,6 +824,13 @@ export default function TenderAnalyzer() {
           (async () => {
             const latestRef = doc(db, 'saved_tenders', projectId, 'boq_extraction', 'latest');
             try {
+              // Captured BEFORE 'running' overwrites the slot. For a brand-new
+              // project this is always null (nothing to protect yet), but the
+              // same gate applies unconditionally for consistency with the
+              // other two write sites.
+              const existingSnap = await getDoc(latestRef);
+              const existingData = existingSnap.exists() ? (existingSnap.data() as any) : null;
+
               await setDoc(latestRef, removeUndefined({ status: 'running', startedAt: serverTimestamp() }));
 
               // Run on all candidates; keep the result with the highest verification score.
@@ -880,7 +888,9 @@ export default function TenderAnalyzer() {
               }
 
               if (!best) {
-                await setDoc(latestRef, removeUndefined({ status: 'no_boq_found', reason: xlsxNotRecognizedReason ?? undefined, updatedAt: serverTimestamp() }));
+                await setDoc(latestRef, existingData
+                  ? removeUndefined({ ...existingData, updatedAt: serverTimestamp() })
+                  : removeUndefined({ status: 'no_boq_found', reason: xlsxNotRecognizedReason ?? undefined, updatedAt: serverTimestamp() }));
                 return;
               }
 
@@ -897,7 +907,9 @@ export default function TenderAnalyzer() {
               // Never display a failed-verification result — it means the extracted data is
               // untrustworthy (score 0 = critical check failed, e.g. reconciliation mismatch).
               if (!verification.pass) {
-                if (maxPageCount > visionPageCap) {
+                if (existingData) {
+                  await setDoc(latestRef, removeUndefined({ ...existingData, updatedAt: serverTimestamp() }));
+                } else if (maxPageCount > visionPageCap) {
                   await setDoc(latestRef, removeUndefined({
                     status: 'failed',
                     reason: `Document has ${maxPageCount} pages, which exceeds the ${visionPageCap}-page AI verification limit.`,
@@ -924,6 +936,35 @@ export default function TenderAnalyzer() {
               }
 
               const totalAmount = extraction.items.reduce((s, it) => s + (it.amount ?? 0), 0);
+
+              const decision = decideBoqReplacement(
+                { itemCount: extraction.items.length, totalAmount, verificationScore: verification.score, verificationPass: true },
+                existingData ? { status: existingData.status, itemCount: existingData.itemCount, totalAmount: existingData.totalAmount, verificationScore: existingData.verificationScore } : null,
+                boq,
+              );
+
+              if (decision === 'discard') {
+                await setDoc(latestRef, existingData
+                  ? removeUndefined({ ...existingData, updatedAt: serverTimestamp() })
+                  : removeUndefined({ status: 'no_boq_found', updatedAt: serverTimestamp() }));
+                return;
+              }
+
+              if (decision === 'pending') {
+                await setDoc(latestRef, removeUndefined({ ...existingData, updatedAt: serverTimestamp() }));
+                await setDoc(doc(db, 'saved_tenders', projectId, 'boq_extraction', 'pending'), removeUndefined({
+                  status: 'pending_review',
+                  items: extraction.items,
+                  itemCount: extraction.items.length,
+                  totalAmount,
+                  engine: bestSource === 'xlsx' ? 'deterministic-xlsx' : telemetry.engine,
+                  verificationScore: verification.score,
+                  detectedAt: serverTimestamp(),
+                }));
+                return;
+              }
+
+              // decision === 'apply'
               // Populate scheduleSum the moment extraction finishes,
               // independent of whether the user is on the BOQ tab —
               // BOQViewer's onScheduleSumChange (fired only once that tab
@@ -1124,19 +1165,61 @@ export default function TenderAnalyzer() {
         return;
       }
 
+      // Captured BEFORE 'running' overwrites the slot — see
+      // boqReplacementGate's docs; restored verbatim on a 'pending'/
+      // 'discard' decision so an already-good BOQ is never lost.
+      const existingSnap = await getDoc(latestRef);
+      const existingData = existingSnap.exists() ? (existingSnap.data() as any) : null;
+
       await setDoc(latestRef, removeUndefined({ status: 'running', startedAt: serverTimestamp() }));
 
       const result = await runBoqExtraction({ rawPdfUrls, payloadUrls, xlsxUrls, executionDurationHint });
 
       if (result.status === 'failed') {
-        await setDoc(latestRef, removeUndefined({ status: 'failed', reason: result.reason, updatedAt: serverTimestamp() }));
+        await setDoc(latestRef, existingData
+          ? removeUndefined({ ...existingData, updatedAt: serverTimestamp() })
+          : removeUndefined({ status: 'failed', reason: result.reason, updatedAt: serverTimestamp() }));
         return;
       }
       if (result.status === 'no_boq_found') {
-        await setDoc(latestRef, removeUndefined({ status: 'no_boq_found', reason: result.reason, updatedAt: serverTimestamp() }));
+        await setDoc(latestRef, existingData
+          ? removeUndefined({ ...existingData, updatedAt: serverTimestamp() })
+          : removeUndefined({ status: 'no_boq_found', reason: result.reason, updatedAt: serverTimestamp() }));
         return;
       }
 
+      const decision = decideBoqReplacement(
+        { itemCount: result.itemCount, totalAmount: result.totalAmount, verificationScore: result.verificationScore, verificationPass: true },
+        existingData ? { status: existingData.status, itemCount: existingData.itemCount, totalAmount: existingData.totalAmount, verificationScore: existingData.verificationScore } : null,
+        // Fresh from Firestore, not the component's `boq` closure — this
+        // function runs against an arbitrary projectId (a background
+        // Tier-2 completion trigger), which may not be the project the
+        // user is currently looking at.
+        (projectData?.boq as BOQData | undefined) ?? null,
+      );
+
+      if (decision === 'discard') {
+        await setDoc(latestRef, existingData
+          ? removeUndefined({ ...existingData, updatedAt: serverTimestamp() })
+          : removeUndefined({ status: 'no_boq_found', updatedAt: serverTimestamp() }));
+        return;
+      }
+
+      if (decision === 'pending') {
+        await setDoc(latestRef, removeUndefined({ ...existingData, updatedAt: serverTimestamp() }));
+        await setDoc(doc(db, 'saved_tenders', projectId, 'boq_extraction', 'pending'), removeUndefined({
+          status: 'pending_review',
+          items: result.items,
+          itemCount: result.itemCount,
+          totalAmount: result.totalAmount,
+          engine: result.engine,
+          verificationScore: result.verificationScore,
+          detectedAt: serverTimestamp(),
+        }));
+        return;
+      }
+
+      // decision === 'apply'
       if (result.totalAmount > 0) setScheduleSum(result.totalAmount);
       await setDoc(latestRef, removeUndefined({
         status: 'done',

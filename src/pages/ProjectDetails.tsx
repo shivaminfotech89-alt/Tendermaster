@@ -28,6 +28,7 @@ import { extractAnalysisText, extractBidRecommendationEstimatedValue } from "../
 import { buildRateContractHint, resolveRateContractRevenue } from "../lib/boq/detectRateContract";
 import { inferLegacyConfirmations } from "../lib/boq/confirmationMigration";
 import { computeBidPrintSummary } from "../lib/boq/printSummary";
+import { decideBoqReplacement } from "../lib/boq/boqReplacementGate";
 
 function formatFileSize(bytes: number): string {
   if (bytes >= 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
@@ -351,6 +352,15 @@ export default function ProjectDetails() {
     }
 
     const latestRef = doc(db, 'saved_tenders', projectId, 'boq_extraction', 'latest');
+    const pendingRef = doc(db, 'saved_tenders', projectId, 'boq_extraction', 'pending');
+
+    // Captured BEFORE the 'running' write below overwrites the slot — this
+    // is the only chance to know what was active a moment ago, so a
+    // 'pending'/'discard' decision can restore it verbatim rather than
+    // leaving the doc stuck on 'running' or, worse, on the new candidate.
+    const existingSnap = await getDoc(latestRef);
+    const existingData = existingSnap.exists() ? (existingSnap.data() as any) : null;
+
     await setDoc(latestRef, removeUndefined({ status: 'running', startedAt: serverTimestamp() }));
     console.log('[BOQ] status set to running', { rawPdfUrlCount: rawPdfUrls.length, payloadUrlCount: payloadUrls.length, xlsxUrlCount: xlsxUrls.length });
 
@@ -363,16 +373,53 @@ export default function ProjectDetails() {
       });
 
       if (result.status === 'failed') {
-        await setDoc(latestRef, removeUndefined({ status: 'failed', reason: result.reason, updatedAt: serverTimestamp() }));
+        // Restore whatever was active before this attempt — a failed retry
+        // must never leave a previously-good BOQ stuck on 'running' or lost.
+        await setDoc(latestRef, existingData
+          ? removeUndefined({ ...existingData, updatedAt: serverTimestamp() })
+          : removeUndefined({ status: 'failed', reason: result.reason, updatedAt: serverTimestamp() }));
         console.log('[BOQ] done — failed', { reason: result.reason, durationMs: Date.now() - t0 });
         return;
       }
       if (result.status === 'no_boq_found') {
-        await setDoc(latestRef, removeUndefined({ status: 'no_boq_found', reason: result.reason, updatedAt: serverTimestamp() }));
+        await setDoc(latestRef, existingData
+          ? removeUndefined({ ...existingData, updatedAt: serverTimestamp() })
+          : removeUndefined({ status: 'no_boq_found', reason: result.reason, updatedAt: serverTimestamp() }));
         console.log('[BOQ] done — no BOQ', { reason: result.reason, durationMs: Date.now() - t0 });
         return;
       }
 
+      const decision = decideBoqReplacement(
+        { itemCount: result.itemCount, totalAmount: result.totalAmount, verificationScore: result.verificationScore, verificationPass: true },
+        existingData ? { status: existingData.status, itemCount: existingData.itemCount, totalAmount: existingData.totalAmount, verificationScore: existingData.verificationScore } : null,
+        boq,
+      );
+      console.log('[BOQ] replacement decision', { decision, newItemCount: result.itemCount, existingItemCount: existingData?.itemCount });
+
+      if (decision === 'discard') {
+        await setDoc(latestRef, existingData
+          ? removeUndefined({ ...existingData, updatedAt: serverTimestamp() })
+          : removeUndefined({ status: 'no_boq_found', updatedAt: serverTimestamp() }));
+        return;
+      }
+
+      if (decision === 'pending') {
+        // The active, priced BOQ is never touched — restored verbatim.
+        await setDoc(latestRef, removeUndefined({ ...existingData, updatedAt: serverTimestamp() }));
+        await setDoc(pendingRef, removeUndefined({
+          status: 'pending_review',
+          items: result.items,
+          itemCount: result.itemCount,
+          totalAmount: result.totalAmount,
+          engine: result.engine,
+          verificationScore: result.verificationScore,
+          detectedAt: serverTimestamp(),
+        }));
+        toast('A revised BOQ was detected — review it in the BOQ tab before applying.', { icon: '📋' });
+        return;
+      }
+
+      // decision === 'apply'
       await setDoc(latestRef, removeUndefined({
         status: 'done',
         items: result.items,
@@ -434,13 +481,81 @@ export default function ProjectDetails() {
     } catch (err: any) {
       const reason = err?.message ?? 'BOQ extraction failed.';
       console.error('[BOQ] extraction error', err);
-      await setDoc(latestRef, removeUndefined({
-        status: 'failed',
-        reason,
-        updatedAt: serverTimestamp(),
-      })).catch(console.error);
+      await setDoc(latestRef, existingData
+        ? removeUndefined({ ...existingData, updatedAt: serverTimestamp() })
+        : removeUndefined({ status: 'failed', reason, updatedAt: serverTimestamp() })
+      ).catch(console.error);
       throw err; // re-throw so BOQViewer can show the error immediately
     }
+  };
+
+  // Applies the pending revised BOQ (boq_extraction/pending) as the new
+  // active one — only ever called after the user has explicitly confirmed
+  // in BOQViewer's warning dialog. Resets the pricing-relevant boq fields
+  // (a revised schedule invalidates the old Schedule-B amount, percentage,
+  // quoted amount, GST breakdown, and any finalized snapshot basis) so the
+  // user re-prices against the correct, current schedule rather than
+  // seeing stale confirmed values pointing at removed/changed items.
+  const handleApplyPendingBoq = async () => {
+    if (!projectId) return;
+    const pendingRef = doc(db, 'saved_tenders', projectId, 'boq_extraction', 'pending');
+    const latestRef = doc(db, 'saved_tenders', projectId, 'boq_extraction', 'latest');
+    const pendingSnap = await getDoc(pendingRef);
+    if (!pendingSnap.exists()) return;
+    const pending = pendingSnap.data() as any;
+
+    await setDoc(latestRef, removeUndefined({
+      status: 'done',
+      items: pending.items,
+      itemCount: pending.itemCount,
+      totalAmount: pending.totalAmount,
+      engine: pending.engine,
+      visionUsed: false,
+      verificationScore: pending.verificationScore,
+      parserDurationMs: 0,
+      updatedAt: serverTimestamp(),
+    }));
+    await deleteDoc(pendingRef);
+
+    handleBoqChange({
+      ...boq,
+      estimatedAmount: null,
+      estimatedAmountConfirmed: false,
+      estimatedAmountEdited: false,
+      estimatedAmountPage: undefined,
+      estimatedAmountClause: undefined,
+      estimatedAmountText: undefined,
+      percentage: null,
+      quotedAmount: null,
+      quotedAmountWords: null,
+      gstIncluded: undefined,
+      cessPercent: undefined,
+      gstPercent: undefined,
+      cessAmount: undefined,
+      gstAmount: undefined,
+      totalWithGst: undefined,
+      roundOff: undefined,
+      roundedTotal: undefined,
+      manualOverride: undefined,
+      completionPeriodConfirmed: false,
+      bidValidityConfirmed: false,
+      estimatedCostConfirmedValue: undefined,
+      expectedRevenueConfirmed: false,
+      expectedRevenueConfirmedValue: undefined,
+      finalisedAt: undefined,
+      boqLastChangedAt: Date.now(),
+    });
+    toast.success('Revised BOQ applied — please review and re-enter your bid.');
+  };
+
+  // Dismisses the pending-revision notice without applying it. The active,
+  // priced BOQ is untouched. The pending record itself is kept (marked
+  // dismissed, not deleted) so it remains reviewable later — a subsequent
+  // new extraction attempt will overwrite/refresh it regardless.
+  const handleDismissPendingBoq = async () => {
+    if (!projectId) return;
+    const pendingRef = doc(db, 'saved_tenders', projectId, 'boq_extraction', 'pending');
+    await updateDoc(pendingRef, { dismissedAt: serverTimestamp() }).catch(console.error);
   };
 
   useEffect(() => {
@@ -3576,6 +3691,8 @@ export default function ProjectDetails() {
                 onScheduleSumChange={setScheduleSum}
                 tenderValue={tenderValue}
                 scheduleBLoading={scheduleBLoading}
+                onApplyPendingBoq={handleApplyPendingBoq}
+                onDismissPendingBoq={handleDismissPendingBoq}
               />
             </div>
           )}

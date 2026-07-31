@@ -8,6 +8,7 @@ import { ArrowLeft, AlertCircle, Calculator, Building, Activity, Upload, FileTex
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import JSZip from "jszip";
+import * as XLSX from "xlsx";
 import { toast } from "react-hot-toast";
 import { useTranslation } from "react-i18next";
 import { useAuth } from "../auth/AuthProvider";
@@ -29,6 +30,7 @@ import { buildRateContractHint, resolveRateContractRevenue } from "../lib/boq/de
 import { inferLegacyConfirmations } from "../lib/boq/confirmationMigration";
 import { computeBidPrintSummary } from "../lib/boq/printSummary";
 import { decideBoqReplacement } from "../lib/boq/boqReplacementGate";
+import { buildAnalysisText as buildXlsxAnalysisText } from "../services/boqExcelExtractService";
 import { driveAnalysisJob } from "../lib/analysisJobDriver";
 
 function formatFileSize(bytes: number): string {
@@ -350,8 +352,18 @@ export default function ProjectDetails() {
 
   // NOTE: if Vision fallback is added in future, the credit/entitlement gate belongs here
   // before calling the extraction, since that path would consume an additional credit.
-  const handleManualBoqExtract = async () => {
+  // overrideProjectData: pass the FRESHLY-FETCHED project doc data when
+  // calling this right after a Firestore write this same render cycle
+  // hasn't propagated into `project` state yet (setProject is
+  // asynchronous — a call to this function immediately after setProject()
+  // would otherwise read the PRE-update payloadRefRaw/payloadRefXlsx,
+  // silently missing whatever document was just added). Defaults to the
+  // component's own `project` state for the existing "Extract BOQ"/Retry
+  // button caller, whose click always happens against already-current
+  // render state.
+  const handleManualBoqExtract = async (overrideProjectData?: any) => {
     if (!projectId) return;
+    const src = overrideProjectData ?? project;
 
     const t0 = Date.now();
     console.log('[BOQ] manual extraction started', { projectId });
@@ -359,21 +371,21 @@ export default function ProjectDetails() {
     // payloadRefRaw holds raw PDF bytes for digital-PDF BOQ candidates (written by TenderAnalyzer
     // after the feature was added). payloadRef holds text for digital PDFs or PDF bytes for image PDFs.
     // Prefer payloadRefRaw so pdf.js always receives actual PDF bytes.
-    const rawPdfRef = project?.payloadRefRaw;
+    const rawPdfRef = src?.payloadRefRaw;
     const rawPdfUrls: string[] = Array.isArray(rawPdfRef)
       ? (rawPdfRef as string[]).filter((u: any) => typeof u === 'string' && u.startsWith('http'))
       : typeof rawPdfRef === 'string' && rawPdfRef.startsWith('http')
       ? [rawPdfRef]
       : [];
 
-    const payloadRef = project?.payloadRef;
+    const payloadRef = src?.payloadRef;
     const payloadUrls: string[] = Array.isArray(payloadRef)
       ? (payloadRef as string[]).filter((u: any) => typeof u === 'string' && u.startsWith('http'))
       : typeof payloadRef === 'string' && payloadRef.startsWith('http')
       ? [payloadRef]
       : [];
 
-    const payloadRefXlsx = project?.payloadRefXlsx;
+    const payloadRefXlsx = src?.payloadRefXlsx;
     const xlsxUrls: string[] = Array.isArray(payloadRefXlsx)
       ? (payloadRefXlsx as string[]).filter((u: any) => typeof u === 'string' && u.startsWith('http'))
       : [];
@@ -401,7 +413,7 @@ export default function ProjectDetails() {
         rawPdfUrls,
         payloadUrls,
         xlsxUrls,
-        executionDurationHint: project?.details?.timeline_and_milestones?.execution_duration,
+        executionDurationHint: src?.details?.timeline_and_milestones?.execution_duration,
       });
 
       if (result.status === 'failed') {
@@ -1004,7 +1016,14 @@ export default function ProjectDetails() {
     // The revised analysis may have brought a revised BOQ file along with
     // it — runs through Fix 2a's decideBoqReplacement gate exactly like a
     // manual re-extract, so a priced active BOQ is never silently replaced.
-    handleManualBoqExtract().catch((e) => console.error('[ProjectDetails] post-reanalysis BOQ extraction failed', e));
+    // Passes `fresh` explicitly — setProject() above hasn't propagated into
+    // the `project` closure yet at this point in the same tick, so calling
+    // handleManualBoqExtract() with no argument here would read the
+    // PRE-update payloadRefRaw/payloadRefXlsx and silently miss whatever
+    // document this re-analysis just added (the root cause of a newly
+    // -added PDF's real BOQ scoring 0/100 — its bytes were uploaded fine,
+    // but extraction never saw the URL).
+    handleManualBoqExtract(fresh).catch((e) => console.error('[ProjectDetails] post-reanalysis BOQ extraction failed', e));
   };
 
   // Drives a large re-analysis's Tier-2 job to completion and resolves once
@@ -1150,15 +1169,17 @@ export default function ProjectDetails() {
 
           let contentToSend: string | string[] = "";
           let uploadedEntryNames: string[] = [];
-          // Raw PDF bytes for digital-PDF entries, parallel to
-          // uploadedEntryNames — mirrors TenderAnalyzer.tsx's
-          // boqRawPdfBuffersRef: null for image PDFs (whose contentToSend
-          // IS already the raw bytes, no separate copy needed) or entries
-          // dropped for size; a real ArrayBuffer for digital PDFs, whose
+          // Raw bytes for entries needing a separate BOQ-candidate upload,
+          // parallel to uploadedEntryNames — mirrors TenderAnalyzer.tsx's
+          // boqRawPdfBuffersRef/boqXlsxCandidatesRef: null for image PDFs
+          // (whose contentToSend IS already the raw bytes, no separate copy
+          // needed); {kind:'pdf', buffer} for digital PDFs, whose
           // contentToSend is text-only (cost-optimised) and so needs a
           // separate raw-bytes upload for BOQ extraction to have anything
-          // to parse.
-          const rawBuffers: (ArrayBuffer | null)[] = [];
+          // to parse; {kind:'xlsx', buffer} for spreadsheet entries, which
+          // always need a separate raw upload (contentToSend for those is
+          // item-table-excluded analysis text, never the real bytes).
+          const rawBuffers: ({ kind: 'pdf' | 'xlsx'; buffer: ArrayBuffer } | null)[] = [];
 
           if (type === "ZIP File") {
              const zip = new JSZip();
@@ -1167,7 +1188,9 @@ export default function ProjectDetails() {
              const zipEntryNames: string[] = [];
 
              for (const [filename, zipEntry] of Object.entries(contents.files)) {
-                if (!zipEntry.dir && filename.toLowerCase().endsWith('.pdf')) {
+                if (zipEntry.dir) continue;
+                const lowerFilename = filename.toLowerCase();
+                if (lowerFilename.endsWith('.pdf')) {
                    const shortName = filename.split('/').pop() || filename;
                    const arrayBuffer = await zipEntry.async("arraybuffer");
                    let dataUri: string;
@@ -1188,12 +1211,30 @@ export default function ProjectDetails() {
                    }
                    pdfBase64Array.push(dataUri);
                    zipEntryNames.push(shortName);
-                   rawBuffers.push(isDigitalPdf ? arrayBuffer : null);
+                   rawBuffers.push(isDigitalPdf ? { kind: 'pdf', buffer: arrayBuffer } : null);
+                } else if (lowerFilename.endsWith('.xlsx') || lowerFilename.endsWith('.xls') || lowerFilename.endsWith('.csv')) {
+                   // A revised Excel BOQ added during re-analysis — same
+                   // principle as PDFs: item-table-excluded text goes into
+                   // the analysis content; the real bytes go to a separate
+                   // BOQ-candidate upload (payloadRefXlsx), never mixed.
+                   const shortName = filename.split('/').pop() || filename;
+                   const arrayBuffer = await zipEntry.async("arraybuffer");
+                   try {
+                     const workbook = XLSX.read(arrayBuffer, { type: "array" });
+                     const allText = `\n--- CONTENT OF SPREADSHEET: ${filename} ---\n${buildXlsxAnalysisText(workbook)}`;
+                     const utf8Bytes = new TextEncoder().encode(allText);
+                     const base64Text = btoa(String.fromCharCode(...utf8Bytes));
+                     pdfBase64Array.push(`data:text/plain;base64,${base64Text}`);
+                     zipEntryNames.push(shortName);
+                     rawBuffers.push({ kind: 'xlsx', buffer: arrayBuffer });
+                   } catch (err) {
+                     console.error(`Failed to parse spreadsheet ${filename}:`, err);
+                   }
                 }
              }
              if (pdfBase64Array.length === 0) {
                  setReanalyzing(false);
-                 toast.error("No PDFs found in the ZIP.");
+                 toast.error("No PDFs or spreadsheets found in the ZIP.");
                  return;
              }
              contentToSend = pdfBase64Array;
@@ -1215,7 +1256,7 @@ export default function ProjectDetails() {
                console.warn(`[PDF extraction] ${file.name} → IMAGE fallback (extraction error)`);
                contentToSend = `data:application/pdf;base64,${arrayBufferToBase64(arrayBuffer)}`;
              }
-             rawBuffers.push(isDigitalPdf ? arrayBuffer : null);
+             rawBuffers.push(isDigitalPdf ? { kind: 'pdf', buffer: arrayBuffer } : null);
           }
 
           // Upload the new file(s) to Firebase Storage — the SAME
@@ -1226,6 +1267,7 @@ export default function ProjectDetails() {
           const newSourceUrls: string[] = [];
           const newSourceNames: string[] = [];
           const newRawPdfUrls: string[] = [];
+          const newXlsxUrls: string[] = [];
           try {
             const { ref: sRef, uploadString: uploadStr, uploadBytes: uploadBytesFn, getDownloadURL } = await import("firebase/storage");
             const { storage } = await import("../lib/firebase");
@@ -1239,16 +1281,24 @@ export default function ProjectDetails() {
               newSourceUrls.push(await getDownloadURL(fileRef));
               newSourceNames.push(entryName);
 
-              // BOQ raw-bytes upload — a separate object, only for digital
-              // PDFs whose Source-Document copy above is text-only.
-              const rawBuf = rawBuffers[idx];
-              if (rawBuf) {
+              // BOQ raw-bytes upload — a separate object, only for entries
+              // whose Source-Document copy above isn't already the real
+              // bytes (digital PDFs get text there; xlsx entries always
+              // get item-table-excluded text there).
+              const rawEntry = rawBuffers[idx];
+              if (rawEntry) {
                 try {
-                  const rawFileRef = sRef(storage, `users/${user?.uid}/tenders/${Date.now()}_${idx}_raw`);
-                  await uploadBytesFn(rawFileRef, new Uint8Array(rawBuf), { contentType: 'application/pdf' });
-                  newRawPdfUrls.push(await getDownloadURL(rawFileRef));
+                  const suffix = rawEntry.kind === 'xlsx' ? 'xlsx' : 'raw';
+                  const rawFileRef = sRef(storage, `users/${user?.uid}/tenders/${Date.now()}_${idx}_${suffix}`);
+                  const contentType = rawEntry.kind === 'xlsx'
+                    ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+                    : 'application/pdf';
+                  await uploadBytesFn(rawFileRef, new Uint8Array(rawEntry.buffer), { contentType });
+                  const rawUrl = await getDownloadURL(rawFileRef);
+                  if (rawEntry.kind === 'xlsx') newXlsxUrls.push(rawUrl);
+                  else newRawPdfUrls.push(rawUrl);
                 } catch (rawErr) {
-                  console.warn(`[BOQ] raw PDF upload failed for ${entryName}:`, rawErr);
+                  console.warn(`[BOQ] raw ${rawEntry.kind} upload failed for ${entryName}:`, rawErr);
                 }
               }
             }
@@ -1257,12 +1307,14 @@ export default function ProjectDetails() {
                 sourceDocuments: arrayUnion(...newSourceUrls),
                 sourceDocumentNames: arrayUnion(...newSourceNames),
                 ...(newRawPdfUrls.length > 0 ? { payloadRefRaw: arrayUnion(...newRawPdfUrls) } : {}),
+                ...(newXlsxUrls.length > 0 ? { payloadRefXlsx: arrayUnion(...newXlsxUrls) } : {}),
               }));
               setProject((prev: any) => prev ? {
                 ...prev,
                 sourceDocuments: [...((prev.sourceDocuments as string[]) || []), ...newSourceUrls],
                 sourceDocumentNames: [...((prev.sourceDocumentNames as string[]) || []), ...newSourceNames],
                 ...(newRawPdfUrls.length > 0 ? { payloadRefRaw: [...((prev.payloadRefRaw as string[]) || []), ...newRawPdfUrls] } : {}),
+                ...(newXlsxUrls.length > 0 ? { payloadRefXlsx: [...((prev.payloadRefXlsx as string[]) || []), ...newXlsxUrls] } : {}),
               } : prev);
             }
           } catch (uploadErr) {
@@ -1300,6 +1352,7 @@ export default function ProjectDetails() {
                tenderType: 'storage_urls',
                tenderContent: combinedUrls,
                ...(newRawPdfUrls.length > 0 ? { rawPdfUrls: newRawPdfUrls } : {}),
+               ...(newXlsxUrls.length > 0 ? { xlsxUrls: newXlsxUrls } : {}),
                userProfile: JSON.stringify(businessProfile || {}),
                extraContext: payload,
                language: i18n.language,

@@ -32,6 +32,7 @@ import { computeBidPrintSummary } from "../lib/boq/printSummary";
 import { decideBoqReplacement } from "../lib/boq/boqReplacementGate";
 import { buildAnalysisText as buildXlsxAnalysisText } from "../services/boqExcelExtractService";
 import { driveAnalysisJob } from "../lib/analysisJobDriver";
+import { OverviewGlanceAndDetails, OverviewAiSummary } from "../components/overview/ExpandedOverview";
 
 function formatFileSize(bytes: number): string {
   if (bytes >= 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
@@ -960,6 +961,15 @@ export default function ProjectDetails() {
 
   const { reanalyzing, reanalyzeProgress, setReanalyzing, setReanalyzeProgress } = useAnalyzerStore();
   const navigate = useNavigate();
+
+  // Expanded Overview — "Ask AI about this" per-section links. Navigates to
+  // the existing Tender Chat with a starter prompt pre-filled; the user
+  // reviews/edits before sending (TenderChat.tsx reads this via
+  // location.state, does not auto-send).
+  const handleAskAiAboutSection = (starterPrompt: string) => {
+    if (!projectId) return;
+    navigate('/dashboard/chat', { state: { projectId, starterPrompt } });
+  };
 
   const handleRemoveProject = async () => {
     if (!projectId) return;
@@ -2271,6 +2281,23 @@ export default function ProjectDetails() {
            
            {activeTab === 'overview' && (
              <div className="space-y-8 print:hidden">
+               {/* Expanded Overview — at-a-glance strip, grouped
+                   Financial/Technical/Qualification highlights, and compact
+                   detail sections (EMD/SD/PG, dates, penalty, price
+                   variation, etc.) with Read-more expand. Reads baseDetails
+                   (project.details, for language-independent keyword
+                   classification) alongside displayDetails (translated, for
+                   rendering) — see classifyOverviewProse.ts. */}
+               {project?.details && (
+                 <OverviewGlanceAndDetails
+                   baseDetails={project.details}
+                   displayDetails={displayDetails}
+                   boq={boq}
+                   tenderValue={tenderValue}
+                   onAskAi={handleAskAiAboutSection}
+                 />
+               )}
+
                {/* Source Documents — original tender files stored in Firebase Storage */}
                {(() => {
                  const ref = project?.payloadRef;
@@ -3287,6 +3314,15 @@ export default function ProjectDetails() {
                    </div>
                 </div>
               </div>
+            )}
+
+            {/* AI Summary — bottom of the expanded Overview, synthesizing
+                compatibility.rationale + pros/cons_and_risks. */}
+            {project?.details && (
+              <OverviewAiSummary
+                displayDetails={displayDetails}
+                onAskAi={handleAskAiAboutSection}
+              />
             )}
           </div>
         )}

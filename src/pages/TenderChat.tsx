@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import { collection, query, where, getDocs, addDoc, writeBatch, serverTimestamp } from "firebase/firestore";
 import { db } from "../lib/firebase";
 import { useAuth } from "../auth/AuthProvider";
@@ -22,6 +23,8 @@ function fmtTs(d?: Date): string {
 export default function TenderChat() {
   const { user, role } = useAuth();
   const { t, i18n } = useTranslation();
+  const location = useLocation();
+  const navigate = useNavigate();
   const [projects, setProjects] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -50,6 +53,26 @@ export default function TenderChat() {
     }
     loadProjects();
   }, [user]);
+
+  // "Ask AI about this" from the expanded Tender Overview (ProjectDetails.tsx)
+  // navigates here with { projectId, starterPrompt } in router state. Once
+  // `projects` has loaded, auto-select the matching project and pre-fill
+  // the input (never auto-sent — the user reviews/edits first, same as the
+  // existing prompt-chip pattern below). The state is cleared immediately
+  // after use via a replace-navigation so a later manual back/forward nav
+  // can't re-trigger it.
+  useEffect(() => {
+    const navState = location.state as { projectId?: string; starterPrompt?: string } | null;
+    if (!navState?.projectId || loading) return;
+    const match = projects.find(p => p.id === navState.projectId);
+    if (match) {
+      setSelectedProject(match);
+      loadChatHistory(match.id);
+      if (navState.starterPrompt) setChatInput(navState.starterPrompt);
+    }
+    navigate(location.pathname, { replace: true, state: {} });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projects, loading]);
 
   useEffect(() => {
     chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' });

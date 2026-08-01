@@ -219,12 +219,27 @@ export default function ProjectDetails() {
   const [boqExtractionStatus, setBoqExtractionStatus] = useState<
     'loading' | 'running' | 'done' | 'failed' | 'no_boq_found' | 'not_attempted'
   >('loading');
+  // Display-only, same doc/listener as boqExtractionStatus above — also
+  // captures totalAmount (written by handleManualBoqExtract on 'done',
+  // same field BOQViewer's onScheduleSumChange reads into `scheduleSum`).
+  // `scheduleSum` itself is ONLY populated once BOQViewer mounts (the BOQ
+  // tab), so if a user opens the Bid Engine tab directly after a fresh
+  // analysis without ever visiting the BOQ tab, boqExtractionStatus can
+  // reach 'done' while `scheduleSum`/`boq.estimatedAmount` are still null —
+  // the exact gap that let the old spinner clear early and expose an
+  // empty, enabled field. This gives the spinner condition below a way to
+  // know a real total exists even before BOQViewer has ever mounted.
+  const [boqExtractionTotalAmount, setBoqExtractionTotalAmount] = useState<number | null>(null);
   useEffect(() => {
     if (!projectId) return;
     const ref = doc(db, 'saved_tenders', projectId, 'boq_extraction', 'latest');
     const unsub = onSnapshot(
       ref,
-      (snap) => setBoqExtractionStatus(snap.exists() ? ((snap.data() as any).status ?? 'not_attempted') : 'not_attempted'),
+      (snap) => {
+        const data = snap.exists() ? (snap.data() as any) : null;
+        setBoqExtractionStatus(data ? (data.status ?? 'not_attempted') : 'not_attempted');
+        setBoqExtractionTotalAmount(typeof data?.totalAmount === 'number' ? data.totalAmount : null);
+      },
       () => setBoqExtractionStatus('failed'),
     );
     return () => unsub();
@@ -2070,12 +2085,21 @@ export default function ProjectDetails() {
   // always shows a figure whether or not the Bid Engine tab was ever opened.
   const printSummary = computeBidPrintSummary(boq, project?.details, totalExpense);
 
-  // Display-only: true while BOQ extraction is still in flight (per the
-  // read-only listener above) and no Schedule-B amount has arrived yet.
-  // Clears the instant any value exists — auto-prefilled or typed — so it
-  // can never stay stuck on once a value has loaded.
-  const scheduleBLoading = (boqExtractionStatus === 'loading' || boqExtractionStatus === 'running')
-    && boq.estimatedAmount == null;
+  // Display-only: true while BOQ extraction is still in flight, OR extraction
+  // has finished server-side with a real total but this tab hasn't picked it
+  // up into `scheduleSum`/`boq.estimatedAmount` yet (only possible for
+  // percentage_rate — see boqExtractionTotalAmount's comment above for why:
+  // scheduleSum only arrives once BOQViewer/the BOQ tab has mounted this
+  // session). Either way, always false the instant a real value exists —
+  // auto-prefilled or typed — so it can never stay stuck on once a value
+  // has loaded, and false for 'no_boq_found'/'failed'/'not_attempted' (or a
+  // 'done' with no numeric total) so it never spins forever when there's
+  // genuinely nothing to fetch.
+  const scheduleBLoading = boq.estimatedAmount == null && (
+    boqExtractionStatus === 'loading' || boqExtractionStatus === 'running' ||
+    (boqExtractionStatus === 'done' && boq.boqType === 'percentage_rate'
+      && scheduleSum == null && boqExtractionTotalAmount != null && boqExtractionTotalAmount > 0)
+  );
 
   // Display-only: true once a document has been generated in this session
   // AND either the bid (boq.boqLastChangedAt) or the source analysis

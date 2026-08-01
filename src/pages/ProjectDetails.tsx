@@ -220,15 +220,10 @@ export default function ProjectDetails() {
     'loading' | 'running' | 'done' | 'failed' | 'no_boq_found' | 'not_attempted'
   >('loading');
   // Display-only, same doc/listener as boqExtractionStatus above — also
-  // captures totalAmount (written by handleManualBoqExtract on 'done',
-  // same field BOQViewer's onScheduleSumChange reads into `scheduleSum`).
-  // `scheduleSum` itself is ONLY populated once BOQViewer mounts (the BOQ
-  // tab), so if a user opens the Bid Engine tab directly after a fresh
-  // analysis without ever visiting the BOQ tab, boqExtractionStatus can
-  // reach 'done' while `scheduleSum`/`boq.estimatedAmount` are still null —
-  // the exact gap that let the old spinner clear early and expose an
-  // empty, enabled field. This gives the spinner condition below a way to
-  // know a real total exists even before BOQViewer has ever mounted.
+  // captures totalAmount (written by handleManualBoqExtract on 'done').
+  // This is `scheduleSum`'s real source of truth (see below) — captured
+  // here so it's available the instant extraction finishes, without
+  // waiting for the user to open the BOQ tab.
   const [boqExtractionTotalAmount, setBoqExtractionTotalAmount] = useState<number | null>(null);
   useEffect(() => {
     if (!projectId) return;
@@ -244,6 +239,26 @@ export default function ProjectDetails() {
     );
     return () => unsub();
   }, [projectId]);
+
+  // The real extracted Schedule-B sum — used for the Step 1 "did you enter
+  // the Tender Value by mistake?" warning AND (via BOQSection's own
+  // percentage-rate override effect) to select boq.estimatedAmount for
+  // percentage_rate tenders.
+  //
+  // Derived directly from the listener above rather than a separate
+  // useState set by BOQViewer's onScheduleSumChange callback. Confirmed
+  // (Phase 1 diagnosis) that BOQViewer's meta.totalAmount is a byte-for-byte
+  // passthrough of this exact same boq_extraction/latest.totalAmount field —
+  // no recomputation, no override applied before it reaches scheduleSum —
+  // so deriving it here produces the identical number BOQViewer would,
+  // just without requiring the BOQ tab to have been opened first. Null
+  // until status is genuinely 'done' with a real total, matching
+  // BOQViewer's own meta-stays-null-until-'done' behavior exactly — nothing
+  // downstream (BOQSection's percentage-rate override, the mis-entry
+  // warning, scheduleBLoading below) can mistake "not ready yet" for zero.
+  const scheduleSum = (boqExtractionStatus === 'done' && boqExtractionTotalAmount != null && boqExtractionTotalAmount > 0)
+    ? boqExtractionTotalAmount
+    : null;
 
   // Renaming State
   const [isEditingName, setIsEditingName] = useState(false);
@@ -288,10 +303,6 @@ export default function ProjectDetails() {
   // Weak advisory signal from BOQViewer's items (BOQSection doesn't have
   // items itself) — one of three inputs to the Rate Contract hint.
   const [nominalQuantitiesSignal, setNominalQuantitiesSignal] = useState(false);
-  // The real extracted Schedule-B sum (BOQViewer's meta.totalAmount) — used
-  // only for the Step 1 "did you enter the Tender Value by mistake?"
-  // warning, never for any calculation.
-  const [scheduleSum, setScheduleSum] = useState<number | null>(null);
   const [snapshots, setSnapshots] = useState<BidSnapshotRow[]>([]);
   const [snapshotsLoading, setSnapshotsLoading] = useState(false);
   const [downloadingPdf, setDownloadingPdf] = useState(false);
@@ -2085,21 +2096,17 @@ export default function ProjectDetails() {
   // always shows a figure whether or not the Bid Engine tab was ever opened.
   const printSummary = computeBidPrintSummary(boq, project?.details, totalExpense);
 
-  // Display-only: true while BOQ extraction is still in flight, OR extraction
-  // has finished server-side with a real total but this tab hasn't picked it
-  // up into `scheduleSum`/`boq.estimatedAmount` yet (only possible for
-  // percentage_rate — see boqExtractionTotalAmount's comment above for why:
-  // scheduleSum only arrives once BOQViewer/the BOQ tab has mounted this
-  // session). Either way, always false the instant a real value exists —
-  // auto-prefilled or typed — so it can never stay stuck on once a value
-  // has loaded, and false for 'no_boq_found'/'failed'/'not_attempted' (or a
-  // 'done' with no numeric total) so it never spins forever when there's
-  // genuinely nothing to fetch.
-  const scheduleBLoading = boq.estimatedAmount == null && (
-    boqExtractionStatus === 'loading' || boqExtractionStatus === 'running' ||
-    (boqExtractionStatus === 'done' && boq.boqType === 'percentage_rate'
-      && scheduleSum == null && boqExtractionTotalAmount != null && boqExtractionTotalAmount > 0)
-  );
+  // Display-only: true while BOQ extraction is still in flight (per the
+  // read-only listener above) and no Schedule-B amount has arrived yet.
+  // Clears the instant any value exists — auto-prefilled or typed — so it
+  // can never stay stuck on once a value has loaded. Previously this also
+  // needed a separate branch for "status is 'done' but scheduleSum hasn't
+  // been picked up yet" (the BOQ-tab-mount gap) — no longer needed now that
+  // `scheduleSum` above is derived directly from this same listener and so
+  // always resolves in the same render `boqExtractionStatus` does; that
+  // branch is dead code once scheduleSum can no longer lag behind status.
+  const scheduleBLoading = (boqExtractionStatus === 'loading' || boqExtractionStatus === 'running')
+    && boq.estimatedAmount == null;
 
   // Display-only: true once a document has been generated in this session
   // AND either the bid (boq.boqLastChangedAt) or the source analysis
@@ -4024,7 +4031,6 @@ export default function ProjectDetails() {
                 boq={boq}
                 onItemRateTotalsChange={handleItemRateTotalsChange}
                 onQuantitySignal={setNominalQuantitiesSignal}
-                onScheduleSumChange={setScheduleSum}
                 tenderValue={tenderValue}
                 scheduleBLoading={scheduleBLoading}
                 onApplyPendingBoq={handleApplyPendingBoq}

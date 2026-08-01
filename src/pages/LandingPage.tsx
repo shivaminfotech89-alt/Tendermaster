@@ -440,6 +440,54 @@ export default function LandingPage() {
         </div>
       </section>
 
+      {/* ── FAQ ──
+          Visible content mirrors the FAQPage JSON-LD in index.html (and its
+          <noscript> fallback) word-for-word — search engines and AI
+          crawlers flag FAQ schema that doesn't match what's actually on the
+          page, so all three copies are kept identical by hand. Every answer
+          states only real, shipped features (Universal BOQ Engine, GeM/CPPP/
+          nProcure support, English/Hindi/Gujarati, EMD tracker, document
+          generation) — nothing fabricated. */}
+      <section id="faq" className="max-w-4xl mx-auto px-6 lg:px-14 py-16">
+        <h2 className="text-2xl font-extrabold text-slate-900 text-center mb-2" style={{ letterSpacing: '-.02em' }}>
+          Frequently asked questions
+        </h2>
+        <p className="text-sm text-slate-500 text-center mb-10">Everything else you might want to know before you upload a tender.</p>
+        <div className="grid md:grid-cols-2 gap-6">
+          {[
+            {
+              q: 'What does TenderMaster AI do?',
+              a: "TenderMaster AI analyses Indian government tender documents — checking eligibility, extracting the Bill of Quantities (BOQ), calculating bid pricing, and generating submission-ready documents including auto-filled annexures.",
+            },
+            {
+              q: 'What is BOQ pricing?',
+              a: "BOQ (Bill of Quantities) pricing means pricing every item in a tender's schedule to arrive at a total bid amount. TenderMaster AI's Universal BOQ Engine automatically detects the schedule format — Percentage Rate, Item Rate, or Lump Sum/EPC — extracts it, and gives you a bid calculator to price it.",
+            },
+            {
+              q: 'Does TenderMaster AI support GeM, CPPP and nProcure tenders?',
+              a: "Yes. TenderMaster AI works with tenders from GeM (Government e-Marketplace), CPPP (Central Public Procurement Portal), nProcure and other Indian e-procurement portals — upload a document, a ZIP of documents, or a portal link.",
+            },
+            {
+              q: 'What languages does TenderMaster AI support?',
+              a: "English, Hindi and Gujarati — analysis results and generated documents are available in all three.",
+            },
+            {
+              q: 'Does TenderMaster AI generate bid documents?',
+              a: "Yes. The AI Document Generator produces submission-ready documents — company profile, EMD declaration, technical bid content and more — and auto-fills the exact annexure form issued by the tender department.",
+            },
+            {
+              q: 'Does TenderMaster AI track EMD and Security Deposit?',
+              a: "Yes. Every EMD and Security Deposit payment is tracked through Paid → Pending Refund → Refunded, so nothing gets forgotten.",
+            },
+          ].map((item) => (
+            <div key={item.q} className="bg-white border border-slate-200 rounded-2xl p-5">
+              <h3 className="font-bold text-slate-900 text-sm mb-1.5">{item.q}</h3>
+              <p className="text-sm text-slate-500 leading-relaxed">{item.a}</p>
+            </div>
+          ))}
+        </div>
+      </section>
+
       {/* ── CTA ── */}
       <section className="py-20 bg-slate-50 border-t border-slate-100 text-center px-6">
         <h2 className="text-2xl font-extrabold text-slate-900 mb-4" style={{ letterSpacing: '-.02em' }}>

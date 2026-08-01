@@ -6,4 +6,55 @@ Disallow: /dashboard/
 Disallow: /admin
 Disallow: /superadmin
 
+# AI crawlers — explicitly allowed (same rules as the wildcard block above;
+# listed by name so intent is unambiguous rather than relying only on the
+# generic User-agent: * catch-all).
+User-agent: GPTBot
+Allow: /
+Disallow: /dashboard/
+Disallow: /admin
+Disallow: /superadmin
+
+User-agent: ChatGPT-User
+Allow: /
+Disallow: /dashboard/
+Disallow: /admin
+Disallow: /superadmin
+
+User-agent: Google-Extended
+Allow: /
+Disallow: /dashboard/
+Disallow: /admin
+Disallow: /superadmin
+
+User-agent: ClaudeBot
+Allow: /
+Disallow: /dashboard/
+Disallow: /admin
+Disallow: /superadmin
+
+User-agent: anthropic-ai
+Allow: /
+Disallow: /dashboard/
+Disallow: /admin
+Disallow: /superadmin
+
+User-agent: PerplexityBot
+Allow: /
+Disallow: /dashboard/
+Disallow: /admin
+Disallow: /superadmin
+
+User-agent: CCBot
+Allow: /
+Disallow: /dashboard/
+Disallow: /admin
+Disallow: /superadmin
+
+User-agent: Applebot-Extended
+Allow: /
+Disallow: /dashboard/
+Disallow: /admin
+Disallow: /superadmin
+
 Sitemap: https://www.tendermasterai.com/sitemap.xml

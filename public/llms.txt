@@ -1,0 +1,28 @@
+# TenderMaster AI
+
+> AI-powered tender analysis platform for Indian businesses. Upload a government tender document and get eligibility checks, BOQ (Bill of Quantities) extraction and pricing, a bid calculator, bid recommendations, and auto-filled submission documents — in English, Hindi or Gujarati.
+
+TenderMaster AI helps Indian bidders decide whether to bid on a government tender and prepares the paperwork to submit it. It supports tenders from GeM (Government e-Marketplace), CPPP (Central Public Procurement Portal), nProcure and other Indian e-procurement portals.
+
+## Key capabilities
+
+- Tender analysis — eligibility checks, compliance matrix, match score, deadlines and risk assessment extracted from the tender document
+- Universal BOQ Engine — detects and extracts the Bill of Quantities (Percentage Rate, Item Rate, or Lump Sum/EPC schedules) with automatic Schedule-B detection and confidence verification
+- Smart Financial Engine / bid calculator — price every BOQ item, track margins, and see the total bid value update live
+- AI Document Generator — company profile, EMD declaration, technical bid and other submission documents, generated automatically
+- Auto-filled annexures — the exact form issued by the tender department, completed with the bidder's business data
+- EMD and Security Deposit tracker — Paid → Pending Refund → Refunded
+- Multilingual — results and documents available in English, Hindi and Gujarati
+
+## Pages
+
+- [Home](https://www.tendermasterai.com/): product overview, features, FAQ and pricing
+- [Sign up / Log in](https://www.tendermasterai.com/login)
+- [Terms and Conditions](https://www.tendermasterai.com/terms)
+- [Privacy Policy](https://www.tendermasterai.com/privacy)
+
+## Pricing
+
+- Free trial: 1 tender analysis, no credit card required
+- Starter: ₹9,999 for 10 tender analyses (valid 24 months from purchase)
+- Pro: ₹14,999 for 20 tender analyses (valid 24 months from purchase)

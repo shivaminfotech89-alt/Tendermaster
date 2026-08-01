@@ -10,7 +10,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
 
     <title>TenderMaster AI — Government Tender Analysis &amp; Annexure Filling for Indian Bidders</title>
-    <meta name="description" content="AI tender analysis for Indian bidders — BOQ pricing, eligibility checks, annexure auto-fill, EMD tracking &amp; bid documents. GeM, CPPP &amp; nProcure supported." />
+    <meta name="description" content="AI tender analysis for Indian government tenders — BOQ extraction &amp; pricing, bid calculator, eligibility checks, annexure auto-fill &amp; EMD tracking. GeM, CPPP &amp; nProcure supported." />
 
     <!-- Canonical -->
     <link rel="canonical" href="https://www.tendermasterai.com/" />
@@ -19,7 +19,7 @@
     <meta property="og:type"        content="website" />
     <meta property="og:url"         content="https://www.tendermasterai.com/" />
     <meta property="og:title"       content="TenderMaster AI — Government Tender Analysis &amp; Annexure Filling for Indian Bidders" />
-    <meta property="og:description" content="Analyse Indian government tenders — BOQ extraction &amp; pricing, eligibility checks, auto-filled annexures, EMD tracking and AI-generated bid documents. GeM, CPPP &amp; nProcure supported." />
+    <meta property="og:description" content="Analyse Indian government tenders — BOQ extraction &amp; pricing, bid calculator, eligibility checks, auto-filled annexures and EMD tracking. GeM, CPPP &amp; nProcure supported." />
     <meta property="og:image"       content="https://www.tendermasterai.com/og-image.png" />
     <meta property="og:image:width"  content="1200" />
     <meta property="og:image:height" content="630" />
@@ -29,7 +29,7 @@
     <!-- Twitter / X card -->
     <meta name="twitter:card"        content="summary_large_image" />
     <meta name="twitter:title"       content="TenderMaster AI — Government Tender Analysis &amp; Annexure Filling for Indian Bidders" />
-    <meta name="twitter:description" content="Analyse Indian tenders — BOQ pricing, eligibility checks, auto-filled annexures, EMD tracking and AI-generated bid documents. GeM, CPPP &amp; nProcure supported." />
+    <meta name="twitter:description" content="AI tender analysis for Indian government tenders — BOQ pricing, bid calculator, eligibility checks, auto-filled annexures and EMD tracking. GeM, CPPP &amp; nProcure supported." />
     <meta name="twitter:image"       content="https://www.tendermasterai.com/og-image.png" />
 
     <!-- Favicon -->
@@ -43,6 +43,7 @@
       "@context": "https://schema.org",
       "@type": "Organization",
       "name": "TenderMaster AI",
+      "description": "AI-powered tender analysis platform for Indian businesses bidding on government tenders.",
       "url": "https://www.tendermasterai.com",
       "logo": "https://www.tendermasterai.com/tendermaster-logo-icon.png"
     }
@@ -56,9 +57,23 @@
       "name": "TenderMaster AI",
       "description": "AI-powered tender analysis platform for Indian businesses — extracts and prices Bill of Quantities (BOQ), checks eligibility, auto-fills annexures, tracks EMD and Security Deposit payments, and generates submission-ready bid documents.",
       "applicationCategory": "BusinessApplication",
+      "applicationSubCategory": "Tender Analysis and Bid Management Software",
       "operatingSystem": "Web",
       "url": "https://www.tendermasterai.com",
       "inLanguage": ["en", "hi", "gu"],
+      "audience": {
+        "@type": "Audience",
+        "audienceType": "Indian businesses bidding on government tenders (GeM, CPPP, nProcure and other e-procurement portals)"
+      },
+      "featureList": [
+        "Tender analysis — eligibility checks, compliance matrix, match score and risk assessment",
+        "Universal BOQ Engine — Bill of Quantities extraction and pricing-mode detection (Percentage Rate, Item Rate, Lump Sum/EPC)",
+        "Smart Financial Engine / bid calculator — item pricing, margin tracking and live bid value",
+        "AI Document Generator — submission-ready bid documents",
+        "Auto-filled annexures matching the tender authority's exact form",
+        "EMD and Security Deposit tracker",
+        "Multilingual support — English, Hindi and Gujarati"
+      ],
       "offers": [
         {
           "@type": "Offer",
@@ -80,6 +95,67 @@
           "price": "14999",
           "priceCurrency": "INR",
           "description": "20 tender analyses, valid 24 months from purchase"
+        }
+      ]
+    }
+    </script>
+
+    <!-- JSON-LD: FAQPage — content is identical to the visible FAQ section
+         on the landing page (src/pages/LandingPage.tsx, id="faq") and the
+         <noscript> fallback below. Kept in sync by hand; only real, shipped
+         features are described here, nothing fabricated. -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "FAQPage",
+      "mainEntity": [
+        {
+          "@type": "Question",
+          "name": "What does TenderMaster AI do?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "TenderMaster AI analyses Indian government tender documents — checking eligibility, extracting the Bill of Quantities (BOQ), calculating bid pricing, and generating submission-ready documents including auto-filled annexures."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "What is BOQ pricing?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "BOQ (Bill of Quantities) pricing means pricing every item in a tender's schedule to arrive at a total bid amount. TenderMaster AI's Universal BOQ Engine automatically detects the schedule format — Percentage Rate, Item Rate, or Lump Sum/EPC — extracts it, and gives you a bid calculator to price it."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Does TenderMaster AI support GeM, CPPP and nProcure tenders?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Yes. TenderMaster AI works with tenders from GeM (Government e-Marketplace), CPPP (Central Public Procurement Portal), nProcure and other Indian e-procurement portals — upload a document, a ZIP of documents, or a portal link."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "What languages does TenderMaster AI support?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "English, Hindi and Gujarati — analysis results and generated documents are available in all three."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Does TenderMaster AI generate bid documents?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Yes. The AI Document Generator produces submission-ready documents — company profile, EMD declaration, technical bid content and more — and auto-fills the exact annexure form issued by the tender department."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Does TenderMaster AI track EMD and Security Deposit?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Yes. Every EMD and Security Deposit payment is tracked through Paid → Pending Refund → Refunded, so nothing gets forgotten."
+          }
         }
       ]
     }
@@ -118,6 +194,19 @@
           <li><strong>Starter</strong> — ₹9,999 for 10 tender analyses (valid 24 months)</li>
           <li><strong>Pro</strong> — ₹14,999 for 20 tender analyses (valid 24 months)</li>
         </ul>
+        <h2>Frequently asked questions</h2>
+        <h3>What does TenderMaster AI do?</h3>
+        <p>TenderMaster AI analyses Indian government tender documents — checking eligibility, extracting the Bill of Quantities (BOQ), calculating bid pricing, and generating submission-ready documents including auto-filled annexures.</p>
+        <h3>What is BOQ pricing?</h3>
+        <p>BOQ (Bill of Quantities) pricing means pricing every item in a tender's schedule to arrive at a total bid amount. TenderMaster AI's Universal BOQ Engine automatically detects the schedule format — Percentage Rate, Item Rate, or Lump Sum/EPC — extracts it, and gives you a bid calculator to price it.</p>
+        <h3>Does TenderMaster AI support GeM, CPPP and nProcure tenders?</h3>
+        <p>Yes. TenderMaster AI works with tenders from GeM (Government e-Marketplace), CPPP (Central Public Procurement Portal), nProcure and other Indian e-procurement portals — upload a document, a ZIP of documents, or a portal link.</p>
+        <h3>What languages does TenderMaster AI support?</h3>
+        <p>English, Hindi and Gujarati — analysis results and generated documents are available in all three.</p>
+        <h3>Does TenderMaster AI generate bid documents?</h3>
+        <p>Yes. The AI Document Generator produces submission-ready documents — company profile, EMD declaration, technical bid content and more — and auto-fills the exact annexure form issued by the tender department.</p>
+        <h3>Does TenderMaster AI track EMD and Security Deposit?</h3>
+        <p>Yes. Every EMD and Security Deposit payment is tracked through Paid → Pending Refund → Refunded, so nothing gets forgotten.</p>
         <p><a href="/login">Get Started Free</a></p>
       </div>
     </noscript>

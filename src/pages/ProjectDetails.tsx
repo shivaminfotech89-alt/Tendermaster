@@ -33,10 +33,47 @@ import { decideBoqReplacement } from "../lib/boq/boqReplacementGate";
 import { buildAnalysisText as buildXlsxAnalysisText } from "../services/boqExcelExtractService";
 import { driveAnalysisJob } from "../lib/analysisJobDriver";
 import { OverviewGlanceAndDetails, OverviewAiSummary } from "../components/overview/ExpandedOverview";
+import * as mammoth from "mammoth";
 
 function formatFileSize(bytes: number): string {
   if (bytes >= 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
   return Math.round(bytes / 1024) + ' KB';
+}
+
+// Graceful-skip foundation: detects the %PDF- magic header. A file that
+// doesn't start with this is not a PDF, however it's named or typed —
+// previously the PDF fallback branch assumed otherwise and silently
+// relabeled anything it couldn't parse (e.g. a .docx) as application/pdf,
+// which the server then forwarded as one malformed part inside the single
+// combined Gemini call for the whole batch, failing the entire re-analysis
+// on one bad file. Gating on this real signature check closes that gap.
+function looksLikePdf(buffer: ArrayBuffer): boolean {
+  if (buffer.byteLength < 5) return false;
+  const bytes = new Uint8Array(buffer, 0, 5);
+  return bytes[0] === 0x25 && bytes[1] === 0x50 && bytes[2] === 0x44 && bytes[3] === 0x46 && bytes[4] === 0x2d; // "%PDF-"
+}
+
+// .docx text extraction — feeds the analysis exactly like digital-PDF text
+// and xlsx text already do (plain data:text/plain;base64 content), never a
+// BOQ-candidate raw upload (BOQ extraction stays PDF/xlsx only). Also
+// covers the old binary .doc format best-effort: mammoth can't parse it,
+// so that call rejects and this returns { ok: false }, which callers treat
+// as a graceful skip rather than a crash.
+async function extractDocxText(arrayBuffer: ArrayBuffer, fileName: string): Promise<{ dataUri: string | null; reason: string | null }> {
+  try {
+    const result = await mammoth.extractRawText({ arrayBuffer });
+    const text = (result.value || "").trim();
+    if (!text) {
+      return { dataUri: null, reason: "No readable text found in this document" };
+    }
+    const allText = `\n--- CONTENT OF DOCUMENT: ${fileName} ---\n${text}`;
+    const utf8Bytes = new TextEncoder().encode(allText);
+    const base64Text = btoa(String.fromCharCode(...utf8Bytes));
+    return { dataUri: `data:text/plain;base64,${base64Text}`, reason: null };
+  } catch (err) {
+    console.error(`Failed to extract text from ${fileName}:`, err);
+    return { dataUri: null, reason: "Could not read this Word document (unsupported or corrupted format)" };
+  }
 }
 
 function sanitizeDocOutput(raw: string): string {
@@ -1192,18 +1229,32 @@ export default function ProjectDetails() {
   };
 
   // Processes ONE selected file into content entries ready for Storage
-  // upload: for a ZIP, every PDF/xlsx entry inside it; for a standalone
-  // PDF or xlsx, itself; for anything else, a best-effort single entry
-  // (matches the file's own prior fallback behavior for .doc/.docx — not
-  // changed here). Never touches Storage itself — the caller uploads.
+  // upload: for a ZIP, every PDF/xlsx/docx entry inside it; for a standalone
+  // PDF, xlsx, or docx, itself; anything that no branch can actually handle
+  // is reported in `skipped` rather than guessed at. Never touches Storage
+  // itself — the caller uploads.
+  //
+  // Graceful-skip foundation: the PDF fallback branch previously assumed
+  // ANY file it didn't recognize was a PDF, and on an extraction failure
+  // fell back to re-labelling the file's raw bytes as application/pdf —
+  // which is exactly how a .docx file used to reach the server (mislabeled
+  // as a PDF), get forwarded as one malformed inlineData part inside the
+  // SINGLE combined Gemini call the server makes for the whole batch, and
+  // crash that entire call. `looksLikePdf` (the %PDF- magic header) gates
+  // that fallback now — anything that doesn't even look like a PDF is
+  // pushed to `skipped` instead of being silently mislabeled and sent
+  // through, so one unsupported/unreadable file can never take down the
+  // rest of the batch.
   const processFileForReanalysis = async (file: File): Promise<{
     contentUris: string[];
     entryNames: string[];
     rawEntries: ({ kind: 'pdf' | 'xlsx'; buffer: ArrayBuffer } | null)[];
+    skipped: { name: string; reason: string }[];
   }> => {
     const lowerName = file.name.toLowerCase();
     const isZip = lowerName.endsWith('.zip') || file.type === "application/zip" || file.type === "application/x-zip-compressed";
     const isXlsx = lowerName.endsWith('.xlsx') || lowerName.endsWith('.xls') || lowerName.endsWith('.csv');
+    const isWord = lowerName.endsWith('.docx') || lowerName.endsWith('.doc');
 
     if (isZip) {
       const zip = new JSZip();
@@ -1211,13 +1262,18 @@ export default function ProjectDetails() {
       const contentUris: string[] = [];
       const entryNames: string[] = [];
       const rawEntries: ({ kind: 'pdf' | 'xlsx'; buffer: ArrayBuffer } | null)[] = [];
+      const skipped: { name: string; reason: string }[] = [];
 
       for (const [filename, zipEntry] of Object.entries(contents.files)) {
         if (zipEntry.dir) continue;
         const lowerFilename = filename.toLowerCase();
+        const shortName = filename.split('/').pop() || filename;
         if (lowerFilename.endsWith('.pdf')) {
-          const shortName = filename.split('/').pop() || filename;
           const arrayBuffer = await zipEntry.async("arraybuffer");
+          if (!looksLikePdf(arrayBuffer)) {
+            skipped.push({ name: shortName, reason: "Not a valid PDF" });
+            continue;
+          }
           let dataUri: string;
           let isDigitalPdf = false;
           try {
@@ -1227,13 +1283,15 @@ export default function ProjectDetails() {
               ? `data:text/plain;base64,${textToBase64(extraction.text)}`
               : `data:application/pdf;base64,${arrayBufferToBase64(arrayBuffer)}`;
           } catch {
+            // Genuinely a PDF (passed the signature check) — pdf.js's local
+            // text extraction stumbled, but Gemini's own vision path may
+            // still read it; unchanged fallback behavior for real PDFs only.
             dataUri = `data:application/pdf;base64,${arrayBufferToBase64(arrayBuffer)}`;
           }
           contentUris.push(dataUri);
           entryNames.push(shortName);
           rawEntries.push(isDigitalPdf ? { kind: 'pdf', buffer: arrayBuffer } : null);
         } else if (lowerFilename.endsWith('.xlsx') || lowerFilename.endsWith('.xls') || lowerFilename.endsWith('.csv')) {
-          const shortName = filename.split('/').pop() || filename;
           const arrayBuffer = await zipEntry.async("arraybuffer");
           try {
             const workbook = XLSX.read(arrayBuffer, { type: "array" });
@@ -1245,10 +1303,28 @@ export default function ProjectDetails() {
             rawEntries.push({ kind: 'xlsx', buffer: arrayBuffer });
           } catch (err) {
             console.error(`Failed to parse spreadsheet ${filename}:`, err);
+            skipped.push({ name: shortName, reason: "Could not read this spreadsheet" });
+          }
+        } else if (lowerFilename.endsWith('.docx') || lowerFilename.endsWith('.doc')) {
+          // Word document — analysis text only (see extractDocxText below),
+          // never a BOQ-candidate raw upload; BOQ still comes from PDF/xlsx
+          // only, unchanged.
+          const arrayBuffer = await zipEntry.async("arraybuffer");
+          const docxResult = await extractDocxText(arrayBuffer, shortName);
+          if (docxResult.dataUri !== null) {
+            contentUris.push(docxResult.dataUri);
+            entryNames.push(shortName);
+            rawEntries.push(null);
+          } else {
+            skipped.push({ name: shortName, reason: docxResult.reason ?? "Could not read this document" });
           }
         }
+        // Any other entry type inside the zip (images, readme files, etc.)
+        // was already silently ignored before this fix — left as-is, not a
+        // regression, since those were never analyzable content to begin
+        // with and weren't reported either way.
       }
-      return { contentUris, entryNames, rawEntries };
+      return { contentUris, entryNames, rawEntries, skipped };
     }
 
     if (isXlsx) {
@@ -1265,12 +1341,37 @@ export default function ProjectDetails() {
         contentUris: [`data:text/plain;base64,${base64Text}`],
         entryNames: [file.name],
         rawEntries: [{ kind: 'xlsx', buffer: arrayBuffer }],
+        skipped: [],
       };
     }
 
-    // PDF (or best-effort fallback for anything else, e.g. .doc/.docx —
-    // unchanged from the prior single-file behavior).
+    if (isWord) {
+      // .docx (and best-effort .doc) — text feeds the analysis exactly like
+      // digital-PDF text and xlsx text already do (data:text/plain;base64).
+      // Deliberately NOT a BOQ-candidate raw upload (rawEntries: [null]) —
+      // BOQ extraction stays PDF/xlsx only, per the hard rule. A .doc file
+      // (old binary format) mammoth can't parse, or a corrupt .docx, lands
+      // in `skipped` rather than crashing anything.
+      const arrayBuffer = await file.arrayBuffer();
+      const docxResult = await extractDocxText(arrayBuffer, file.name);
+      if (docxResult.dataUri !== null) {
+        return {
+          contentUris: [docxResult.dataUri],
+          entryNames: [file.name],
+          rawEntries: [null],
+          skipped: [],
+        };
+      }
+      return { contentUris: [], entryNames: [], rawEntries: [], skipped: [{ name: file.name, reason: docxResult.reason ?? "Could not read this document" }] };
+    }
+
+    // PDF, gated by a real signature check — anything that doesn't even
+    // look like a PDF is skipped explicitly rather than silently relabeled
+    // and forwarded (see the graceful-skip note above this function).
     const arrayBuffer = await file.arrayBuffer();
+    if (!looksLikePdf(arrayBuffer)) {
+      return { contentUris: [], entryNames: [], rawEntries: [], skipped: [{ name: file.name, reason: "Unsupported or unreadable file type" }] };
+    }
     let isDigitalPdf = false;
     let dataUri: string;
     try {
@@ -1280,12 +1381,16 @@ export default function ProjectDetails() {
         ? `data:text/plain;base64,${textToBase64(extraction.text)}`
         : `data:application/pdf;base64,${arrayBufferToBase64(arrayBuffer)}`;
     } catch {
+      // Genuinely a PDF (passed the signature check) — same reasoning as
+      // the zip-entry branch above: keep the existing best-effort fallback
+      // for real PDFs only.
       dataUri = `data:application/pdf;base64,${arrayBufferToBase64(arrayBuffer)}`;
     }
     return {
       contentUris: [dataUri],
       entryNames: [file.name],
       rawEntries: [isDigitalPdf ? { kind: 'pdf', buffer: arrayBuffer } : null],
+      skipped: [],
     };
   };
 
@@ -1387,6 +1492,7 @@ export default function ProjectDetails() {
         if (n.includes('boq')) return "BOQ";
         if (n.endsWith('.zip') || f.type === "application/zip" || f.type === "application/x-zip-compressed") return "ZIP File";
         if (n.endsWith('.xlsx') || n.endsWith('.xls') || n.endsWith('.csv')) return "Excel BOQ";
+        if (n.endsWith('.docx') || n.endsWith('.doc')) return "Word Document";
         if (n.endsWith('.pdf') || f.type === "application/pdf") return "Tender Document";
         return "Other";
       };
@@ -1419,6 +1525,13 @@ export default function ProjectDetails() {
           const allEntryNames: string[] = [];
           const allRawEntries: ({ kind: 'pdf' | 'xlsx'; buffer: ArrayBuffer } | null)[] = [];
           const fileUploadRecords: { file: File; entryNames: string[] }[] = [];
+          // Graceful-skip foundation: files processFileForReanalysis couldn't
+          // handle (unsupported/unreadable) land here, never in
+          // allContentUris — so one bad file never blocks or crashes
+          // analysis of the rest of the batch. Reported to the user below,
+          // and left untouched in Project Documents (never promoted, since
+          // they never enter fileUploadRecords either).
+          const skippedFiles: { name: string; reason: string }[] = [];
           for (const f of files) {
             try {
               const result = await processFileForReanalysis(f);
@@ -1426,14 +1539,25 @@ export default function ProjectDetails() {
               allEntryNames.push(...result.entryNames);
               allRawEntries.push(...result.rawEntries);
               fileUploadRecords.push({ file: f, entryNames: result.entryNames });
+              skippedFiles.push(...result.skipped);
             } catch (fileErr) {
               console.error(`Failed to process ${f.name}:`, fileErr);
+              skippedFiles.push({ name: f.name, reason: "Could not be read or processed" });
             }
+          }
+
+          if (skippedFiles.length > 0) {
+            const summary = skippedFiles.map(s => `${s.name} (${s.reason})`).join('; ');
+            toast(`Skipped ${skippedFiles.length} file${skippedFiles.length === 1 ? '' : 's'} — couldn't be analyzed: ${summary}`, { icon: '⚠️', duration: 6000 });
           }
 
           if (allContentUris.length === 0) {
               setReanalyzing(false);
-              toast.error("No PDFs or spreadsheets found in the selected file(s).");
+              if (skippedFiles.length === 0) {
+                toast.error("No PDFs, spreadsheets, or Word documents found in the selected file(s).");
+              }
+              // If everything was skipped, the toast above already explained why —
+              // no need for a second, redundant error toast.
               return;
           }
 
@@ -1554,6 +1678,19 @@ export default function ProjectDetails() {
           const successToastText = `Re-analyzed using ${combinedUrls.length} document${combinedUrls.length === 1 ? '' : 's'} `
             + `(${existingCombined.urls.length} original${existingCombined.urls.length === 1 ? '' : 's'} + ${newSourceUrls.length} new).`;
 
+          // Records client-side-skipped files (unsupported/unreadable —
+          // never reached the server) into remarks.notes too, so the
+          // Analysis Notes tab reflects them the same way it already does
+          // for server-side filesSkipped, not just the toast above.
+          const appendClientSkipNotes = async (freshProject: any) => {
+            if (skippedFiles.length === 0 || !projectId) return;
+            const notes = skippedFiles.map(s => `${s.name}: skipped — ${s.reason}`);
+            const currentRemarks = freshProject?.remarks || { totalFilesProvided: 0, filesAnalyzed: 0, filesSkipped: [], notes: [] };
+            const updatedRemarks = { ...currentRemarks, notes: [...(currentRemarks.notes || []), ...notes] };
+            await updateDoc(doc(db, "saved_tenders", projectId), { remarks: updatedRemarks });
+            setProject((prev: any) => prev ? { ...prev, remarks: updatedRemarks } : prev);
+          };
+
           if (data.tier === 2 && data.jobId) {
             // Large re-analysis — routed to Tier-2 (Fix 2b).
             const fresh = await driveReanalysisJob(data.jobId);
@@ -1563,6 +1700,7 @@ export default function ProjectDetails() {
                 filesSkipped: fresh?.remarks?.filesSkipped || [],
                 currentProject: fresh, currentUploadedFiles: (fresh?.uploadedFiles as typeof newFiles) ?? newFiles,
               });
+              await appendClientSkipNotes(fresh);
               toast.success(successToastText);
             }
             return;
@@ -1583,6 +1721,7 @@ export default function ProjectDetails() {
                 filesSkipped: fresh?.remarks?.filesSkipped || [],
                 currentProject: fresh, currentUploadedFiles: (fresh?.uploadedFiles as typeof newFiles) ?? newFiles,
               });
+              await appendClientSkipNotes(fresh);
             }
           }
           toast.success(successToastText);

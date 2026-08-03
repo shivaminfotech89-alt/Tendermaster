@@ -139,10 +139,10 @@ export default function LandingPage() {
           className="text-4xl md:text-5xl font-extrabold text-slate-900 leading-tight max-w-3xl mx-auto"
           style={{ letterSpacing: '-.03em' }}
         >
-          Everything you need to win a tender — in one place.
+          Win More Government Tenders with AI-Powered Bid Analysis
         </h1>
         <p className="mt-5 text-lg text-slate-500 max-w-2xl mx-auto leading-relaxed">
-          Analysis, eligibility, risks, filled annexures, and answers to every question — in your language.
+          Automate your tender analysis, extract eligibility and compliance criteria instantly, and generate submission-ready technical bids in minutes instead of days.
         </p>
         <div className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-3.5">
           {user ? (

@@ -1,6 +1,6 @@
 # TenderMaster AI
 
-> AI-powered tender analysis platform for Indian businesses. Upload a government tender document and get eligibility checks, BOQ (Bill of Quantities) extraction and pricing, a bid calculator, bid recommendations, and auto-filled submission documents — in English, Hindi or Gujarati.
+> AI-powered bid analysis platform for Indian government tenders. Upload a tender document and get instant eligibility and compliance checks, BOQ (Bill of Quantities) extraction and pricing, a bid calculator, and submission-ready technical bids — in English, Hindi or Gujarati.
 
 TenderMaster AI helps Indian bidders decide whether to bid on a government tender and prepares the paperwork to submit it. It supports tenders from GeM (Government e-Marketplace), CPPP (Central Public Procurement Portal), nProcure and other Indian e-procurement portals.
 

@@ -46,11 +46,18 @@ service cloud.firestore {
     }
 
     match /tender_analyses/{analysisId} {
-      allow read, create, update, delete: if isSignedIn();
+      allow read, update, delete: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
     }
 
     match /saved_tenders/{savedId} {
-      allow read, create, update, delete: if isSignedIn();
+      // Read includes isAdmin() — AdminPanel.tsx/SuperAdminPanel.tsx's user
+      // project-drawer reads other users' projects for oversight; confirmed
+      // no admin write path exists for this collection, so update/delete/
+      // create stay strictly owner-only, unlike the read side.
+      allow read: if isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow update, delete: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
     }
 
     match /notifications/{notificationId} {

@@ -6,11 +6,15 @@
   "scripts": {
     "dev": "tsx server.ts",
     "build": "vite build && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs",
+    "build:guides": "vite build -c vite.guides.config.ts",
+    "build:all": "npm run build && npm run build:guides",
     "start": "node dist/server.cjs",
     "clean": "rm -rf dist server.js",
     "preview": "vite preview",
     "lint": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "screenshot": "node scripts/auto-screenshot.cjs",
+    "voiceover": "node scripts/generate-voiceover.cjs"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
@@ -44,6 +48,7 @@
     "react-dom": "^19.0.1",
     "react-hot-toast": "^2.6.0",
     "react-i18next": "^17.0.8",
+    "react-is": "^19.2.8",
     "react-markdown": "^10.1.0",
     "react-router-dom": "^7.18.0",
     "recharts": "^3.8.1",

@@ -1,0 +1,15 @@
+/* Standalone Tailwind entry for the /guides static site — deliberately NOT
+   importing /src/index.css. That file now carries `@source not "../guides"`
+   specifically so the MAIN app's build doesn't scan this directory's HTML
+   (see src/index.css's comment); sharing that same file here would mean
+   this exclusion also strips /guides's own classes from ITS OWN compiled
+   CSS. Duplicating the two real lines (Tailwind import + Inter font token)
+   keeps the two builds' Tailwind scans fully independent in both
+   directions — this file additionally excludes ../src so the guides
+   bundle doesn't carry unrelated app-only classes. */
+@import "tailwindcss";
+@source not "../src";
+
+@theme {
+  --font-sans: 'Inter', ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+}

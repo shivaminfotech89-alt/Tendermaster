@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="/guides/guides.css" />
+    <link rel="icon" type="image/png" sizes="512x512" href="/tendermaster-logo-icon.png" />
+
+    <title>A Practical Field Guide to Reading a Tender BOQ | TenderMaster AI</title>
+    <meta name="description" content="A step-by-step walkthrough for locating, understanding and cross-checking a Bill of Quantities before you quote — the schedule vs. the headline value, units and quantities, provisional sums, and common mistakes." />
+    <link rel="canonical" href="https://www.tendermasterai.com/guides/reading-a-tender-boq" />
+
+    <meta property="og:type" content="article" />
+    <meta property="og:url" content="https://www.tendermasterai.com/guides/reading-a-tender-boq" />
+    <meta property="og:title" content="A Practical Field Guide to Reading a Tender BOQ" />
+    <meta property="og:description" content="A step-by-step walkthrough for locating, understanding and cross-checking a Bill of Quantities before you quote — the schedule vs. the headline value, units and quantities, provisional sums, and common mistakes." />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="A Practical Field Guide to Reading a Tender BOQ" />
+    <meta name="twitter:description" content="A step-by-step walkthrough for locating, understanding and cross-checking a Bill of Quantities before you quote — the schedule vs. the headline value, units and quantities, provisional sums, and common mistakes." />
+
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "Article",
+      "headline": "A Practical Field Guide to Reading a Tender BOQ",
+      "description": "A step-by-step walkthrough for locating, understanding and cross-checking a Bill of Quantities before you quote — the schedule vs. the headline value, units and quantities, provisional sums, and common mistakes.",
+      "author": { "@type": "Organization", "name": "TenderMaster AI", "url": "https://www.tendermasterai.com" },
+      "publisher": { "@type": "Organization", "name": "TenderMaster AI", "url": "https://www.tendermasterai.com" },
+      "datePublished": "2026-08-03",
+      "dateModified": "2026-08-03",
+      "mainEntityOfPage": "https://www.tendermasterai.com/guides/reading-a-tender-boq"
+    }
+    </script>
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "HowTo",
+      "name": "How to read a tender BOQ before you quote",
+      "step": [
+        { "@type": "HowToStep", "name": "Find the actual schedule", "text": "Locate the Bill of Quantities or Schedule-B document itself, separate from the tender notice's headline estimated value — these are often different figures in the same tender." },
+        { "@type": "HowToStep", "name": "Identify the pricing structure", "text": "Check whether the schedule asks for a rate per item with quantities (item rate), a single percentage above or below an estimate (percentage rate), or one fixed total (lump sum/EPC)." },
+        { "@type": "HowToStep", "name": "Check units and quantities", "text": "Confirm the unit of measurement for every item (per sqm, per cum, per running metre, per each) and note any items marked provisional or nominal, since these quantities may change during execution." },
+        { "@type": "HowToStep", "name": "Look for pre-filled columns", "text": "Some schedules include a department estimated rate column alongside the column you're meant to fill in — don't confuse the two, and don't accidentally quote the department's own estimate back to them." },
+        { "@type": "HowToStep", "name": "Cross-check the schedule total against the headline value", "text": "Sum the schedule (or note its stated total) and compare it against the tender notice's own estimated value — a mismatch is common and usually means the headline figure includes items outside the priced schedule, or vice versa." },
+        { "@type": "HowToStep", "name": "Note provisional sums and prime cost items", "text": "Identify any provisional sum or prime cost (PC) line items — these are placeholder allowances for work or materials not yet finalised, and are typically excluded from your competitive pricing margin." }
+      ]
+    }
+    </script>
+  </head>
+  <body class="min-h-screen bg-white text-slate-900 font-sans flex flex-col">
+    <header class="border-b border-slate-100">
+      <div class="max-w-4xl mx-auto px-6 lg:px-14 py-4 flex items-center justify-between">
+        <a href="https://www.tendermasterai.com/" class="font-extrabold text-slate-900 text-lg" style="letter-spacing:-.02em">
+          TenderMaster <span class="text-indigo-600">AI</span>
+        </a>
+        <nav class="flex items-center gap-6 text-sm font-medium text-slate-600">
+          <a href="/guides/" class="hover:text-indigo-600 transition-colors">Guides</a>
+          <a href="https://www.tendermasterai.com/login" class="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold px-4 py-2 rounded-lg transition-colors">
+            Start Free
+          </a>
+        </nav>
+      </div>
+    </header>
+
+    <main class="flex-1">
+      <article class="max-w-3xl mx-auto px-6 lg:px-14 py-16">
+        <p class="text-xs font-semibold text-indigo-600 mb-2">BOQ &amp; Pricing</p>
+        <h1 class="text-3xl font-extrabold text-slate-900 mb-4 leading-tight" style="letter-spacing:-.02em">
+          A Practical Field Guide to Reading a Tender BOQ
+        </h1>
+        <p class="text-slate-500 text-lg leading-relaxed mb-10">
+          A step-by-step walkthrough for locating, understanding and cross-checking a Bill of Quantities before you quote a single rate.
+        </p>
+
+        <div class="text-slate-700 leading-relaxed space-y-6 [&_h2]:text-xl [&_h2]:font-bold [&_h2]:text-slate-900 [&_h2]:mt-10 [&_h2]:mb-3 [&_h3]:text-base [&_h3]:font-bold [&_h3]:text-slate-900 [&_h3]:mt-6 [&_h3]:mb-2 [&_ul]:list-disc [&_ul]:pl-5 [&_ul]:space-y-1.5 [&_ol]:list-decimal [&_ol]:pl-5 [&_ol]:space-y-2 [&_strong]:text-slate-900 [&_strong]:font-semibold">
+          <p>
+            A Bill of Quantities (BOQ) is the document your entire bid is built on — and misreading it is one of the most expensive mistakes a bidder can make. It's usually buried inside a larger tender package alongside dozens of other pages, easy to skim past or misinterpret under deadline pressure. Here's how to actually read one properly, step by step.
+          </p>
+
+          <h2>Step 1: Find the actual schedule, not just the headline value</h2>
+          <p>
+            Every tender notice states an estimated or approximate value up front — but that headline figure is <strong>not</strong> the same document as the BOQ or Schedule-B itself. The schedule is usually a separate annexure listing individual items (or, for percentage-rate tenders, referencing a Schedule of Rates). Locate that specific document before doing anything else. Bidders who price only against the headline value, without ever opening the actual schedule, routinely miss items, wrong units, or a total that doesn't match what they assumed.
+          </p>
+
+          <h2>Step 2: Identify the pricing structure</h2>
+          <p>
+            Before you can price anything, confirm which structure the schedule uses:
+          </p>
+          <ul>
+            <li><strong>Item rate</strong> — a list of individual items, each with a quantity, asking you to fill in your own rate per item.</li>
+            <li><strong>Percentage rate</strong> — a single ask for a percentage above or below a published estimate or Schedule of Rates, rather than item-by-item pricing.</li>
+            <li><strong>Lump sum / EPC</strong> — one fixed total for the whole scope (or per defined package), with no line-by-line quantities to price against.</li>
+          </ul>
+          <p>
+            Each requires a completely different pricing approach, so getting this identification right first is non-negotiable.
+          </p>
+
+          <h2>Step 3: Check units and quantities carefully</h2>
+          <p>
+            For an item-rate schedule, confirm the unit of measurement for every single item — per square metre, per cubic metre, per running metre, per kilogram, per each — since misreading a unit (pricing per metre when the schedule means per square metre, for instance) silently multiplies your rate wrong. Also watch for quantities marked <strong>provisional</strong> or <strong>nominal</strong>: these are estimates the department expects may change once actual measured work is done, and they shouldn't be treated with the same confidence as a firm, fixed quantity.
+          </p>
+
+          <h2>Step 4: Watch for pre-filled columns</h2>
+          <p>
+            Some schedules include the department's own estimated rate in one column, right next to the blank column you're meant to fill in with your quoted rate. It happens more often than you'd expect: a bidder accidentally enters a rate in the wrong column, or worse, copies the department's estimated rate back to them instead of their own competitive price. Always confirm which column is actually being scored before you submit.
+          </p>
+
+          <h2>Step 5: Cross-check the schedule total against the tender's headline value</h2>
+          <p>
+            Once you've priced the schedule (or noted its stated total, for a percentage-rate tender), compare that figure against the tender notice's own "estimated value." These two numbers frequently don't match, and the mismatch usually has a real explanation — the headline figure might include contingencies, taxes, or scope outside the priced schedule, or the schedule might only cover part of a larger project value. Don't assume they should be identical; understand <em>why</em> they differ before you finalise anything.
+          </p>
+
+          <h2>Step 6: Note provisional sums and prime cost items</h2>
+          <p>
+            Many schedules include a <strong>provisional sum</strong> or <strong>prime cost (PC) item</strong> — a placeholder allowance for work or materials that aren't fully specified yet (a nominated subcontractor's scope, for example, or a material whose exact specification is still being finalised). These are typically fixed allowances passed through the contract rather than items you compete on — don't build your margin expectations around them the way you would a normal priced item.
+          </p>
+
+          <h2>Common mistakes</h2>
+          <ul>
+            <li><strong>Pricing from the headline value alone</strong> — never opening the actual schedule document and pricing based on the tender notice's summary figure instead.</li>
+            <li><strong>Missing a unit mismatch</strong> — quoting per running metre against a quantity that's actually in square metres, or similar.</li>
+            <li><strong>Treating provisional quantities as fixed</strong> — building a tight margin around a quantity the department has explicitly flagged as subject to change.</li>
+            <li><strong>Ignoring provisional sums when comparing totals</strong> — assuming your competitively-priced total should equal the tender's headline value, without accounting for pass-through allowances.</li>
+          </ul>
+
+          <h2>Quick checklist before you quote</h2>
+          <ol>
+            <li>Have you located the actual BOQ/Schedule-B, separate from the tender notice's headline figure?</li>
+            <li>Have you confirmed whether it's item rate, percentage rate, or lump sum/EPC?</li>
+            <li>Have you checked every item's unit of measurement, and flagged provisional/nominal quantities?</li>
+            <li>Have you confirmed which column is the one being scored, if an estimated rate is shown alongside it?</li>
+            <li>Have you reconciled your schedule total against the tender's headline estimated value, and understood any difference?</li>
+            <li>Have you identified any provisional sums or PC items and excluded them from your competitive margin?</li>
+          </ol>
+        </div>
+      </article>
+    </main>
+
+    <footer class="border-t border-slate-100 py-8 px-6 lg:px-14 text-sm text-slate-400">
+      <div class="max-w-4xl mx-auto flex flex-col md:flex-row justify-between gap-3">
+        <span>&copy; 2026 TenderMaster AI. All rights reserved.</span>
+        <div class="flex gap-5">
+          <a href="https://www.tendermasterai.com/" class="hover:text-slate-600 transition-colors">Home</a>
+          <a href="https://www.tendermasterai.com/terms" class="hover:text-slate-600 transition-colors">Terms</a>
+          <a href="https://www.tendermasterai.com/privacy" class="hover:text-slate-600 transition-colors">Privacy</a>
+        </div>
+      </div>
+    </footer>
+  </body>
+</html>

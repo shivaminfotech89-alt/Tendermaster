@@ -1,4 +1,6 @@
 {
+  "buildCommand": "npm run build:all",
+  "outputDirectory": "dist",
   "functions": {
     "api/**/*": {
       "maxDuration": 300,
@@ -9,6 +11,22 @@
     {
       "source": "/api/(.*)",
       "destination": "/api/index.js"
+    },
+    {
+      "source": "/guides",
+      "destination": "/guides/index.html"
+    },
+    {
+      "source": "/guides/",
+      "destination": "/guides/index.html"
+    },
+    {
+      "source": "/guides/reading-a-tender-boq",
+      "destination": "/guides/reading-a-tender-boq/index.html"
+    },
+    {
+      "source": "/guides/reading-a-tender-boq/",
+      "destination": "/guides/reading-a-tender-boq/index.html"
     },
     {
       "source": "/(.*)",

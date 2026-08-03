@@ -21,6 +21,7 @@ import Settings from "./pages/Settings";
 import Documents from "./pages/Documents";
 import TermsAndConditions from "./pages/TermsAndConditions";
 import PrivacyPolicy from "./pages/PrivacyPolicy";
+import PromoVideo from "./pages/PromoVideo";
 
 class ErrorBoundary extends React.Component<any, any> {
   constructor(props: any) { super(props); this.state = { hasError: false, error: null }; }
@@ -64,6 +65,7 @@ export default function App() {
               <Route path="/login" element={<Login />} />
               <Route path="/terms" element={<TermsAndConditions />} />
               <Route path="/privacy" element={<PrivacyPolicy />} />
+              <Route path="/promo" element={<PromoVideo />} />
               
               <Route path="/dashboard" element={<ProtectedRoute><Layout /></ProtectedRoute>}>
                 <Route index element={<Dashboard />} />

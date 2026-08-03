@@ -3,7 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import {
   CheckCircle2, FileText, ArrowRight, Menu, X, Calendar, MessageSquare,
   Building2, Languages, CreditCard, Folder, LayoutGrid,
-  FileSpreadsheet, Calculator
+  FileSpreadsheet, Calculator, Play
 } from 'lucide-react';
 import { useAuth } from '../auth/AuthProvider';
 import toast from 'react-hot-toast';
@@ -154,6 +154,9 @@ export default function LandingPage() {
               Get Started Free <ArrowRight className="w-4 h-4" />
             </Link>
           )}
+          <Link to="/promo" className="inline-flex items-center gap-2 px-6 py-3.5 bg-slate-900 hover:bg-slate-800 text-white font-bold text-sm rounded-xl transition-all shadow-lg shadow-slate-900/10">
+            Watch AI Promo <Play className="w-4 h-4 text-indigo-400 fill-indigo-400" />
+          </Link>
           <a href="#how" className="inline-flex items-center gap-2 px-6 py-3.5 text-slate-700 font-semibold text-sm rounded-xl border border-slate-200 hover:bg-slate-50 transition-all">
             See how it works
           </a>

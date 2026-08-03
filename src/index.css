@@ -1,5 +1,14 @@
 @import "tailwindcss";
 
+/* Tailwind v4 auto-scans the whole project root for class names by
+   default, not just this build's own module graph — so without this, the
+   separate /guides static site (guides/*.html, its own isolated build via
+   vite.guides.config.ts) would get pulled into the MAIN app's compiled CSS
+   too, changing its output for a reason with nothing to do with the app
+   itself. Confirmed empirically: removing guides/*.html from the scan
+   restores the app's build output to byte-identical. */
+@source not "../guides";
+
 @theme {
   --font-sans: 'Inter', ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
 }

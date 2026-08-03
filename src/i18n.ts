@@ -139,7 +139,14 @@ const resources = {
       "ask_prompt_financial_highlights": "Summarize the key financial requirements and figures for this tender.",
       "ask_prompt_technical_highlights": "Summarize the key technical eligibility requirements for this tender.",
       "ask_prompt_qualification_highlights": "Summarize the key qualification and registration requirements for this tender.",
-      "ask_prompt_ai_summary": "Give me an overall summary and recommendation for this tender."
+      "ask_prompt_ai_summary": "Give me an overall summary and recommendation for this tender.",
+
+      "chat_select_project_title": "Global Tender Chat",
+      "chat_select_project_subtitle": "Select a project to start chatting with its dedicated AI assistant.",
+      "chat_search_placeholder": "Search projects...",
+      "chat_no_projects_found": "No projects found.",
+      "chat_recently_chatted": "Recent chat",
+      "chat_unnamed_project": "Unnamed Project"
     }
   },
   hi: {
@@ -277,7 +284,14 @@ const resources = {
       "ask_prompt_financial_highlights": "इस निविदा की मुख्य वित्तीय आवश्यकताओं और आंकड़ों का सारांश दें।",
       "ask_prompt_technical_highlights": "इस निविदा की मुख्य तकनीकी पात्रता आवश्यकताओं का सारांश दें।",
       "ask_prompt_qualification_highlights": "इस निविदा की मुख्य योग्यता और पंजीकरण आवश्यकताओं का सारांश दें।",
-      "ask_prompt_ai_summary": "इस निविदा के लिए समग्र सारांश और सिफारिश दें।"
+      "ask_prompt_ai_summary": "इस निविदा के लिए समग्र सारांश और सिफारिश दें।",
+
+      "chat_select_project_title": "ग्लोबल टेंडर चैट",
+      "chat_select_project_subtitle": "इसके समर्पित एआई सहायक से चैट शुरू करने के लिए एक प्रोजेक्ट चुनें।",
+      "chat_search_placeholder": "प्रोजेक्ट खोजें...",
+      "chat_no_projects_found": "कोई प्रोजेक्ट नहीं मिला।",
+      "chat_recently_chatted": "हाल की चैट",
+      "chat_unnamed_project": "अनाम प्रोजेक्ट"
     }
   },
   gu: {
@@ -415,7 +429,14 @@ const resources = {
       "ask_prompt_financial_highlights": "આ ટેન્ડરની મુખ્ય નાણાકીય આવશ્યકતાઓ અને આંકડાઓનો સારાંશ આપો.",
       "ask_prompt_technical_highlights": "આ ટેન્ડરની મુખ્ય તકનીકી પાત્રતા આવશ્યકતાઓનો સારાંશ આપો.",
       "ask_prompt_qualification_highlights": "આ ટેન્ડરની મુખ્ય લાયકાત અને નોંધણી આવશ્યકતાઓનો સારાંશ આપો.",
-      "ask_prompt_ai_summary": "આ ટેન્ડર માટે એકંદર સારાંશ અને ભલામણ આપો."
+      "ask_prompt_ai_summary": "આ ટેન્ડર માટે એકંદર સારાંશ અને ભલામણ આપો.",
+
+      "chat_select_project_title": "ગ્લોબલ ટેન્ડર ચેટ",
+      "chat_select_project_subtitle": "તેના સમર્પિત AI સહાયક સાથે ચેટ શરૂ કરવા માટે એક પ્રોજેક્ટ પસંદ કરો.",
+      "chat_search_placeholder": "પ્રોજેક્ટ્સ શોધો...",
+      "chat_no_projects_found": "કોઈ પ્રોજેક્ટ મળ્યો નથી.",
+      "chat_recently_chatted": "તાજેતરની ચેટ",
+      "chat_unnamed_project": "અનામી પ્રોજેક્ટ"
     }
   }
 };

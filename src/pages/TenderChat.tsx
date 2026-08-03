@@ -1,9 +1,9 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { collection, query, where, getDocs, addDoc, writeBatch, serverTimestamp } from "firebase/firestore";
 import { db } from "../lib/firebase";
 import { useAuth } from "../auth/AuthProvider";
-import { MessageSquare, Search, Send, Loader2, ArrowLeft, FolderOpen, Trash2 } from "lucide-react";
+import { MessageSquare, Search, Send, Loader2, ArrowLeft, FolderOpen, Trash2, IndianRupee, Calendar, Clock } from "lucide-react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useTranslation } from "react-i18next";
@@ -20,6 +20,12 @@ function fmtTs(d?: Date): string {
   return d.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true });
 }
 
+function fmtDate(ts: any): string {
+  if (!ts) return "";
+  const d = ts?.toDate ? ts.toDate() : new Date(ts);
+  return d.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
+}
+
 export default function TenderChat() {
   const { user, role } = useAuth();
   const { t, i18n } = useTranslation();
@@ -30,6 +36,13 @@ export default function TenderChat() {
   const [search, setSearch] = useState("");
 
   const [selectedProject, setSelectedProject] = useState<any | null>(null);
+  // Most-recent chat_messages timestamp per projectId (ms since epoch) —
+  // read-only, derived from the existing chat_messages collection (no new
+  // field, no write-path change to handleSendMessage/the chat endpoint).
+  // Covers historical conversations retroactively, not just ones sent after
+  // this feature shipped. Powers PART 1's "recently-chatted bubbles to the
+  // top" ordering below.
+  const [lastChatMap, setLastChatMap] = useState<Map<string, number>>(new Map());
 
   const [chatInput, setChatInput] = useState("");
   const [messages, setMessages] = useState<ChatMsg[]>([]);
@@ -52,6 +65,29 @@ export default function TenderChat() {
       }
     }
     loadProjects();
+  }, [user]);
+
+  useEffect(() => {
+    async function loadLastChatActivity() {
+      if (!user) return;
+      try {
+        const q = query(collection(db, "chat_messages"), where("userId", "==", user.uid));
+        const snap = await getDocs(q);
+        const map = new Map<string, number>();
+        for (const d of snap.docs) {
+          const data = d.data() as any;
+          const pid = data.projectId as string | undefined;
+          const ms = data.createdAt?.toMillis?.() ?? 0;
+          if (!pid || !ms) continue;
+          const existing = map.get(pid) ?? 0;
+          if (ms > existing) map.set(pid, ms);
+        }
+        setLastChatMap(map);
+      } catch (err) {
+        console.error("Failed to load chat activity for ordering:", err);
+      }
+    }
+    loadLastChatActivity();
   }, [user]);
 
   // "Ask AI about this" from the expanded Tender Overview (ProjectDetails.tsx)
@@ -78,9 +114,27 @@ export default function TenderChat() {
     chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, chatLoading]);
 
-  const filteredProjects = projects.filter(p =>
-    (p.projectName || p.tenderName || "").toLowerCase().includes(search.toLowerCase())
-  );
+  // PART 1 ordering: recently-chatted projects first (most recent chat
+  // activity at the top, derived from lastChatMap), then everything else
+  // by newest-created (savedAt) — same field/direction Projects.tsx uses
+  // as its own "Newest" default, for consistency across the app.
+  const sortedProjects = useMemo(() => {
+    return [...projects].sort((a, b) => {
+      const aChat = lastChatMap.get(a.id);
+      const bChat = lastChatMap.get(b.id);
+      if (aChat != null && bChat != null) return bChat - aChat;
+      if (aChat != null) return -1;
+      if (bChat != null) return 1;
+      return (b.savedAt?.toMillis?.() ?? 0) - (a.savedAt?.toMillis?.() ?? 0);
+    });
+  }, [projects, lastChatMap]);
+
+  const filteredProjects = useMemo(() => {
+    const q = search.toLowerCase();
+    return sortedProjects.filter(p =>
+      (p.projectName || p.tenderName || "").toLowerCase().includes(q)
+    );
+  }, [sortedProjects, search]);
 
   const loadChatHistory = async (pid: string) => {
     if (!user) return;
@@ -205,11 +259,11 @@ export default function TenderChat() {
   if (!selectedProject) {
     return (
       <div className="max-w-4xl mx-auto p-4 md:p-8">
-        <h1 className="text-2xl font-bold text-slate-800 mb-2 flex items-center gap-2">
-          <MessageSquare className="w-6 h-6 text-blue-600" />
-          Global Tender Chat
+        <h1 className="text-2xl font-bold text-slate-900 mb-2 flex items-center gap-2">
+          <MessageSquare className="w-6 h-6 text-indigo-600" />
+          {t('chat_select_project_title')}
         </h1>
-        <p className="text-slate-500 mb-6">Select a project to start chatting with its dedicated AI assistant.</p>
+        <p className="text-slate-500 mb-6">{t('chat_select_project_subtitle')}</p>
 
         <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden flex flex-col items-center">
           <div className="w-full p-4 border-b border-slate-100">
@@ -217,38 +271,67 @@ export default function TenderChat() {
               <Search className="w-5 h-5 absolute left-3 top-2.5 text-slate-400" />
               <input
                 type="text"
-                placeholder="Search projects..."
-                className="w-full pl-10 pr-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                placeholder={t('chat_search_placeholder')}
+                className="w-full pl-10 pr-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
                 value={search}
                 onChange={e => setSearch(e.target.value)}
               />
             </div>
           </div>
 
-          <div className="w-full divide-y divide-slate-100 max-h-[60vh] overflow-y-auto">
+          <div className="w-full divide-y divide-slate-100 max-h-[65vh] overflow-y-auto">
             {filteredProjects.length === 0 ? (
-              <div className="p-8 text-center text-slate-500">No projects found.</div>
+              <div className="p-8 text-center text-slate-500">{t('chat_no_projects_found')}</div>
             ) : (
-              filteredProjects.map(p => (
-                <div
-                  key={p.id}
-                  onClick={() => { setSelectedProject(p); loadChatHistory(p.id); }}
-                  className="p-4 hover:bg-blue-50 cursor-pointer flex items-center justify-between group transition-colors"
-                >
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-lg bg-blue-100 text-blue-600 flex items-center justify-center shrink-0">
-                      <FolderOpen className="w-5 h-5" />
+              filteredProjects.map(p => {
+                const recentlyChatted = lastChatMap.has(p.id);
+                const score = p.details?.compatibility?.score;
+                const tenderValue = p.details?.tender_simplified?.tender_value;
+                return (
+                  <div
+                    key={p.id}
+                    onClick={() => { setSelectedProject(p); loadChatHistory(p.id); }}
+                    className="p-4 hover:bg-indigo-50/60 cursor-pointer flex items-center justify-between gap-3 group transition-colors"
+                  >
+                    <div className="flex items-center gap-3 min-w-0 flex-1">
+                      <div className={`w-10 h-10 rounded-lg flex items-center justify-center shrink-0 ${recentlyChatted ? 'bg-indigo-600 text-white' : 'bg-indigo-100 text-indigo-600'}`}>
+                        <FolderOpen className="w-5 h-5" />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <h3 className="font-bold text-slate-800 group-hover:text-indigo-700 transition-colors truncate min-w-0">
+                            {p.projectName || p.tenderName || t('chat_unnamed_project')}
+                          </h3>
+                          {recentlyChatted && (
+                            <span className="shrink-0 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-100 text-indigo-700 whitespace-nowrap">
+                              <Clock className="w-2.5 h-2.5" /> {t('chat_recently_chatted')}
+                            </span>
+                          )}
+                          {score != null && (
+                            <span className={`shrink-0 px-1.5 py-0.5 rounded text-[10px] font-bold whitespace-nowrap ${score >= 80 ? 'bg-emerald-100 text-emerald-800' : score >= 50 ? 'bg-amber-100 text-amber-800' : 'bg-slate-100 text-slate-600'}`}>
+                              {t('match_score')}: {score}/100
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex items-center flex-wrap gap-x-3 gap-y-0.5 mt-1 text-xs text-slate-400">
+                          {tenderValue && (
+                            <span className="flex items-center gap-1 min-w-0">
+                              <IndianRupee className="w-3 h-3 shrink-0" />
+                              <span className="truncate">{tenderValue}</span>
+                            </span>
+                          )}
+                          {p.savedAt && (
+                            <span className="flex items-center gap-1 shrink-0">
+                              <Calendar className="w-3 h-3" /> {t('saved')} {fmtDate(p.savedAt)}
+                            </span>
+                          )}
+                        </div>
+                      </div>
                     </div>
-                    <div>
-                      <h3 className="font-bold text-slate-800 group-hover:text-blue-700 transition-colors">
-                        {p.projectName || p.tenderName || "Unnamed Project"}
-                      </h3>
-                      <p className="text-sm text-slate-500">{p.details?.executive_summary?.substring(0, 80)}...</p>
-                    </div>
+                    <MessageSquare className="w-5 h-5 text-slate-300 group-hover:text-indigo-500 shrink-0" />
                   </div>
-                  <MessageSquare className="w-5 h-5 text-slate-300 group-hover:text-blue-500" />
-                </div>
-              ))
+                );
+              })
             )}
           </div>
         </div>

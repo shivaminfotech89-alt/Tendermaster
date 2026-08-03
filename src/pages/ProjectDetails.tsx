@@ -1033,9 +1033,9 @@ export default function ProjectDetails() {
   // concurrent live edit elsewhere on the page can't be clobbered by a
   // stale snapshot. Also the fix for the Analysis Notes panel showing
   // stale file history — the old code only ever merged `details`.
-  const refreshProjectAfterReanalysis = async (targetProjectId: string) => {
+  const refreshProjectAfterReanalysis = async (targetProjectId: string): Promise<any | null> => {
     const freshSnap = await getDoc(doc(db, "saved_tenders", targetProjectId));
-    if (!freshSnap.exists()) return;
+    if (!freshSnap.exists()) return null;
     const fresh = freshSnap.data() as any;
     setProject((prev: any) => (prev ? {
       ...prev,
@@ -1061,6 +1061,7 @@ export default function ProjectDetails() {
     // -added PDF's real BOQ scoring 0/100 — its bytes were uploaded fine,
     // but extraction never saw the URL).
     handleManualBoqExtract(fresh).catch((e) => console.error('[ProjectDetails] post-reanalysis BOQ extraction failed', e));
+    return fresh;
   };
 
   // Drives a large re-analysis's Tier-2 job to completion and resolves once
@@ -1072,8 +1073,14 @@ export default function ProjectDetails() {
   // reports as failed (existing project + BOQ + bid fully untouched, per
   // Fix 2b's transaction guarantee) rather than offering granular per-
   // chunk resolution — the user can retry the whole re-analysis.
-  const driveReanalysisJob = (jobId: string): Promise<void> => {
-    return new Promise<void>((resolve) => {
+  // Resolves with the fresh project doc on a successful ('done') completion
+  // — used by handleFileUpload to run promotion (Fix A) against the
+  // just-completed run's remarks.filesSkipped, regardless of whether the
+  // re-analysis went through Tier-1 (synchronous) or this Tier-2 path.
+  // Resolves null for every non-success outcome so a caller never mistakes
+  // a failed/blocked/abandoned job for one safe to promote from.
+  const driveReanalysisJob = (jobId: string): Promise<any | null> => {
+    return new Promise<any | null>((resolve) => {
       let settled = false;
       const jobRef = doc(db, 'analysis_jobs', jobId);
       const unsub = onSnapshot(
@@ -1085,20 +1092,22 @@ export default function ProjectDetails() {
             settled = true;
             unsub();
             if (data.projectId) {
-              await refreshProjectAfterReanalysis(data.projectId);
+              const fresh = await refreshProjectAfterReanalysis(data.projectId);
               toast.success("Large re-analysis complete!");
+              resolve(fresh);
+              return;
             }
-            resolve();
+            resolve(null);
           } else if (data.status === 'failed') {
             settled = true;
             unsub();
             toast.error(friendlyAnalysisError(data.reason || 'Re-analysis failed'));
-            resolve();
+            resolve(null);
           } else if (data.status === 'blocked' || data.status === 'abandoned') {
             settled = true;
             unsub();
             toast.error('Large re-analysis could not complete automatically — please try again, or with fewer/smaller documents.');
-            resolve();
+            resolve(null);
           }
           // 'queued'/'running' — keep waiting.
         },
@@ -1107,7 +1116,7 @@ export default function ProjectDetails() {
           settled = true;
           console.error('[ProjectDetails] reanalysis job snapshot error', err);
           toast.error('Lost connection while re-analyzing. Please check back shortly.');
-          resolve();
+          resolve(null);
         },
       );
       driveAnalysisJob(jobId).catch((e) => console.error('[ProjectDetails] driveAnalysisJob error', e));
@@ -1164,7 +1173,8 @@ export default function ProjectDetails() {
 
         // Tier-1 — synchronous result (unchanged path).
         await refreshProjectAfterReanalysis(projectId);
-        toast.success("Project thoroughly re-analyzed!");
+        // Fix B (display clarity, same as handleFileUpload): state the count.
+        toast.success(`Project thoroughly re-analyzed using ${combined.urls.length} document${combined.urls.length === 1 ? '' : 's'}.`);
     } catch (e: any) {
         console.error(e);
         const friendly = friendlyAnalysisError(e.message);
@@ -1279,6 +1289,94 @@ export default function ProjectDetails() {
     };
   };
 
+  // Fix A — promotion. Called ONLY after a CONFIRMED-successful re-analysis
+  // that included newly-uploaded documents (handleFileUpload's own success
+  // branches, both Tier-1 sync and Tier-2 job-done). Moves whichever of
+  // THIS call's uploaded entries actually participated (i.e. are absent
+  // from the just-completed run's remarks.filesSkipped) from the additions
+  // side (uploadedFiles / Project Documents) into the originals side
+  // (sourceDocuments / Source Documents) — never touches payloadRef itself
+  // (the true originals), payloadRefRaw/payloadRefXlsx (BOQ's own inputs,
+  // untouched so BOQ extraction — routed through Fix 2a's gate independently
+  // — keeps working exactly as before), or the union logic in
+  // buildCombinedDocumentSet.
+  //
+  // Matching granularity: `newSourceNames`/`newSourceUrls` are ENTRY-level
+  // (a ZIP's individual PDFs, not the ZIP itself) since that's what the
+  // server's filesSkipped reports against. `fileUploadRecords` maps each
+  // TOP-LEVEL selected File back to the entry names it expanded into, so a
+  // top-level Project Documents row is only removed once EVERY entry it
+  // produced succeeded — a partially-skipped ZIP stays visible in Project
+  // Documents even though its successful entries are also promoted.
+  //
+  // uploadedFiles has no stored id/URL (see Bug 2 investigation) — matching
+  // for removal uses name+size together, the closest available identity;
+  // a same-named, same-sized-but-different file re-uploaded in the exact
+  // same batch is the one known edge case this can't distinguish.
+  const promoteUploadedFiles = async (params: {
+    fileUploadRecords: { file: File; entryNames: string[] }[];
+    newSourceUrls: string[];
+    newSourceNames: string[];
+    filesSkipped: { fileName?: string }[];
+    currentProject: any;
+    currentUploadedFiles: { name: string; size: string; type: string; bytes?: number }[];
+  }) => {
+    if (!projectId) return;
+    const { fileUploadRecords, newSourceUrls, newSourceNames, filesSkipped, currentProject, currentUploadedFiles } = params;
+
+    const skippedNames = new Set((filesSkipped || []).map((s) => s.fileName).filter(Boolean));
+    const successfulIdx = newSourceNames
+      .map((n, i) => (skippedNames.has(n) ? -1 : i))
+      .filter((i) => i >= 0);
+    if (successfulIdx.length === 0) return; // nothing from this upload was actually analyzed — promote nothing
+
+    // Dedupe by Storage URL against the current full combined set (originals
+    // + everything already promoted) — arrayUnion below also dedupes exact
+    // values natively, this is a defensive belt-and-braces check.
+    const existingUrls = new Set(buildCombinedDocumentSet(currentProject).urls);
+    const urlsToAdd: string[] = [];
+    const namesToAdd: string[] = [];
+    for (const i of successfulIdx) {
+      const url = newSourceUrls[i];
+      if (url && !existingUrls.has(url)) {
+        urlsToAdd.push(url);
+        namesToAdd.push(newSourceNames[i]);
+      }
+    }
+
+    const successfulNameSet = new Set(successfulIdx.map((i) => newSourceNames[i]));
+    const fullyPromotedFileKeys = new Set(
+      fileUploadRecords
+        .filter((r) => r.entryNames.length > 0 && r.entryNames.every((n) => successfulNameSet.has(n)))
+        .map((r) => `${r.file.name}::${r.file.size}`),
+    );
+    const remainingUploadedFiles = currentUploadedFiles.filter(
+      (f) => !fullyPromotedFileKeys.has(`${f.name}::${f.bytes ?? ''}`),
+    );
+
+    const updates: Record<string, unknown> = {};
+    if (urlsToAdd.length > 0) {
+      updates.sourceDocuments = arrayUnion(...urlsToAdd);
+      updates.sourceDocumentNames = arrayUnion(...namesToAdd);
+    }
+    if (remainingUploadedFiles.length !== currentUploadedFiles.length) {
+      updates.uploadedFiles = remainingUploadedFiles;
+    }
+    if (Object.keys(updates).length === 0) return;
+
+    await updateDoc(doc(db, "saved_tenders", projectId), removeUndefined(updates));
+    setProject((prev: any) => prev ? {
+      ...prev,
+      ...(urlsToAdd.length > 0 ? {
+        sourceDocuments: [...((prev.sourceDocuments as string[]) || []), ...urlsToAdd],
+        sourceDocumentNames: [...((prev.sourceDocumentNames as string[]) || []), ...namesToAdd],
+      } : {}),
+    } : prev);
+    if (remainingUploadedFiles.length !== currentUploadedFiles.length) {
+      setUploadedFiles(remainingUploadedFiles);
+    }
+  };
+
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
       const files = Array.from(e.target.files);
@@ -1313,15 +1411,21 @@ export default function ProjectDetails() {
           // Process every selected file (not just the first) and
           // accumulate their content entries + raw BOQ-candidate buffers
           // across all of them before a single combined upload/request.
+          // fileUploadRecords keeps the top-level File -> its expanded entry
+          // names mapping (a ZIP can expand to several) — Fix A's promotion
+          // step uses this to decide when a Project Documents row (which
+          // only knows the top-level file) is fully done vs. still partial.
           const allContentUris: string[] = [];
           const allEntryNames: string[] = [];
           const allRawEntries: ({ kind: 'pdf' | 'xlsx'; buffer: ArrayBuffer } | null)[] = [];
+          const fileUploadRecords: { file: File; entryNames: string[] }[] = [];
           for (const f of files) {
             try {
               const result = await processFileForReanalysis(f);
               allContentUris.push(...result.contentUris);
               allEntryNames.push(...result.entryNames);
               allRawEntries.push(...result.rawEntries);
+              fileUploadRecords.push({ file: f, entryNames: result.entryNames });
             } catch (fileErr) {
               console.error(`Failed to process ${f.name}:`, fileErr);
             }
@@ -1335,9 +1439,16 @@ export default function ProjectDetails() {
 
           // Upload every processed entry to Firebase Storage — the SAME
           // mechanism fresh analysis uses successfully (real, durable
-          // download URLs, not base64 in the analysis request). Feeds
-          // BOTH Source Documents (existing behavior) and, from here on,
-          // the actual re-analysis request itself.
+          // download URLs, not base64 in the analysis request), feeding the
+          // re-analysis request below. Fix A: newSourceUrls/newSourceNames
+          // are deliberately NOT written to sourceDocuments here anymore —
+          // that write now only happens via promoteUploadedFiles, after a
+          // CONFIRMED-successful re-analysis, so a failed run leaves Source
+          // Documents/Project Documents completely untouched (no partial
+          // promotion). payloadRefRaw/payloadRefXlsx (BOQ's own inputs) are
+          // untouched by this change — still written immediately below,
+          // exactly as before, so BOQ extraction keeps working independently
+          // of whether the text analysis itself succeeds.
           const newSourceUrls: string[] = [];
           const newSourceNames: string[] = [];
           const newRawPdfUrls: string[] = [];
@@ -1373,17 +1484,13 @@ export default function ProjectDetails() {
                 }
               }
             }
-            if (newSourceUrls.length > 0 && projectId) {
+            if ((newRawPdfUrls.length > 0 || newXlsxUrls.length > 0) && projectId) {
               await updateDoc(doc(db, "saved_tenders", projectId), removeUndefined({
-                sourceDocuments: arrayUnion(...newSourceUrls),
-                sourceDocumentNames: arrayUnion(...newSourceNames),
                 ...(newRawPdfUrls.length > 0 ? { payloadRefRaw: arrayUnion(...newRawPdfUrls) } : {}),
                 ...(newXlsxUrls.length > 0 ? { payloadRefXlsx: arrayUnion(...newXlsxUrls) } : {}),
               }));
               setProject((prev: any) => prev ? {
                 ...prev,
-                sourceDocuments: [...((prev.sourceDocuments as string[]) || []), ...newSourceUrls],
-                sourceDocumentNames: [...((prev.sourceDocumentNames as string[]) || []), ...newSourceNames],
                 ...(newRawPdfUrls.length > 0 ? { payloadRefRaw: [...((prev.payloadRefRaw as string[]) || []), ...newRawPdfUrls] } : {}),
                 ...(newXlsxUrls.length > 0 ? { payloadRefXlsx: [...((prev.payloadRefXlsx as string[]) || []), ...newXlsxUrls] } : {}),
               } : prev);
@@ -1441,9 +1548,23 @@ export default function ProjectDetails() {
           }
           if (!response.ok) throw new Error(data.error || "Re-analysis failed");
 
+          // Fix B (display clarity): state the actual combined count so it
+          // doesn't look like only the new file(s) were used — the payload
+          // sent above already included every original alongside them.
+          const successToastText = `Re-analyzed using ${combinedUrls.length} document${combinedUrls.length === 1 ? '' : 's'} `
+            + `(${existingCombined.urls.length} original${existingCombined.urls.length === 1 ? '' : 's'} + ${newSourceUrls.length} new).`;
+
           if (data.tier === 2 && data.jobId) {
             // Large re-analysis — routed to Tier-2 (Fix 2b).
-            await driveReanalysisJob(data.jobId);
+            const fresh = await driveReanalysisJob(data.jobId);
+            if (fresh) {
+              await promoteUploadedFiles({
+                fileUploadRecords, newSourceUrls, newSourceNames,
+                filesSkipped: fresh?.remarks?.filesSkipped || [],
+                currentProject: fresh, currentUploadedFiles: (fresh?.uploadedFiles as typeof newFiles) ?? newFiles,
+              });
+              toast.success(successToastText);
+            }
             return;
           }
 
@@ -1452,9 +1573,19 @@ export default function ProjectDetails() {
           // (Analysis Notes) and triggers BOQ extraction on the combined
           // set through Fix 2a's gate, same as handleManualReanalyze.
           if (projectId) {
-            await refreshProjectAfterReanalysis(projectId);
+            const fresh = await refreshProjectAfterReanalysis(projectId);
+            if (fresh) {
+              // Fix A: promote only the entries this run actually analyzed
+              // (absent from filesSkipped) — a failed/skipped entry stays in
+              // Project Documents, everything else moves to Source Documents.
+              await promoteUploadedFiles({
+                fileUploadRecords, newSourceUrls, newSourceNames,
+                filesSkipped: fresh?.remarks?.filesSkipped || [],
+                currentProject: fresh, currentUploadedFiles: (fresh?.uploadedFiles as typeof newFiles) ?? newFiles,
+              });
+            }
           }
-          toast.success("Project completely re-analyzed with new document!");
+          toast.success(successToastText);
       } catch (err: any) {
           console.error("Reanalysis Error:", err);
           const friendly = friendlyAnalysisError(err.message);
@@ -1463,7 +1594,11 @@ export default function ProjectDetails() {
             const docRef = doc(db, "saved_tenders", projectId);
             const currentRemarks = project?.remarks || { totalFilesProvided: 0, filesAnalyzed: 0, filesSkipped: [], notes: [] };
             const uploadedNames = files.map(f => f.name).join(', ');
-            const noteText = `Re-analysis failed after uploading "${uploadedNames}": ${friendly} The file(s) appear in Source Documents but were not included in the analysis.`;
+            // Fix A: on failure, uploads are never written to Source
+            // Documents (that write now only happens via promoteUploadedFiles,
+            // after a confirmed success) — they simply remain in Project
+            // Documents until retried, so this note must not claim otherwise.
+            const noteText = `Re-analysis failed after uploading "${uploadedNames}": ${friendly} The file(s) remain in Project Documents — not added to Source Documents, and not included in this analysis.`;
             const updatedRemarks = { ...currentRemarks, notes: [...(currentRemarks.notes || []), noteText] };
             await updateDoc(docRef, { remarks: updatedRemarks });
             setProject((prev: any) => prev ? { ...prev, remarks: updatedRemarks } : prev);

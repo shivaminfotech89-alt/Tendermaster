@@ -123,6 +123,35 @@ function findWritableRect(fillRect: PdfRect, textBoxes: TextBox[]): PdfRect {
   return { x, y: best.lo, width, height: best.hi - best.lo };
 }
 
+/**
+ * Trims the writable rect's left edge past any pre-printed text (e.g. a
+ * printed label like "(Firm Name)") that overlaps it — horizontally and in
+ * the same Y-band — so values start in the blank after the label instead of
+ * on top of it. Returns the rect unchanged if nothing intrudes.
+ */
+function trimBlockedX(rect: PdfRect, textBoxes: TextBox[]): PdfRect {
+  const { x, y, width, height } = rect;
+  const rectRight = x + width;
+
+  const intruding = textBoxes.filter(tb =>
+    tb.x        < rectRight               &&
+    tb.x + tb.w > x - OCCUPY_MARGIN       &&
+    tb.y        < y + height + OCCUPY_MARGIN &&
+    tb.y + tb.h > y - OCCUPY_MARGIN,
+  );
+
+  if (intruding.length === 0) return rect;
+
+  const rightEdge = Math.min(
+    rectRight,
+    Math.max(...intruding.map(tb => tb.x + tb.w + OCCUPY_MARGIN)),
+  );
+
+  if (rightEdge <= x) return rect;
+
+  return { x: rightEdge, y, width: rectRight - rightEdge, height };
+}
+
 // ── Main overlay ──────────────────────────────────────────────────────────────
 
 export async function overlayFields(
@@ -164,7 +193,10 @@ export async function overlayFields(
     if (lines.length === 0) continue;
 
     // BUG 1: restrict draw area to the largest Y-band free of printed text
-    const writable = findWritableRect(field.pdfRect, pageTextBoxes.get(pageIdx) ?? []);
+    // BUG 3: then trim the left edge past any label text sharing that band
+    const textBoxesForPage = pageTextBoxes.get(pageIdx) ?? [];
+    const yTrimmed = findWritableRect(field.pdfRect, textBoxesForPage);
+    const writable = trimBlockedX(yTrimmed, textBoxesForPage);
 
     // Shrink font until content fits in the writable area or we hit the minimum
     let fontSize = DEFAULT_FONT_SIZE;
@@ -196,8 +228,8 @@ export async function overlayFields(
     // BUG 2: place baseline within the writable rect and hard-clamp to its bounds
     const lineH = fontSize * LINE_HEIGHT_RATIO;
     const rawY  = lines.length === 1
-      ? writable.y + (writable.height - fontSize) / 2   // vertically centred
-      : writable.y + writable.height - PADDING - fontSize; // top-aligned
+      ? writable.y + PADDING                                // rest on the line, not centred
+      : writable.y + writable.height - PADDING - fontSize;   // top-aligned
 
     // Clamp so the full glyph block stays inside the writable rect
     const yMin   = writable.y + 1;

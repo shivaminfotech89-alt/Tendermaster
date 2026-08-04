@@ -1508,6 +1508,16 @@ async function grantCredits(uid: string, credits: number, paymentId: string): Pr
       tx.set(userRef, {
         creditsTotal: FieldValue.increment(credits),
         creditsExpiry: Timestamp.fromDate(finalExpiry),
+        // Any credit-based purchase (Basic/Starter/Pro/admin_test, via this
+        // same choke point) must lift the role==='free' feature lock on
+        // Chat/BOQ/Roadmap/Documents (5 LockedOverlay sites, all a bare
+        // role==='free' check) — this function previously never touched
+        // role at all, so every paying customer stayed locked regardless
+        // of plan or credit balance. Only upgrades FROM 'free' — never
+        // downgrades an existing admin/superadmin, and a no-op if already
+        // 'premium' (e.g. a second purchase, or the legacy activate-code
+        // path already granted it).
+        ...(!userData.role || userData.role === 'free' ? { role: 'premium' } : {}),
       }, { merge: true });
     });
     console.log(`[Credits] Granted ${credits} credits to uid=${uid} (payment=${paymentId})`);

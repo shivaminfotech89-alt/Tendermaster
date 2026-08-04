@@ -391,13 +391,25 @@ export default function LandingPage() {
             </Link>
           </div>
 
-          <div className="flex flex-col md:flex-row gap-6 justify-center items-stretch max-w-2xl mx-auto">
-            {PLANS.filter(p => !p.adminOnly).map((plan, i) => {
-              const featured = i === 1;
+          <div className="flex flex-col md:flex-row gap-6 justify-center items-stretch max-w-4xl mx-auto">
+            {PLANS.filter(p => !p.adminOnly).map((plan) => {
+              // Featured/feature-list logic is intentionally NOT index-based —
+              // with 3+ plans, "i === 1"/"i === 0" would silently mislabel
+              // whichever plan happens to land at that position (e.g. Basic
+              // being added before Starter would have made Starter "BEST
+              // VALUE" instead of Pro). Keyed on plan identity/shape instead.
+              const featured = plan.id === 'pro';
               const perCredit = Math.round(plan.amountRupees / plan.credits);
-              const features = i === 0
-                ? [`${plan.credits} tender analyses`, "Eligibility & risk reports", "Document generation & chat", "24-month validity"]
-                : [`${plan.credits} tender analyses`, "Eligibility & risk reports", "Document generation & chat", "24-month validity", `Only ₹${perCredit.toLocaleString('en-IN')} per analysis`];
+              const analysesLabel = plan.credits === 1 ? '1 tender analysis' : `${plan.credits} tender analyses`;
+              const features = [
+                analysesLabel,
+                "Eligibility & risk reports",
+                "Document generation & chat",
+                "24-month validity",
+                // A per-analysis breakdown is only meaningful once there's
+                // more than one analysis to divide the price by.
+                ...(plan.credits > 1 ? [`Only ₹${perCredit.toLocaleString('en-IN')} per analysis`] : []),
+              ];
 
               return (
                 <div
@@ -420,7 +432,7 @@ export default function LandingPage() {
                     ₹{plan.amountRupees.toLocaleString('en-IN')}
                   </div>
                   <div className={`text-sm mt-1 ${featured ? "text-indigo-600 font-semibold" : "text-slate-500"}`}>
-                    {plan.credits} analyses · ₹{perCredit.toLocaleString('en-IN')} each
+                    {plan.credits === 1 ? 'Try it on one tender' : `${plan.credits} analyses · ₹${perCredit.toLocaleString('en-IN')} each`}
                   </div>
                   <div className="my-5 h-px bg-slate-100" />
                   <ul className="space-y-2.5 text-sm text-slate-700 flex-1 leading-relaxed">
@@ -434,7 +446,7 @@ export default function LandingPage() {
                         : "border border-slate-300 text-slate-700 hover:bg-slate-50"
                     }`}
                   >
-                    Get {plan.credits} Analyses <ArrowRight className="w-4 h-4" />
+                    Get {plan.credits === 1 ? '1 Analysis' : `${plan.credits} Analyses`} <ArrowRight className="w-4 h-4" />
                   </button>
                 </div>
               );

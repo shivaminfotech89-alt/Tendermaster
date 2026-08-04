@@ -1,4 +1,5 @@
 export const PLANS = [
+  { id: 'basic',      amountRupees: 1199,  amountPaise: 119900,  credits: 1,  label: 'Basic',       adminOnly: false },
   { id: 'starter',    amountRupees: 9999,  amountPaise: 999900,  credits: 10, label: 'Starter',    adminOnly: false },
   { id: 'pro',        amountRupees: 14999, amountPaise: 1499900, credits: 20, label: 'Pro',         adminOnly: false },
   { id: 'admin_test', amountRupees: 1,     amountPaise: 100,     credits: 1,  label: 'Admin Test',  adminOnly: true  },

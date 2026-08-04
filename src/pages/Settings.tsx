@@ -301,11 +301,17 @@ export default function Settings() {
                   <div className="space-y-4">
                     <p className="text-sm font-semibold text-slate-700">Get more analyses — stacks with your current balance</p>
                     <div className="grid grid-cols-1 gap-4">
-                      {PLANS.filter(p => !p.adminOnly).map((plan, i) => {
-                        const featured = i === 1;
-                        const features = i === 0
-                          ? ["10 tender analyses", "All AI features", "24-month validity"]
-                          : ["20 tender analyses", "All AI features", "24-month validity", "Best value per analysis"];
+                      {PLANS.filter(p => !p.adminOnly).map((plan) => {
+                        // Keyed on plan identity, not array position — see the
+                        // matching note in LandingPage.tsx's pricing section.
+                        const featured = plan.id === 'pro';
+                        const analysesLabel = plan.credits === 1 ? '1 tender analysis' : `${plan.credits} tender analyses`;
+                        const features = [
+                          analysesLabel,
+                          "All AI features",
+                          "24-month validity",
+                          ...(featured ? ["Best value per analysis"] : []),
+                        ];
                         return (
                           <div
                             key={plan.amountPaise}
@@ -321,7 +327,7 @@ export default function Settings() {
                             <div className="flex-1">
                               <div className="font-bold text-lg">{plan.label}</div>
                               <div className="text-3xl font-extrabold">₹{plan.amountRupees.toLocaleString('en-IN')}</div>
-                              <div className={`text-sm mt-1 ${featured ? "text-indigo-300" : "text-slate-400"}`}>{plan.credits} analyses · Valid for 24 months</div>
+                              <div className={`text-sm mt-1 ${featured ? "text-indigo-300" : "text-slate-400"}`}>{plan.credits === 1 ? '1 analysis' : `${plan.credits} analyses`} · Valid for 24 months</div>
                               <ul className={`mt-2 space-y-1 text-sm ${featured ? "text-indigo-100" : "text-slate-300"}`}>
                                 {features.map(f => <li key={f}>✓ {f}</li>)}
                               </ul>

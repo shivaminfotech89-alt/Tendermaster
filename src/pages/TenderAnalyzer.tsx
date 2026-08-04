@@ -230,7 +230,6 @@ export default function TenderAnalyzer() {
   const [formUploading, setFormUploading] = useState(false);
   const [generatedDocIsHtml, setGeneratedDocIsHtml] = useState(false);
   const [generatedFromTemplate, setGeneratedFromTemplate] = useState(false);
-  const [downloadingPdf, setDownloadingPdf] = useState(false);
 
   // BOQ state (session only — not persisted for TenderAnalyzer)
   const [boq, setBoq] = useState<BOQData>({ ...INITIAL_BOQ });
@@ -1466,48 +1465,30 @@ export default function TenderAnalyzer() {
     }
   };
 
+  // Vision-filled (exact_form_overlay) PDFs are already rendered and stored
+  // in Firebase Storage at generation time (Mode B's pdf-lib overlay, a
+  // separate, unrelated, working pipeline) — this is a direct Storage
+  // fetch, never the removed Puppeteer endpoint. Kept intentionally; only
+  // the broken server-side-render download (standard/markdown docs) was
+  // removed.
   const downloadSavedDocPdf = async (sd: SavedDoc) => {
+    if (!sd.filledPdfUrl) return;
     setSavedDocDownloadingId(sd.id);
     setSavedDocDownloadingType('pdf');
     try {
-      // Vision-filled PDFs are already stored in Storage — fetch directly
-      if (sd.mode === 'exact_form_overlay' && sd.filledPdfUrl) {
-        const resp = await fetch(sd.filledPdfUrl);
-        if (!resp.ok) throw new Error('Download failed');
-        const blob = await resp.blob();
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = sd.title.replace(/\s+/g, '_') + '.pdf';
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-        return;
-      }
-      const res = await fetchWithAuth("/api/generate-pdf", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          html: sd.content,
-          filename: sd.title,
-          isMarkdown: !sd.isHtml,
-          useUserLetterhead: sd.mode !== 'exact_form' && useLetterhead,
-          letterheadImageBase64: (sd.mode !== 'exact_form' && useLetterhead) ? (businessProfile?.letterheadBackgroundImage ?? "") : "",
-          letterheadHeaderHtml: (sd.mode !== 'exact_form' && useLetterhead) ? (businessProfile?.letterheadHeader ?? "") : "",
-          letterheadFooterHtml: (sd.mode !== 'exact_form' && useLetterhead) ? (businessProfile?.letterheadFooter ?? "") : "",
-        }),
-      });
-      if (!res.ok) throw new Error("PDF generation failed");
-      const blob = await res.blob();
+      const resp = await fetch(sd.filledPdfUrl);
+      if (!resp.ok) throw new Error('Download failed');
+      const blob = await resp.blob();
       const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
+      const a = document.createElement('a');
       a.href = url;
-      a.download = sd.title.replace(/\s+/g, "_") + ".pdf";
+      a.download = sd.title.replace(/\s+/g, '_') + '.pdf';
+      document.body.appendChild(a);
       a.click();
+      document.body.removeChild(a);
       URL.revokeObjectURL(url);
     } catch (e: any) {
-      toast.error("PDF generation failed: " + e.message);
+      toast.error("Download failed: " + e.message);
     } finally {
       setSavedDocDownloadingId(null);
       setSavedDocDownloadingType(null);
@@ -1619,42 +1600,6 @@ export default function TenderAnalyzer() {
     } finally {
       setGeneratingDoc(false);
       setFormUploading(false);
-    }
-  };
-
-  const downloadPdf = async () => {
-    if (!generatedDoc) return;
-    setDownloadingPdf(true);
-    try {
-      const res = await fetchWithAuth("/api/generate-pdf", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          html: generatedDoc,
-          filename: docType,
-          isMarkdown: !generatedDocIsHtml,
-          useUserLetterhead: exactFormMode ? false : useLetterhead,
-          letterheadImageBase64: (!exactFormMode && useLetterhead) ? (businessProfile?.letterheadBackgroundImage ?? "") : "",
-          letterheadHeaderHtml: (!exactFormMode && useLetterhead) ? (businessProfile?.letterheadHeader ?? "") : "",
-          letterheadFooterHtml: (!exactFormMode && useLetterhead) ? (businessProfile?.letterheadFooter ?? "") : "",
-        }),
-      });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({ error: "PDF generation failed" }));
-        throw new Error(err.error || "PDF generation failed");
-      }
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = docType.replace(/\s+/g, "_") + ".pdf";
-      a.click();
-      URL.revokeObjectURL(url);
-      markDocExported();
-    } catch (e: any) {
-      toast.error("PDF generation failed: " + e.message);
-    } finally {
-      setDownloadingPdf(false);
     }
   };
 
@@ -2848,13 +2793,6 @@ export default function TenderAnalyzer() {
                                <FileText className="w-3 h-3" /> Print
                              </button>
                            )}
-                           {!exactFormMode && (
-                             <button onClick={downloadPdf} disabled={downloadingPdf}
-                               className="text-xs flex items-center gap-1 text-indigo-600 hover:text-indigo-800 font-medium transition-colors disabled:opacity-50">
-                               {downloadingPdf ? <Loader2 className="w-3 h-3 animate-spin" /> : <Download className="w-3 h-3" />}
-                               {downloadingPdf ? "Generating…" : "PDF"}
-                             </button>
-                           )}
                            <button onClick={downloadDocx} disabled={downloadingDocx}
                              className="text-xs flex items-center gap-1 text-indigo-600 hover:text-indigo-800 font-medium transition-colors disabled:opacity-50">
                              {downloadingDocx ? <Loader2 className="w-3 h-3 animate-spin" /> : <FileText className="w-3 h-3" />}
@@ -3056,7 +2994,11 @@ export default function TenderAnalyzer() {
                                 className="text-xs text-indigo-600 hover:text-indigo-800 font-semibold px-2 py-1 rounded hover:bg-indigo-50 transition-colors"
                               >Open</button>
                             )}
-                            {sd.mode !== 'exact_form' && (
+                            {/* Only Vision-Filled PDFs have a working PDF download — a direct
+                                fetch of the already-rendered file already sitting in Storage.
+                                Standard/markdown docs' PDF download used the removed, broken
+                                server-side Puppeteer renderer; those users have Print instead. */}
+                            {sd.mode === 'exact_form_overlay' && (
                               <button
                                 onClick={() => downloadSavedDocPdf(sd)}
                                 disabled={savedDocDownloadingId === sd.id}

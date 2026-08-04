@@ -405,7 +405,7 @@ export default function LandingPage() {
                 analysesLabel,
                 "Eligibility & risk reports",
                 "Document generation & chat",
-                "24-month validity",
+                "Credits valid for 24 months",
                 // A per-analysis breakdown is only meaningful once there's
                 // more than one analysis to divide the price by.
                 ...(plan.credits > 1 ? [`Only ₹${perCredit.toLocaleString('en-IN')} per analysis`] : []),

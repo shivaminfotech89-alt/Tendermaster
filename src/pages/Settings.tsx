@@ -309,7 +309,7 @@ export default function Settings() {
                         const features = [
                           analysesLabel,
                           "All AI features",
-                          "24-month validity",
+                          "Credits valid for 24 months",
                           ...(featured ? ["Best value per analysis"] : []),
                         ];
                         return (

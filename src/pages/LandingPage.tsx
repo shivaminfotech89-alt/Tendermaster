@@ -131,7 +131,13 @@ export default function LandingPage() {
       </header>
 
       {/* ── Hero ── */}
-      <section className="px-6 lg:px-14 pt-20 pb-16 text-center max-w-5xl mx-auto">
+      <div className="relative overflow-hidden">
+        {/* Decorative glow accents — purely visual, sit behind content */}
+        <div aria-hidden="true" className="pointer-events-none absolute inset-0 overflow-hidden">
+          <div className="absolute -top-40 -left-32 w-[320px] h-[320px] md:w-[560px] md:h-[560px] rounded-full bg-indigo-500/20 blur-[100px]" />
+          <div className="absolute -top-24 -right-32 w-[280px] h-[280px] md:w-[480px] md:h-[480px] rounded-full bg-indigo-600/15 blur-[110px]" />
+        </div>
+      <section className="relative z-10 px-6 lg:px-14 pt-20 pb-16 text-center max-w-5xl mx-auto">
         <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-indigo-50 text-indigo-700 font-bold text-xs mb-6 uppercase tracking-wider">
           Built for Indian government tenders
         </div>
@@ -163,6 +169,7 @@ export default function LandingPage() {
         </div>
         <p className="mt-4 text-xs text-slate-400">No credit card required &bull; Cancel anytime</p>
       </section>
+      </div>
 
       {/* ── How it Works ── */}
       <section id="how" className="max-w-5xl mx-auto px-6 lg:px-14 pb-16">
@@ -371,7 +378,16 @@ export default function LandingPage() {
       </section>
 
       {/* ── Pricing ── */}
-      <section id="pricing" className="bg-white border-t border-slate-100 py-16 px-6 lg:px-14">
+      <div className="relative overflow-hidden">
+        {/* Decorative glow accents — purely visual, sit behind content.
+            No explicit bg-white on the <section> below (root already
+            provides it) — an opaque section background would otherwise
+            paint over these and hide them. */}
+        <div aria-hidden="true" className="pointer-events-none absolute inset-0 overflow-hidden">
+          <div className="absolute top-10 -left-40 w-[280px] h-[280px] md:w-[420px] md:h-[420px] rounded-full bg-indigo-500/15 blur-[100px]" />
+          <div className="absolute bottom-0 -right-32 w-[280px] h-[280px] md:w-[420px] md:h-[420px] rounded-full bg-indigo-600/15 blur-[100px]" />
+        </div>
+      <section id="pricing" className="relative z-10 border-t border-slate-100 py-16 px-6 lg:px-14">
         <div className="max-w-5xl mx-auto">
           <h2 className="text-2xl font-extrabold text-slate-900 text-center mb-2" style={{ letterSpacing: '-.02em' }}>
             Pay per tender, not per month
@@ -454,6 +470,7 @@ export default function LandingPage() {
           </div>
         </div>
       </section>
+      </div>
 
       {/* ── FAQ ──
           Visible content mirrors the FAQPage JSON-LD in index.html (and its
